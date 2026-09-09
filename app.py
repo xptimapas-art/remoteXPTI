@@ -11,7 +11,7 @@ from PIL import Image
 from storage import StorageManager
 from rdp_manager import RDPManager
 from preview_manager import PreviewManager
-from dialogs import ServerDialog, ConfirmDialog, SettingsDialog
+from dialogs import ServerDialog, ConfirmDialog, SettingsDialog, UninstallProgressDialog
 from version import CURRENT_VERSION
 from updater import SilentAutoUpdater
 from uninstaller import Uninstaller
@@ -770,8 +770,7 @@ class RemoteXPTIApp(ctk.CTk):
         )
 
         def do_uninstall():
-            self.set_message("Desinstalando RemoteXPTI e limpando credenciais...")
-            Uninstaller.execute_complete_uninstallation()
+            UninstallProgressDialog(self)
 
         ConfirmDialog(
             parent=self,

@@ -235,52 +235,129 @@ class SilentAutoUpdater:
         # Modo executável compilado (.exe):
         import tempfile
         temp_dir = Path(tempfile.gettempdir())
-        script_path = temp_dir / "remotexpti_update.cmd"
-        vbs_path = temp_dir / "remotexpti_run.vbs"
+        ps1_path = temp_dir / "remotexpti_update_gui.ps1"
+        current_pid = os.getpid()
 
-        cmd_content = f"""@echo off
-chcp 65001 >nul
-title Atualizando RemoteXPTI...
+        ps_script = f"""# Atualizador com Tela de Carregamento Moderna (Sem janelas de CMD)
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
 
-:: 1. Aguarda 2 segundos para o processo anterior encerrar e liberar os arquivos
-ping 127.0.0.1 -n 3 >nul
-taskkill /f /im "{current_exe.name}" >nul 2>&1
-taskkill /f /im "RemoteXPTI.exe" >nul 2>&1
+[System.Windows.Forms.Application]::EnableVisualStyles()
 
-:: 2. Substitui o executavel com retry seguro (ate 30 tentativas)
-for /l %%i in (1, 1, 30) do (
-    copy /y "{str(self.downloaded_file)}" "{str(current_exe)}" >nul 2>&1 && (
-        del /f /q "{str(self.downloaded_file)}" >nul 2>&1
-        goto :launch
-    )
-    taskkill /f /im "{current_exe.name}" >nul 2>&1
-    ping 127.0.0.1 -n 2 >nul
-)
+$form = New-Object System.Windows.Forms.Form
+$form.Text = "Atualizando RemoteXPTI"
+$form.Size = New-Object System.Drawing.Size(440, 195)
+$form.StartPosition = "CenterScreen"
+$form.FormBorderStyle = "FixedDialog"
+$form.MaximizeBox = $false
+$form.MinimizeBox = $false
+$form.TopMost = $true
+$form.BackColor = [System.Drawing.Color]::FromArgb(24, 26, 32)
+$form.ForeColor = [System.Drawing.Color]::White
 
-:launch
-:: 3. Aguarda 1 segundo, limpa ambiente e reinicia o aplicativo
-ping 127.0.0.1 -n 2 >nul
-set PYINSTALLER_RESET_ENVIRONMENT=1
-set _MEIPASS2=
-set _MEIPASS=
-cd /d "{str(app_dir)}"
-start "" "{str(current_exe)}"
-del "%~f0"
-exit
+$iconPath = Join-Path '{str(app_dir)}' "imagens\\icon.ico"
+if (Test-Path $iconPath) {{
+    try {{ $form.Icon = New-Object System.Drawing.Icon($iconPath) }} catch {{}}
+}}
+
+$titleLabel = New-Object System.Windows.Forms.Label
+$titleLabel.Text = "⚡ RemoteXPTI - Atualizando Sistema"
+$titleLabel.Font = New-Object System.Drawing.Font("Segoe UI", 12, [System.Drawing.FontStyle]::Bold)
+$titleLabel.ForeColor = [System.Drawing.Color]::White
+$titleLabel.Location = New-Object System.Drawing.Point(24, 20)
+$titleLabel.Size = New-Object System.Drawing.Size(380, 26)
+$form.Controls.Add($titleLabel)
+
+$statusLabel = New-Object System.Windows.Forms.Label
+$statusLabel.Text = "Aplicando atualização para a versão v{self.new_version}..."
+$statusLabel.Font = New-Object System.Drawing.Font("Segoe UI", 9.5)
+$statusLabel.ForeColor = [System.Drawing.Color]::FromArgb(160, 165, 180)
+$statusLabel.Location = New-Object System.Drawing.Point(24, 50)
+$statusLabel.Size = New-Object System.Drawing.Size(380, 24)
+$form.Controls.Add($statusLabel)
+
+$pbar = New-Object System.Windows.Forms.ProgressBar
+$pbar.Location = New-Object System.Drawing.Point(24, 82)
+$pbar.Size = New-Object System.Drawing.Size(376, 18)
+$pbar.Style = [System.Windows.Forms.ProgressBarStyle]::Marquee
+$pbar.MarqueeAnimationSpeed = 20
+$form.Controls.Add($pbar)
+
+$stepLabel = New-Object System.Windows.Forms.Label
+$stepLabel.Text = "Substituindo executável pela nova versão..."
+$stepLabel.Font = New-Object System.Drawing.Font("Segoe UI", 8.5)
+$stepLabel.ForeColor = [System.Drawing.Color]::FromArgb(100, 150, 255)
+$stepLabel.Location = New-Object System.Drawing.Point(24, 110)
+$stepLabel.Size = New-Object System.Drawing.Size(380, 20)
+$form.Controls.Add($stepLabel)
+
+$timer = New-Object System.Windows.Forms.Timer
+$timer.Interval = 250
+$script:ticks = 0
+
+$timer.Add_Tick({{
+    $script:ticks++
+    if ($script:ticks -eq 2) {{
+        try {{
+            $p = Get-Process -Id {current_pid} -ErrorAction SilentlyContinue
+            if ($p) {{ $p | Stop-Process -Force -ErrorAction SilentlyContinue }}
+        }} catch {{}}
+    }}
+    if ($script:ticks -ge 4) {{
+        $copied = $false
+        for ($i = 0; $i -lt 20; $i++) {{
+            try {{
+                Copy-Item -Path '{str(self.downloaded_file)}' -Destination '{str(current_exe)}' -Force -ErrorAction Stop
+                Remove-Item -Path '{str(self.downloaded_file)}' -Force -ErrorAction SilentlyContinue
+                $copied = $true
+                break
+            }} catch {{
+                Start-Sleep -Milliseconds 300
+            }}
+        }}
+        if ($copied) {{
+            $statusLabel.Text = "Versão v{self.new_version} instalada com sucesso!"
+            $stepLabel.Text = "Iniciando RemoteXPTI..."
+            $stepLabel.ForeColor = [System.Drawing.Color]::FromArgb(0, 204, 102)
+            $pbar.Style = [System.Windows.Forms.ProgressBarStyle]::Continuous
+            $pbar.Value = 100
+            $timer.Stop()
+            
+            $env:PYINSTALLER_RESET_ENVIRONMENT = "1"
+            $env:_MEIPASS2 = $null
+            $env:_MEIPASS = $null
+            Start-Process -FilePath '{str(current_exe)}' -WorkingDirectory '{str(app_dir)}'
+            
+            Start-Sleep -Milliseconds 700
+            $form.Close()
+        }} elseif ($script:ticks -gt 25) {{
+            $timer.Stop()
+            [System.Windows.Forms.MessageBox]::Show("Não foi possível substituir o executável. Feche o programa e tente novamente.", "Erro na Atualização", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+            $form.Close()
+        }}
+    }}
+}})
+
+$form.Add_Shown({{ $timer.Start() }})
+[System.Windows.Forms.Application]::Run($form)
+Remove-Item -Path '{str(ps1_path)}' -Force -ErrorAction SilentlyContinue
 """
-        script_path.write_text(cmd_content, encoding="utf-8")
+        ps1_path.write_text(ps_script, encoding="utf-8")
 
-        # Dispara via wscript.exe de forma 100% oculta e desvinculada do processo atual
-        vbs_content = f'''Set WshShell = CreateObject("WScript.Shell")
-WshShell.Run "cmd.exe /c """ & "{str(script_path)}" & """", 0, False
-'''
-        vbs_path.write_text(vbs_content, encoding="utf-8")
-
+        creation_flags = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
         try:
-            subprocess.run(["wscript.exe", "//b", "//nologo", str(vbs_path)], timeout=5.0)
-        except Exception:
-            # Fallback caso wscript esteja restrito
-            os.startfile(str(script_path))
+            subprocess.Popen(
+                [
+                    "powershell.exe",
+                    "-NoProfile",
+                    "-WindowStyle", "Hidden",
+                    "-ExecutionPolicy", "Bypass",
+                    "-File", str(ps1_path)
+                ],
+                creationflags=creation_flags
+            )
+        except Exception as e:
+            print(f"[SilentUpdater] Erro ao disparar tela de atualização: {e}")
 
         # Encerra o processo atual imediatamente
         os._exit(0)

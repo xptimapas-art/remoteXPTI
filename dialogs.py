@@ -1,10 +1,12 @@
 import customtkinter as ctk
 from typing import Optional, Dict, Any, Callable, List
 import threading
+import time
 from pathlib import Path
 from tkinter import filedialog
 from rdp_manager import RDPManager
 from preview_manager import PreviewManager
+from uninstaller import Uninstaller
 
 class ServerDialog(ctk.CTkToplevel):
     """Janela modal para criação ou edição de perfil de servidor RDP."""
@@ -617,3 +619,106 @@ class SettingsDialog(ctk.CTkToplevel):
 
 # Alias de compatibilidade
 UpdateMenuDialog = SettingsDialog
+
+
+class UninstallProgressDialog(ctk.CTkToplevel):
+    """Janela modal com barra de progresso em tempo real para desinstalação completa."""
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.title("Desinstalando RemoteXPTI")
+        self.geometry("460x240")
+        self.minsize(460, 240)
+        self.resizable(False, False)
+        self.transient(parent)
+        self.grab_set()
+        self.focus_force()
+
+        # Design do card
+        main_frame = ctk.CTkFrame(self, corner_radius=12, fg_color=("gray92", "#18191f"))
+        main_frame.pack(fill="both", expand=True, padx=16, pady=16)
+
+        lbl_title = ctk.CTkLabel(
+            main_frame,
+            text="🗑️ Desinstalando o RemoteXPTI",
+            font=ctk.CTkFont(size=17, weight="bold"),
+            text_color=("gray10", "#ffffff")
+        )
+        lbl_title.pack(anchor="w", padx=16, pady=(16, 4))
+
+        self.lbl_subtitle = ctk.CTkLabel(
+            main_frame,
+            text="Aguarde enquanto removemos todos os arquivos e configurações...",
+            font=ctk.CTkFont(size=11),
+            text_color=("gray40", "#8e92a0")
+        )
+        self.lbl_subtitle.pack(anchor="w", padx=16, pady=(0, 16))
+
+        # Barra de Progresso
+        self.pbar = ctk.CTkProgressBar(main_frame, height=14, corner_radius=7)
+        self.pbar.pack(fill="x", padx=16, pady=(0, 10))
+        self.pbar.set(0.05)
+
+        # Status detalhado
+        self.lbl_status = ctk.CTkLabel(
+            main_frame,
+            text="Iniciando procedimentos de desinstalação...",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color="#0080ff"
+        )
+        self.lbl_status.pack(anchor="w", padx=16, pady=(0, 14))
+
+        # Botão Concluir (inicialmente desabilitado)
+        self.btn_done = ctk.CTkButton(
+            main_frame,
+            text="Aguarde...",
+            height=32,
+            fg_color="#0066cc",
+            hover_color="#0052a3",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            state="disabled",
+            command=self._on_done_clicked
+        )
+        self.btn_done.pack(fill="x", padx=16, pady=(0, 8))
+
+        # Inicia a thread de desinstalação silenciosa
+        threading.Thread(target=self._run_uninstallation, daemon=True).start()
+
+    def _run_uninstallation(self):
+        def update_ui(prog: float, text: str, color: str = "#0080ff"):
+            self.after(0, lambda: (
+                self.pbar.set(prog),
+                self.lbl_status.configure(text=text, text_color=color)
+            ))
+
+        time.sleep(0.4)
+        # Etapa 1: Limpar credenciais do Windows (TERMSRV)
+        update_ui(0.30, "🔐 Limpando credenciais do Windows (TERMSRV)...")
+        Uninstaller.cleanup_windows_credentials()
+        time.sleep(0.5)
+
+        # Etapa 2: Remover atalhos
+        update_ui(0.60, "🗑️ Removendo atalhos da Área de Trabalho e Menu Iniciar...")
+        Uninstaller.remove_shortcuts()
+        time.sleep(0.5)
+
+        # Etapa 3: Excluir cache e arquivos de dados
+        update_ui(0.85, "🧹 Excluindo miniaturas, perfis temporários e configurações...")
+        Uninstaller.remove_data_and_temp_files()
+        time.sleep(0.5)
+
+        # Etapa 4: Concluído
+        def on_finished():
+            self.pbar.set(1.0)
+            self.pbar.configure(progress_color="#00cc66")
+            self.lbl_status.configure(text="✅ Desinstalação concluída com sucesso!", text_color="#00cc66")
+            self.lbl_subtitle.configure(text="Todos os arquivos, atalhos e credenciais foram removidos.")
+            self.btn_done.configure(state="normal", text="Concluir e Fechar")
+            # Auto-fecha em 2.5 segundos
+            self.after(2500, self._on_done_clicked)
+
+        self.after(0, on_finished)
+
+    def _on_done_clicked(self):
+        Uninstaller.finalize_self_delete_and_exit()
+

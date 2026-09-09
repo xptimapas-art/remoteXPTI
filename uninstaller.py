@@ -1,10 +1,12 @@
 """
 Módulo de Desinstalação Completa do RemoteXPTI.
 Remove executáveis, dados criptografados, atalhos do Windows e credenciais salvas no Windows Credential Manager.
+Executa tudo 100% de forma silenciosa sem janelas de CMD piscando na tela.
 """
 
 import os
 import sys
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -13,105 +15,142 @@ from pathlib import Path
 class Uninstaller:
     @staticmethod
     def cleanup_windows_credentials():
-        """Remove todas as credenciais TERMSRV salvas no Gerenciador de Credenciais do Windows."""
+        """Remove todas as credenciais TERMSRV salvas no Gerenciador de Credenciais do Windows sem abrir janelas CMD."""
+        creation_flags = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
         try:
-            res = subprocess.run(["cmdkey", "/list"], capture_output=True, text=True, errors="replace")
+            res = subprocess.run(
+                ["cmdkey", "/list"],
+                capture_output=True,
+                text=True,
+                errors="replace",
+                creationflags=creation_flags
+            )
             for line in res.stdout.splitlines():
                 if "TERMSRV/" in line:
                     target = line.split("TERMSRV/")[-1].strip()
                     if target:
-                        # Executa duas vezes para remover tanto Tipo Senha do Domínio quanto Genérico
-                        subprocess.run(f'cmdkey /delete:TERMSRV/{target}', shell=True, capture_output=True)
-                        subprocess.run(f'cmdkey /delete:TERMSRV/{target}', shell=True, capture_output=True)
+                        # Executa duas vezes para remover tanto Tipo Senha do Domínio quanto Genérico sem shell=True
+                        subprocess.run(
+                            ["cmdkey", f"/delete:TERMSRV/{target}"],
+                            capture_output=True,
+                            creationflags=creation_flags
+                        )
+                        subprocess.run(
+                            ["cmdkey", f"/delete:TERMSRV/{target}"],
+                            capture_output=True,
+                            creationflags=creation_flags
+                        )
         except Exception as e:
             print(f"[Uninstaller] Erro ao limpar credenciais: {e}")
 
-    @classmethod
-    def execute_complete_uninstallation(cls):
-        """
-        Executa a desinstalação completa:
-        1. Limpa credenciais do Windows.
-        2. Gera e executa o script em segundo plano para apagar arquivos, pastas e atalhos.
-        3. Encerra o processo atual.
-        """
-        # 1. Limpa credenciais do Windows antes de encerrar
-        cls.cleanup_windows_credentials()
-
-        current_exe = Path(sys.executable).resolve()
-        app_dir = current_exe.parent
-
-        local_appdata = os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))
-        default_install_dir = Path(local_appdata) / "Programs" / "RemoteXPTI"
-
-        userprofile = os.environ.get("USERPROFILE", "")
+    @staticmethod
+    def remove_shortcuts():
+        """Remove atalhos da Área de Trabalho (local e OneDrive) e do Menu Iniciar de forma nativa e silenciosa."""
+        userprofile = os.environ.get("USERPROFILE", str(Path.home()))
         appdata = os.environ.get("APPDATA", "")
 
-        desktop_candidates = [
+        candidates = [
             Path(userprofile) / "Desktop" / "RemoteXPTI.lnk",
             Path(userprofile) / "OneDrive" / "Desktop" / "RemoteXPTI.lnk",
             Path(userprofile) / "OneDrive" / "Área de Trabalho" / "RemoteXPTI.lnk",
             Path(userprofile) / "Área de Trabalho" / "RemoteXPTI.lnk",
+            Path(appdata) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "RemoteXPTI.lnk",
         ]
-        start_shortcut = Path(appdata) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "RemoteXPTI.lnk"
+        for p in candidates:
+            try:
+                if p.exists():
+                    p.unlink()
+            except Exception:
+                pass
 
+    @staticmethod
+    def remove_data_and_temp_files():
+        """Remove perfis temporários RDP, arquivos de cache, miniaturas e configurações."""
+        # 1. Limpa perfis temporários RDP e scripts no %TEMP%
         temp_dir = Path(tempfile.gettempdir())
-        script_path = temp_dir / "remotexpti_uninstall.cmd"
-        vbs_path = temp_dir / "remotexpti_uninst_run.vbs"
+        temp_patterns = [
+            "remotexpti_*.rdp",
+            "remote_*.rdp",
+            ".pending_update*",
+            "remotexpti_update.*",
+            "remotexpti_run.*",
+            "remotexpti_uninstall.*",
+            "remotexpti_uninst_run.*"
+        ]
+        for pat in temp_patterns:
+            for f in temp_dir.glob(pat):
+                try:
+                    f.unlink()
+                except Exception:
+                    pass
 
-        del_desktop_lines = "\n".join(f'del /f /q "{str(p)}" >nul 2>&1' for p in desktop_candidates)
+        # 2. Limpa dados locais da pasta da aplicação
+        current_exe = Path(sys.executable).resolve()
+        app_dir = current_exe.parent
 
-        cmd_content = f"""@echo off
-chcp 65001 >nul
-title Desinstalando RemoteXPTI...
+        files_to_remove = [
+            "servers.json",
+            ".secret.key",
+            ".pending_update.exe",
+            ".pending_update.part",
+            "version_app.txt",
+            "version_setup.txt"
+        ]
+        for f_name in files_to_remove:
+            f = app_dir / f_name
+            try:
+                if f.exists():
+                    f.unlink()
+            except Exception:
+                pass
 
-:: 1. Aguarda o processo encerrar por completo
-ping 127.0.0.1 -n 3 >nul
-taskkill /f /im "{current_exe.name}" >nul 2>&1
-taskkill /f /im "RemoteXPTI.exe" >nul 2>&1
+        dirs_to_remove = ["thumbnails", "imagens"]
+        for d_name in dirs_to_remove:
+            d = app_dir / d_name
+            if d.exists() and d.is_dir():
+                try:
+                    shutil.rmtree(d, ignore_errors=True)
+                except Exception:
+                    pass
 
-:: 2. Remove atalhos da Area de Trabalho e Menu Iniciar
-{del_desktop_lines}
-del /f /q "{str(start_shortcut)}" >nul 2>&1
+    @classmethod
+    def finalize_self_delete_and_exit(cls):
+        """
+        Inicia a exclusão do executável principal e pasta de instalação via PowerShell 100% oculto,
+        e encerra o processo imediatamente sem abrir nenhuma janela preta de CMD.
+        """
+        current_exe = Path(sys.executable).resolve()
+        local_appdata = os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))
+        default_install_dir = Path(local_appdata) / "Programs" / "RemoteXPTI"
 
-:: 3. Remove perfis temporarios e scripts em %TEMP%
-del /f /q "%TEMP%\\remotexpti_*.rdp" >nul 2>&1
-del /f /q "%TEMP%\\remote_*.rdp" >nul 2>&1
-del /f /q "%TEMP%\\.pending_update*" >nul 2>&1
-del /f /q "%TEMP%\\remotexpti_update.cmd" >nul 2>&1
-del /f /q "%TEMP%\\remotexpti_run.vbs" >nul 2>&1
-
-:: 4. Remove pasta padrao de instalacao se existir
-if exist "{str(default_install_dir)}" (
-    rmdir /s /q "{str(default_install_dir)}" >nul 2>&1
-)
-
-:: 5. Se o executavel rodava de outra pasta
-del /f /q "{str(current_exe)}" >nul 2>&1
-del /f /q "{str(app_dir / 'servers.json')}" >nul 2>&1
-del /f /q "{str(app_dir / '.secret.key')}" >nul 2>&1
-del /f /q "{str(app_dir / '.pending_update.exe')}" >nul 2>&1
-del /f /q "{str(app_dir / '.pending_update.part')}" >nul 2>&1
-rmdir /s /q "{str(app_dir / 'thumbnails')}" >nul 2>&1
-rmdir /s /q "{str(app_dir / 'imagens')}" >nul 2>&1
-
-:: 6. Exibe mensagem de conclusao
-powershell.exe -NoProfile -WindowStyle Hidden -Command "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.MessageBox]::Show('O RemoteXPTI, seus atalhos, configuracoes e credenciais foram completamente desinstalados do computador.', 'RemoteXPTI - Desinstalacao Concluida', [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)"
-
-:: 7. Autoexclui este script e o vbs
-del /f /q "{str(vbs_path)}" >nul 2>&1
-del "%~f0"
-"""
-        script_path.write_text(cmd_content, encoding="utf-8")
-
-        vbs_content = f'''Set WshShell = CreateObject("WScript.Shell")
-WshShell.Run "cmd.exe /c """ & "{str(script_path)}" & """", 0, False
-'''
-        vbs_path.write_text(vbs_content, encoding="utf-8")
-
+        creation_flags = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
+        ps_cmd = f"""
+        Start-Sleep -Seconds 1
+        Remove-Item -Path '{str(current_exe)}' -Force -ErrorAction SilentlyContinue
+        if (Test-Path '{str(default_install_dir)}') {{
+            Remove-Item -Path '{str(default_install_dir)}' -Recurse -Force -ErrorAction SilentlyContinue
+        }}
+        """
         try:
-            subprocess.run(["wscript.exe", "//b", "//nologo", str(vbs_path)], timeout=5.0)
+            subprocess.Popen(
+                [
+                    "powershell.exe",
+                    "-NoProfile",
+                    "-WindowStyle", "Hidden",
+                    "-ExecutionPolicy", "Bypass",
+                    "-Command", ps_cmd
+                ],
+                creationflags=creation_flags
+            )
         except Exception:
-            os.startfile(str(script_path))
+            pass
 
-        # Encerra o processo imediatamente
         os._exit(0)
+
+    @classmethod
+    def execute_complete_uninstallation(cls):
+        """Execução direta completa e 100% silenciosa (para uso sem interface gráfica)."""
+        cls.cleanup_windows_credentials()
+        cls.remove_shortcuts()
+        cls.remove_data_and_temp_files()
+        cls.finalize_self_delete_and_exit()

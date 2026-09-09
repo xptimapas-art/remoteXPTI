@@ -131,8 +131,8 @@ class RDPManager:
 
         for target in targets:
             try:
-                subprocess.run(f'cmdkey /delete:{target}', shell=True, capture_output=True, creationflags=creation_flags)
-                subprocess.run(f'cmdkey /delete:{target}', shell=True, capture_output=True, creationflags=creation_flags)
+                subprocess.run(["cmdkey", f"/delete:{target}"], capture_output=True, creationflags=creation_flags)
+                subprocess.run(["cmdkey", f"/delete:{target}"], capture_output=True, creationflags=creation_flags)
             except Exception:
                 pass
         return True
