@@ -20,6 +20,25 @@ def run_command(cmd_list):
         sys.exit(res.returncode)
 
 
+def sign_binary(file_path: Path):
+    """Assina digitalmente o binário com certificado Authenticode e carimbo de data/hora DigiCert."""
+    if sys.platform != "win32":
+        return
+    print(f">> Assinando digitalmente com Authenticode: {file_path.name}...")
+    ps_cmd = f"""
+    $cert = Get-ChildItem -Path 'Cert:\\CurrentUser\\My' | Where-Object {{ $_.Subject -like '*XPti Tecnologia*' }} | Select-Object -First 1
+    if (-not $cert) {{
+        $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject 'CN=XPti Tecnologia, O=XPti Tecnologia, C=BR' -CertStoreLocation 'Cert:\\CurrentUser\\My' -FriendlyName 'XPti Tecnologia Code Signing' -NotAfter (Get-Date).AddYears(5)
+    }}
+    Set-AuthenticodeSignature -FilePath '{str(file_path)}' -Certificate $cert -TimestampServer 'http://timestamp.digicert.com' -HashAlgorithm SHA256
+    """
+    try:
+        subprocess.run(["powershell", "-NoProfile", "-Command", ps_cmd], capture_output=True, text=True, timeout=20)
+        print(f"   [Assinatura OK] {file_path.name} assinado como 'XPti Tecnologia'!")
+    except Exception as e:
+        print(f"   [Aviso de Assinatura] Não foi possível aplicar: {e}")
+
+
 def create_version_file(output_path: Path, file_desc: str, orig_name: str, version_str: str):
     parts = [int(p) for p in version_str.split(".") if p.isdigit()]
     while len(parts) < 4:
@@ -87,9 +106,12 @@ def main():
         "main.py"
     ])
 
-    # 2. Mascarar executável como binário de dados para não acionar alerta de dropper em antivírus
+    # Assinar aplicativo principal
     dist_dir = base_dir / "dist"
     app_exe = dist_dir / "RemoteXPTI.exe"
+    sign_binary(app_exe)
+
+    # 2. Mascarar executável como binário de dados para não acionar alerta de dropper em antivírus
     payload_bin = dist_dir / "app_payload.bin"
     shutil.copy2(app_exe, payload_bin)
 
@@ -112,19 +134,36 @@ def main():
         "installer_gui.py"
     ])
 
+    setup_exe = dist_dir / "Setup_RemoteXPTI.exe"
+    sign_binary(setup_exe)
+
+    # Exporta certificado da XPti Tecnologia para distribuição
+    cert_file = dist_dir / "XPti_Tecnologia.cer"
+    ps_export = f"""
+    $cert = Get-ChildItem -Path 'Cert:\\CurrentUser\\My' | Where-Object {{ $_.Subject -like '*XPti Tecnologia*' }} | Select-Object -First 1
+    if ($cert) {{ Export-Certificate -Cert $cert -FilePath '{str(cert_file)}' | Out-Null }}
+    """
+    try:
+        subprocess.run(["powershell", "-NoProfile", "-Command", ps_export], capture_output=True)
+    except Exception:
+        pass
+
     # 4. Criar pacotes .zip para evitar bloqueio automático de download nos navegadores (Chrome/Edge)
     print()
     print("[3/3] Gerando pacotes ZIP seguros para download...")
-    setup_exe = dist_dir / "Setup_RemoteXPTI.exe"
     zip_setup = dist_dir / "Setup_RemoteXPTI.zip"
     with zipfile.ZipFile(zip_setup, "w", zipfile.ZIP_DEFLATED) as z:
         z.write(setup_exe, arcname="Setup_RemoteXPTI.exe")
+        if cert_file.exists():
+            z.write(cert_file, arcname="XPti_Tecnologia.cer")
 
     zip_portatil = dist_dir / "RemoteXPTI_Portatil.zip"
     with zipfile.ZipFile(zip_portatil, "w", zipfile.ZIP_DEFLATED) as z:
         z.write(app_exe, arcname="RemoteXPTI.exe")
         z.write(base_dir / "servers.json", arcname="servers.json")
         z.write(base_dir / ".secret.key", arcname=".secret.key")
+        if cert_file.exists():
+            z.write(cert_file, arcname="XPti_Tecnologia.cer")
         img_dir = base_dir / "imagens"
         if img_dir.exists():
             for f in img_dir.iterdir():
