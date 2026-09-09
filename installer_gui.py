@@ -330,17 +330,10 @@ class SetupApp(ctk.CTk):
                 if not k.startswith("_MEI") and not k.startswith("PYI_") and not k.startswith("_PYI_")
             }
             clean_env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
-            creation_flags = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
-            if hasattr(subprocess, "CREATE_NEW_PROCESS_GROUP"):
-                creation_flags |= subprocess.CREATE_NEW_PROCESS_GROUP
-            if hasattr(subprocess, "DETACHED_PROCESS"):
-                creation_flags |= subprocess.DETACHED_PROCESS
-
             subprocess.Popen(
                 [str(exe_path)],
                 cwd=str(exe_path.parent),
-                env=clean_env,
-                creationflags=creation_flags
+                env=clean_env
             )
         except Exception:
             pass

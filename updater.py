@@ -68,11 +68,32 @@ class SilentAutoUpdater:
 
         threading.Thread(target=self._worker, args=(is_manual,), daemon=True).start()
 
-    def _worker(self, is_manual: bool = False):
-        self.is_checking = True
-        if is_manual:
-            self.notify_status("🔍 Verificando atualizações no GitHub...")
+    def _get_latest_release_info(self) -> Tuple[str, str]:
+        """
+        Retorna (tag_name, download_url) da versao mais recente.
+        Prioriza o redirecionamento web oficial do GitHub para NAO consumir a cota de 60 req/h da API.
+        Se falhar, faz fallback para a API JSON.
+        """
+        tag_name = ""
+        download_url = ""
 
+        # Metodo 1: Redirecionamento Web (Sem limite de taxa de 60 req/h da API)
+        try:
+            web_url = f"https://github.com/{GITHUB_REPO}/releases/latest"
+            req = urllib.request.Request(
+                web_url,
+                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+            )
+            with urllib.request.urlopen(req, timeout=8.0) as resp:
+                final_url = resp.geturl()
+                if "/releases/tag/" in final_url:
+                    tag_name = final_url.split("/releases/tag/")[-1].split("/")[0].strip()
+                    download_url = f"https://github.com/{GITHUB_REPO}/releases/download/{tag_name}/{APP_NAME}.exe"
+                    return tag_name, download_url
+        except Exception as e:
+            print(f"[SilentUpdater] Metodo web indisponivel: {e}")
+
+        # Metodo 2: Fallback para API REST do GitHub
         try:
             api_url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
             req = urllib.request.Request(
@@ -82,15 +103,35 @@ class SilentAutoUpdater:
                     "Accept": "application/vnd.github.v3+json"
                 }
             )
-
             with urllib.request.urlopen(req, timeout=8.0) as resp:
-                if resp.status != 200:
-                    if is_manual:
-                        self.notify_status("⚠️ Servidor de atualizações indisponível.")
-                    return
-                data = json.loads(resp.read().decode("utf-8"))
+                if resp.status == 200:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    tag_name = data.get("tag_name", "").strip()
+                    for asset in data.get("assets", []):
+                        name = asset.get("name", "")
+                        if name.lower().endswith(".exe") and "setup" not in name.lower():
+                            download_url = asset.get("browser_download_url", "")
+                            break
+                    if not download_url and data.get("assets"):
+                        download_url = data["assets"][0].get("browser_download_url", "")
+                    return tag_name, download_url
+        except Exception as e:
+            print(f"[SilentUpdater] Fallback API GitHub indisponivel: {e}")
 
-            tag_name = data.get("tag_name", "").strip()
+        return tag_name, download_url
+
+    def _worker(self, is_manual: bool = False):
+        self.is_checking = True
+        if is_manual:
+            self.notify_status("🔍 Verificando atualizações no GitHub...")
+
+        try:
+            tag_name, download_url = self._get_latest_release_info()
+            if not tag_name:
+                if is_manual:
+                    self.notify_status("⚠️ Servidor de atualizações indisponível.")
+                return
+
             remote_ver = parse_version(tag_name)
             local_ver = parse_version(CURRENT_VERSION)
 
@@ -102,20 +143,7 @@ class SilentAutoUpdater:
 
             self.new_version = tag_name.lstrip("v").lstrip("V")
             if is_manual:
-                self.notify_status(f"⬇️ Nova versão v{self.new_version} encontrada! Baixando...")
-
-            # Localiza o arquivo .exe nos assets
-            assets = data.get("assets", [])
-            download_url = ""
-            for asset in assets:
-                name = asset.get("name", "")
-                if name.lower().endswith(".exe") and "setup" not in name.lower():
-                    download_url = asset.get("browser_download_url", "")
-                    break
-
-            if not download_url and assets:
-                # Fallback para qualquer .exe se não houver um exclusivo
-                download_url = assets[0].get("browser_download_url", "")
+                self.notify_status(f"⬇️ Nova versão v{self.new_version} encontrada! Baixando em segundo plano...")
 
             if not download_url:
                 if is_manual:
@@ -142,29 +170,44 @@ class SilentAutoUpdater:
             else:
                 app_dir = Path(__file__).parent.resolve()
 
+            temp_part = app_dir / ".pending_update.part"
             temp_dest = app_dir / ".pending_update.exe"
+
+            if temp_part.exists():
+                try:
+                    temp_part.unlink()
+                except Exception:
+                    pass
 
             req = urllib.request.Request(
                 download_url,
-                headers={"User-Agent": f"{APP_NAME}-SilentUpdater"}
+                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
             )
             with urllib.request.urlopen(req, timeout=60.0) as response:
                 block_size = 65536
-                with open(temp_dest, "wb") as out_file:
+                with open(temp_part, "wb") as out_file:
                     while True:
                         buf = response.read(block_size)
                         if not buf:
                             break
                         out_file.write(buf)
 
-            # Download 100% concluído e verificado
-            if temp_dest.exists() and temp_dest.stat().st_size > 500000:
+            # Download concluído com sucesso e verificado (> 5MB)
+            if temp_part.exists() and temp_part.stat().st_size > 5000000:
+                if temp_dest.exists():
+                    try:
+                        temp_dest.unlink()
+                    except Exception:
+                        pass
+                temp_part.replace(temp_dest)
                 self.downloaded_file = temp_dest
                 self.update_ready = True
                 print(f"[SilentUpdater] Nova versão {self.new_version} baixada e pronta!")
 
                 if self.on_ready_callback:
                     self.on_ready_callback(self.new_version)
+            else:
+                print("[SilentUpdater] Arquivo baixado incompleto ou corrompido.")
 
         except Exception as e:
             print(f"[SilentUpdater] Erro no download em background: {e}")
@@ -177,7 +220,8 @@ class SilentAutoUpdater:
             return
 
         is_frozen = getattr(sys, "frozen", False)
-        current_exe = Path(sys.executable)
+        current_exe = Path(sys.executable).resolve()
+        app_dir = current_exe.parent
 
         if not is_frozen:
             # Modo dev (python main.py): apenas move para dist/RemoteXPTI.exe
@@ -195,33 +239,37 @@ class SilentAutoUpdater:
         }
         clean_env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
 
-        # 2. Comando PowerShell em segundo plano:
-        # Aguarda o processo anterior encerrar por completo, substitui o arquivo com retry,
-        # limpa as variáveis de ambiente e inicializa a nova versão como processo independente.
-        ps_cmd = (
-            f"Start-Sleep -Milliseconds 1500; "
-            f"for ($i=0; $i -lt 5; $i++) {{ "
-            f"    try {{ Move-Item -Force -Path '{str(self.downloaded_file)}' -Destination '{str(current_exe)}' -ErrorAction Stop; break }} "
-            f"    catch {{ Start-Sleep -Milliseconds 500 }} "
-            f"}}; "
-            f"Get-ChildItem env: | Where-Object {{ $_.Name -like '_MEI*' -or $_.Name -like '*PYI*' }} | ForEach-Object {{ Remove-Item \"env:$($_.Name)\" -ErrorAction SilentlyContinue }}; "
-            f"[Environment]::SetEnvironmentVariable('PYINSTALLER_RESET_ENVIRONMENT', '1', 'Process'); "
-            f"Start-Process -FilePath '{str(current_exe)}' -WorkingDirectory '{str(current_exe.parent)}'"
-        )
+        # 2. Gera script batch em %TEMP% para substituir e abrir o novo aplicativo
+        import tempfile
+        script_path = Path(tempfile.gettempdir()) / "remotexpti_update.cmd"
 
-        creation_flags = 0
-        if hasattr(subprocess, "CREATE_NO_WINDOW"):
-            creation_flags |= subprocess.CREATE_NO_WINDOW
-        if hasattr(subprocess, "CREATE_NEW_PROCESS_GROUP"):
-            creation_flags |= subprocess.CREATE_NEW_PROCESS_GROUP
-        if hasattr(subprocess, "DETACHED_PROCESS"):
-            creation_flags |= subprocess.DETACHED_PROCESS
+        cmd_content = f"""@echo off
+chcp 65001 >nul
+:: Aguarda o processo anterior encerrar e liberar o arquivo
+ping 127.0.0.1 -n 3 >nul
+:: Tenta substituir com retry por ate 30 segundos
+for /l %%i in (1, 1, 30) do (
+    move /y "{str(self.downloaded_file)}" "{str(current_exe)}" >nul 2>&1
+    if not exist "{str(self.downloaded_file)}" goto :launch
+    taskkill /f /im "{current_exe.name}" >nul 2>&1
+    ping 127.0.0.1 -n 2 >nul
+)
+:launch
+set PYINSTALLER_RESET_ENVIRONMENT=1
+set _MEIPASS2=
+set _MEIPASS=
+cd /d "{str(app_dir)}"
+start "" "{str(current_exe)}"
+del "%~f0"
+"""
+        script_path.write_text(cmd_content, encoding="utf-8")
 
+        flags = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
         subprocess.Popen(
-            ["powershell.exe", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass", "-Command", ps_cmd],
-            cwd=str(current_exe.parent),
+            ["cmd.exe", "/c", str(script_path)],
+            cwd=str(app_dir),
             env=clean_env,
-            creationflags=creation_flags
+            creationflags=flags
         )
 
         # Encerra o processo atual imediatamente
