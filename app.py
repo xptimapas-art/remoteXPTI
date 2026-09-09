@@ -231,11 +231,6 @@ class RemoteXPTIApp(ctk.CTk):
         self._auto_ping_timer = None
 
         self._build_header()
-
-        # Container exclusivo para o banner de atualização
-        self.banner_container = ctk.CTkFrame(self, fg_color="transparent")
-        self.banner_container.pack(fill="x", padx=14, pady=(2, 0))
-
         self._build_main_view()
         self._build_statusbar()
 
@@ -406,12 +401,13 @@ class RemoteXPTIApp(ctk.CTk):
             try:
                 if not self.update_banner:
                     self.update_banner = UpdatePromptBanner(
-                        parent=self.banner_container,
+                        parent=self,
                         new_version=new_version,
                         on_restart_command=self.updater.apply_update_and_restart,
                         on_dismiss=self._dismiss_update_banner
                     )
-                    self.update_banner.pack(fill="x", pady=2)
+                    target_widget = getattr(self.scroll_frame, "_parent_frame", self.scroll_frame)
+                    self.update_banner.pack(fill="x", padx=14, pady=(6, 2), before=target_widget)
             except Exception as e:
                 print(f"[Aviso] Falha ao exibir banner: {e}")
 
