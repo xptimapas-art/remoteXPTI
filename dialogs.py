@@ -20,9 +20,9 @@ class ServerDialog(ctk.CTkToplevel):
         super().__init__(parent)
         self.parent = parent
         self.server_data = server_data or {}
-        self.existing_groups = existing_groups or ["Geral", "Produção", "Filiais", "Clientes"]
-        if "Geral" not in self.existing_groups:
-            self.existing_groups.insert(0, "Geral")
+        self.existing_groups = existing_groups or ["BEMTEVI", "SEJURI"]
+        if not self.existing_groups:
+            self.existing_groups = ["BEMTEVI", "SEJURI"]
         self.on_save = on_save
         self.on_delete = on_delete
         self.is_edit = bool(server_data and "id" in server_data)
@@ -93,12 +93,12 @@ class ServerDialog(ctk.CTkToplevel):
         # 3. Grupo / Categoria
         ctk.CTkLabel(form_frame, text="Grupo / Categoria", font=ctk.CTkFont(size=13, weight="bold")).pack(anchor="w", padx=10, pady=(0, 2))
         self.combo_group = ctk.CTkComboBox(form_frame, values=self.existing_groups, height=38)
-        self.combo_group.set("Geral")
+        self.combo_group.set(self.existing_groups[0] if self.existing_groups else "BEMTEVI")
         self.combo_group.pack(fill="x", padx=10, pady=(0, 10))
 
         # 4. Usuário
         ctk.CTkLabel(form_frame, text="Usuário RDP", font=ctk.CTkFont(size=13, weight="bold")).pack(anchor="w", padx=10, pady=(0, 2))
-        self.entry_user = ctk.CTkEntry(form_frame, placeholder_text="Ex: Administrador ou DOMINIO\\usuario", height=38)
+        self.entry_user = ctk.CTkEntry(form_frame, placeholder_text=r"Ex: bemtevi.net\xpti", height=38)
         self.entry_user.pack(fill="x", padx=10, pady=(0, 10))
 
         # 5. Senha com botão de alternar visibilidade
@@ -274,7 +274,7 @@ class ServerDialog(ctk.CTkToplevel):
         self.entry_port.delete(0, "end")
         self.entry_port.insert(0, str(self.server_data.get("port", 3389)))
         
-        grp = self.server_data.get("group", "Geral")
+        grp = self.server_data.get("group", "BEMTEVI")
         if grp not in self.existing_groups:
             self.existing_groups.append(grp)
             self.combo_group.configure(values=self.existing_groups)

@@ -99,8 +99,35 @@ class StorageManager:
         except Exception as e:
             print(f"Erro ao carregar {self.data_file}: {e}")
             self.servers = []
-        
+
+        self._sync_official_groups_and_users()
         return self.servers
+
+    def _sync_official_groups_and_users(self):
+        """Sincroniza automaticamente as tags oficiais (SEJURI e BEMTEVI) e o usuário padrão bemtevi.net\\xpti."""
+        sejuri_hosts = {
+            "192.168.190.61",  # Feminino Chapeco
+            "192.168.190.63",  # Joinville
+            "192.168.190.64",  # UMAX
+            "192.168.190.65",  # Industrial SCS
+        }
+        changed = False
+        for s in self.servers:
+            host = s.get("host", "").strip()
+            if host in sejuri_hosts:
+                if s.get("group") != "SEJURI":
+                    s["group"] = "SEJURI"
+                    changed = True
+            else:
+                if s.get("group") != "BEMTEVI":
+                    s["group"] = "BEMTEVI"
+                    changed = True
+                if s.get("username") != r"bemtevi.net\xpti":
+                    s["username"] = r"bemtevi.net\xpti"
+                    changed = True
+
+        if changed:
+            self.save()
 
     def save(self):
         try:

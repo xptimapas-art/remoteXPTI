@@ -260,9 +260,28 @@ class SetupApp(ctk.CTk):
                             with open(dest_json, "r", encoding="utf-8") as f_dst:
                                 dst_data = json.load(f_dst)
 
-                            existing_hosts = {s.get("host") for s in dst_data.get("servers", []) if s.get("host")}
-                            existing_names = {s.get("name") for s in dst_data.get("servers", [])}
-                            for s in src_data.get("servers", []):
+                            src_servers = src_data.get("servers", [])
+                            src_by_host = {s.get("host"): s for s in src_servers if s.get("host")}
+                            src_by_name = {s.get("name"): s for s in src_servers if s.get("name")}
+
+                            # Atualiza servidores já existentes com as novas tags oficiais e usuários
+                            existing_hosts = set()
+                            existing_names = set()
+                            for dst_s in dst_data.get("servers", []):
+                                h = dst_s.get("host")
+                                n = dst_s.get("name")
+                                if h:
+                                    existing_hosts.add(h)
+                                if n:
+                                    existing_names.add(n)
+                                ref = src_by_host.get(h) or src_by_name.get(n)
+                                if ref:
+                                    dst_s["group"] = ref.get("group", dst_s.get("group"))
+                                    if ref.get("group") == "BEMTEVI":
+                                        dst_s["username"] = ref.get("username", dst_s.get("username"))
+
+                            # Adiciona novos servidores do pacote que não existiam no cliente
+                            for s in src_servers:
                                 s_host = s.get("host")
                                 s_name = s.get("name")
                                 if (s_host and s_host not in existing_hosts) or (not s_host and s_name not in existing_names):
