@@ -400,11 +400,20 @@ class ServerDialog(ctk.CTkToplevel):
 
 
 class ConfirmDialog(ctk.CTkToplevel):
-    """Janela de confirmação para ações destrutivas (excluir servidor)."""
-    def __init__(self, parent, title: str, message: str, on_confirm: Callable[[], None]):
+    """Janela de confirmação para ações destrutivas (excluir servidor, desinstalar app)."""
+    def __init__(
+        self,
+        parent,
+        title: str,
+        message: str,
+        on_confirm: Callable[[], None],
+        confirm_text: str = "Sim, excluir",
+        confirm_color: str = "#cc3333",
+        height: int = 200
+    ):
         super().__init__(parent)
         self.title(title)
-        self.geometry("400x190")
+        self.geometry(f"440x{height}")
         self.resizable(False, False)
         self.transient(parent)
         self.grab_set()
@@ -412,11 +421,11 @@ class ConfirmDialog(ctk.CTkToplevel):
         frame = ctk.CTkFrame(self, corner_radius=10)
         frame.pack(fill="both", expand=True, padx=16, pady=16)
 
-        lbl = ctk.CTkLabel(frame, text=message, font=ctk.CTkFont(size=14), wraplength=350)
-        lbl.pack(pady=(20, 20), padx=10)
+        lbl = ctk.CTkLabel(frame, text=message, font=ctk.CTkFont(size=13), wraplength=390, justify="center")
+        lbl.pack(pady=(15, 15), padx=10)
 
         btn_box = ctk.CTkFrame(frame, fg_color="transparent")
-        btn_box.pack(fill="x", padx=10)
+        btn_box.pack(fill="x", padx=10, side="bottom", pady=(0, 5))
 
         btn_no = ctk.CTkButton(
             btn_box,
@@ -428,15 +437,15 @@ class ConfirmDialog(ctk.CTkToplevel):
         btn_no.pack(side="right", padx=(8, 0))
 
         def confirm_and_close():
-            on_confirm()
             self.destroy()
+            on_confirm()
 
         btn_yes = ctk.CTkButton(
             btn_box,
-            text="Sim, excluir",
-            width=110,
-            fg_color="#cc3333",
-            hover_color="#aa2222",
+            text=confirm_text,
+            width=160,
+            fg_color=confirm_color,
+            hover_color="#990000",
             command=confirm_and_close
         )
         btn_yes.pack(side="right")

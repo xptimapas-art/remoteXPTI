@@ -14,6 +14,7 @@ from preview_manager import PreviewManager
 from dialogs import ServerDialog, ConfirmDialog
 from version import CURRENT_VERSION
 from updater import SilentAutoUpdater, UpdatePromptBanner
+from uninstaller import Uninstaller
 
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
@@ -377,7 +378,21 @@ class RemoteXPTIApp(ctk.CTk):
             font=ctk.CTkFont(size=12, weight="bold"),
             command=self.open_add_dialog
         )
-        self.btn_add.pack(side="left")
+        self.btn_add.pack(side="left", padx=(0, 8))
+
+        # Botão Desinstalação Completa
+        self.btn_uninstall = ctk.CTkButton(
+            actions_box,
+            text="🗑️ Desinstalar",
+            width=105,
+            height=34,
+            fg_color=("#ffdddd", "#381a1e"),
+            hover_color=("#ffc2c2", "#522228"),
+            text_color=("#cc0000", "#ff6b6b"),
+            font=ctk.CTkFont(size=11, weight="bold"),
+            command=self.confirm_uninstall_app
+        )
+        self.btn_uninstall.pack(side="left")
 
     def _build_main_view(self):
         self.scroll_frame = ctk.CTkScrollableFrame(self, fg_color="transparent")
@@ -790,6 +805,31 @@ class RemoteXPTIApp(ctk.CTk):
             title="Excluir Servidor",
             message=f"Tem certeza que deseja excluir '{name}'?\nEsta ação não pode ser desfeita.",
             on_confirm=do_delete
+        )
+
+    def confirm_uninstall_app(self):
+        """Abre modal de confirmação para desinstalar o RemoteXPTI por completo."""
+        message = (
+            "Deseja desinstalar o RemoteXPTI por completo do computador?\n\n"
+            "⚠️ Esta ação irá:\n"
+            "• Remover o aplicativo e todos os arquivos instalados\n"
+            "• Apagar os atalhos da Área de Trabalho e Menu Iniciar\n"
+            "• Limpar todas as credenciais salvas no Windows (TERMSRV)\n"
+            "• Excluir os perfis temporários de conexão RDP"
+        )
+
+        def do_uninstall():
+            self.set_message("Desinstalando RemoteXPTI e limpando credenciais...")
+            Uninstaller.execute_complete_uninstallation()
+
+        ConfirmDialog(
+            parent=self,
+            title="Desinstalação Completa do RemoteXPTI",
+            message=message,
+            confirm_text="Sim, Desinstalar Tudo",
+            confirm_color="#cc0000",
+            height=240,
+            on_confirm=do_uninstall
         )
 
 
