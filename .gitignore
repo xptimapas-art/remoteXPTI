@@ -1,0 +1,24 @@
+﻿# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# PyInstaller e compilação
+build/
+dist/
+*.spec
+*.exe
+.pending_update.exe
+
+# Dados sensíveis e senhas locais (proteção contra vazamento público)
+.secret.key
+servers.json
+*.bak
+
+# Thumbnails de telas geradas localmente
+thumbnails/*.png
+!thumbnails/.gitkeep
+
+# IDE
+.vscode/
+.idea/

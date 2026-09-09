@@ -1,0 +1,163 @@
+import subprocess
+import socket
+import sys
+from typing import Tuple, Optional
+
+class RDPManager:
+    """Gerencia conexões RDP, injeção de credenciais via cmdkey e testes de conectividade."""
+
+    @staticmethod
+    def is_windows() -> bool:
+        return sys.platform == "win32"
+
+    @staticmethod
+    def check_connection(host: str, port: int = 3389, timeout: float = 1.2) -> Tuple[bool, str]:
+        """
+        Testa rapidamente se a porta RDP do servidor está respondendo.
+        Retorna (is_online, mensagem).
+        """
+        if not host:
+            return False, "Host vazio"
+
+        # Se o host vier no formato host:porta, separar
+        clean_host = host
+        target_port = port
+        if ":" in host:
+            parts = host.split(":", 1)
+            clean_host = parts[0]
+            try:
+                target_port = int(parts[1])
+            except ValueError:
+                target_port = port
+
+        try:
+            # Resolve DNS ou conecta direto via IPv4/IPv6
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(timeout)
+            result = sock.connect_ex((clean_host, target_port))
+            sock.close()
+            if result == 0:
+                return True, f"Online ({clean_host}:{target_port})"
+            else:
+                return False, f"Porta {target_port} fechada ou filtrada"
+        except socket.gaierror:
+            return False, "Falha ao resolver DNS"
+        except socket.timeout:
+            return False, "Tempo de resposta esgotado (Timeout)"
+        except Exception as e:
+            return False, f"Erro de rede: {str(e)}"
+
+    @staticmethod
+    def set_windows_credential(host: str, port: int, username: str, password: str) -> Tuple[bool, str]:
+        """
+        Injeta a credencial no Windows Credential Manager usando cmdkey.
+        """
+        if not RDPManager.is_windows():
+            return False, "Sistema operacional não é Windows"
+
+        clean_host = host
+        if ":" in host:
+            clean_host = host.split(":", 1)[0]
+
+        targets = [f"TERMSRV/{clean_host}"]
+        if port and port != 3389:
+            targets.append(f"TERMSRV/{clean_host}:{port}")
+
+        creation_flags = 0
+        if hasattr(subprocess, "CREATE_NO_WINDOW"):
+            creation_flags = subprocess.CREATE_NO_WINDOW
+
+        success = True
+        err_msgs = []
+
+        for target in targets:
+            try:
+                # cmdkey /generic:TERMSRV/<host> /user:<user> /pass:<pass>
+                cmd = ["cmdkey", f"/generic:{target}", f"/user:{username}", f"/pass:{password}"]
+                res = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    creationflags=creation_flags
+                )
+                if res.returncode != 0:
+                    success = False
+                    err_msgs.append(res.stderr.strip() or res.stdout.strip())
+            except Exception as e:
+                success = False
+                err_msgs.append(str(e))
+
+        if success:
+            return True, "Credencial registrada com sucesso"
+        return False, "; ".join(err_msgs)
+
+    @staticmethod
+    def clear_windows_credential(host: str, port: int = 3389) -> bool:
+        """Remove as credenciais registradas para o host."""
+        if not RDPManager.is_windows():
+            return False
+
+        clean_host = host.split(":", 1)[0] if ":" in host else host
+        targets = [f"TERMSRV/{clean_host}"]
+        if port and port != 3389:
+            targets.append(f"TERMSRV/{clean_host}:{port}")
+
+        creation_flags = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
+
+        for target in targets:
+            try:
+                subprocess.run(
+                    ["cmdkey", f"/delete:{target}"],
+                    capture_output=True,
+                    creationflags=creation_flags
+                )
+            except Exception:
+                pass
+        return True
+
+    @staticmethod
+    def launch_rdp(
+        host: str,
+        port: int = 3389,
+        username: str = "",
+        password: str = "",
+        fullscreen: bool = True,
+        admin_mode: bool = False,
+        multimon: bool = False
+    ) -> Tuple[bool, str]:
+        """
+        Configura a credencial e abre o mstsc.exe diretamente.
+        """
+        if not RDPManager.is_windows():
+            return False, "O cliente nativo mstsc só está disponível no Windows."
+
+        if not host:
+            return False, "Endereço de host inválido."
+
+        # Monta o destino para o mstsc (se a porta não for padrão, inclui :porta)
+        clean_host = host.split(":", 1)[0] if ":" in host else host
+        target_v = clean_host
+        if port and port != 3389:
+            target_v = f"{clean_host}:{port}"
+
+        # Se houver usuário e senha, salva no Credential Manager
+        if username and password:
+            ok, msg = RDPManager.set_windows_credential(clean_host, port, username, password)
+            if not ok:
+                print(f"[Aviso] Falha ao registrar credencial no cmdkey: {msg}")
+
+        # Monta parâmetros do mstsc
+        cmd = ["mstsc", f"/v:{target_v}"]
+        if fullscreen:
+            cmd.append("/f")
+        if admin_mode:
+            cmd.append("/admin")
+        if multimon:
+            cmd.append("/multimon")
+
+        try:
+            creation_flags = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
+            subprocess.Popen(cmd, creationflags=creation_flags)
+            return True, f"Conexão iniciada com {target_v}"
+        except Exception as e:
+            return False, f"Falha ao executar mstsc: {str(e)}"
