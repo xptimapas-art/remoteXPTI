@@ -6,6 +6,7 @@ from typing import List, Dict, Any, Optional, Tuple
 import threading
 import time
 import shutil
+from concurrent.futures import ThreadPoolExecutor
 from PIL import Image
 from storage import StorageManager
 from rdp_manager import RDPManager
@@ -250,6 +251,9 @@ class RemoteXPTIApp(ctk.CTk):
         self.last_cols = 4
         self._resize_timer = None
         self._auto_ping_timer = None
+        self._search_debounce_timer = None
+        self._status_executor = ThreadPoolExecutor(max_workers=10)
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
 
         self._build_header()
         self.banner_container = ctk.CTkFrame(self, fg_color="transparent")
@@ -323,7 +327,7 @@ class RemoteXPTIApp(ctk.CTk):
             height=34
         )
         self.entry_search.pack(side="left", padx=(0, 8))
-        self.entry_search.bind("<KeyRelease>", lambda e: self.filter_servers())
+        self.entry_search.bind("<KeyRelease>", self._on_search_keypress)
 
         # Filtro de Grupos
         self.combo_filter_group = ctk.CTkComboBox(
@@ -496,10 +500,33 @@ class RemoteXPTIApp(ctk.CTk):
         if duration_sec > 0:
             self.after(duration_sec * 1000, lambda: self.lbl_status_msg.configure(text="Pronto."))
 
+    def _on_search_keypress(self, event=None):
+        """Aplica debounce de 90ms para digitação fluida sem engasgos na interface."""
+        if self._search_debounce_timer:
+            self.after_cancel(self._search_debounce_timer)
+        self._search_debounce_timer = self.after(90, self.filter_servers)
+
+    def _on_close(self):
+        """Encerra a aplicação de forma limpa, finalizando o pool de threads em segundo plano."""
+        try:
+            if hasattr(self, "_status_executor"):
+                self._status_executor.shutdown(wait=False)
+        except Exception:
+            pass
+        self.destroy()
+
     def refresh_servers(self):
         self.storage.load()
         groups = ["Todos os Grupos"] + self.storage.get_groups()
         self.combo_filter_group.configure(values=groups)
+
+        # Remove cards de servidores que não existem mais
+        current_ids = {s["id"] for s in self.storage.servers}
+        for s_id in list(self.card_widgets.keys()):
+            if s_id not in current_ids:
+                self.card_widgets[s_id].destroy()
+                del self.card_widgets[s_id]
+
         self.filter_servers()
 
     def filter_servers(self):
@@ -523,14 +550,12 @@ class RemoteXPTIApp(ctk.CTk):
         self._render_cards(filtered)
 
     def _render_cards(self, servers: List[Dict[str, Any]]):
-        for card in self.card_widgets.values():
-            card.destroy()
-        self.card_widgets.clear()
-
         count = len(servers)
         self.lbl_server_count.configure(text=f"{count} {'servidor' if count == 1 else 'servidores'}")
 
         if not servers:
+            for card in self.card_widgets.values():
+                card.grid_forget()
             self.empty_label.pack(pady=60)
             return
         else:
@@ -553,22 +578,33 @@ class RemoteXPTIApp(ctk.CTk):
         for i in range(cols):
             self.scroll_frame.grid_columnconfigure(i, weight=0, minsize=slot_w)
 
+        visible_ids = {s["id"] for s in servers}
+
+        # 1. Oculta instantaneamente com grid_forget (sem destruir widgets!)
+        for s_id, card in self.card_widgets.items():
+            if s_id not in visible_ids:
+                card.grid_forget()
+
+        # 2. Reutiliza cards já criados em cache (0ms) ou instancia se for novo
         for index, server in enumerate(servers):
+            s_id = server["id"]
             row = index // cols
             col = index % cols
 
-            # Recupera o status já conhecido da memória para NÃO resetar para "Checando"
-            cached_status = self.server_status.get(server["id"])
+            if s_id in self.card_widgets:
+                card = self.card_widgets[s_id]
+            else:
+                cached_status = self.server_status.get(s_id)
+                card = ServerCard(
+                    self.scroll_frame,
+                    server=server,
+                    on_connect=self.connect_to_server,
+                    on_edit=self.open_edit_dialog,
+                    initial_status=cached_status
+                )
+                self.card_widgets[s_id] = card
 
-            card = ServerCard(
-                self.scroll_frame,
-                server=server,
-                on_connect=self.connect_to_server,
-                on_edit=self.open_edit_dialog,
-                initial_status=cached_status
-            )
             card.grid(row=row, column=col, padx=7, pady=7, sticky="nw")
-            self.card_widgets[server["id"]] = card
 
     def connect_to_server(self, server: Dict[str, Any]):
         server_id = server["id"]
@@ -638,12 +674,15 @@ class RemoteXPTIApp(ctk.CTk):
                     self.card_widgets[server_id].update_status(is_online, msg)
             self.after(0, update_card)
 
+        if not hasattr(self, "_status_executor") or self._status_executor._shutdown:
+            self._status_executor = ThreadPoolExecutor(max_workers=10)
+
         for server in self.storage.servers:
             s_id = server["id"]
             s_host = server.get("host", "")
             s_port = int(server.get("port", 3389))
             if s_host:
-                threading.Thread(target=check_worker, args=(s_id, s_host, s_port), daemon=True).start()
+                self._status_executor.submit(check_worker, s_id, s_host, s_port)
 
     def _on_manual_refresh(self):
         self.start_status_checker(is_manual=True)
@@ -691,6 +730,7 @@ class RemoteXPTIApp(ctk.CTk):
         def on_save(data):
             self.storage.update_server(server["id"], data)
             server_id = server["id"]
+            PreviewManager.invalidate_cache(server_id)
             if data.get("custom_image"):
                 try:
                     img = Image.open(data["custom_image"])
@@ -701,6 +741,11 @@ class RemoteXPTIApp(ctk.CTk):
                 tpath = PreviewManager.get_thumbnail_path(server_id)
                 if tpath.exists():
                     tpath.unlink()
+
+            # Destrói apenas o card deste servidor para recriação com novos dados
+            if server_id in self.card_widgets:
+                self.card_widgets[server_id].destroy()
+                del self.card_widgets[server_id]
 
             self.refresh_servers()
             self.set_message(f"Servidor '{data['name']}' atualizado com sucesso!")
@@ -720,16 +765,22 @@ class RemoteXPTIApp(ctk.CTk):
     def confirm_delete_server(self, server: Dict[str, Any]):
         name = server.get("name", "este servidor")
         def do_delete():
-            self.storage.delete_server(server["id"])
-            thumb_path = PreviewManager.get_thumbnail_path(server["id"])
+            server_id = server["id"]
+            self.storage.delete_server(server_id)
+            PreviewManager.invalidate_cache(server_id)
+            thumb_path = PreviewManager.get_thumbnail_path(server_id)
             if thumb_path.exists():
                 try:
                     thumb_path.unlink()
                 except Exception:
                     pass
             # Remove do cache de status
-            if server["id"] in self.server_status:
-                del self.server_status[server["id"]]
+            self.server_status.pop(server_id, None)
+            
+            # Destrói o card da interface
+            if server_id in self.card_widgets:
+                self.card_widgets[server_id].destroy()
+                del self.card_widgets[server_id]
                 
             self.refresh_servers()
             self.set_message(f"Servidor '{name}' excluído com sucesso.")

@@ -20,6 +20,18 @@ THUMBNAILS_DIR.mkdir(exist_ok=True)
 class PreviewManager:
     """Gerencia captura, geração e exibição de miniaturas (previews) estilo AnyDesk."""
 
+    _cache: dict = {}
+
+    @classmethod
+    def invalidate_cache(cls, server_id: Optional[str] = None):
+        """Invalida o cache de miniaturas de um servidor ou de todos."""
+        if server_id:
+            to_del = [k for k in cls._cache if k.startswith(f"{server_id}_")]
+            for k in to_del:
+                cls._cache.pop(k, None)
+        else:
+            cls._cache.clear()
+
     @staticmethod
     def get_thumbnail_path(server_id: str) -> Path:
         return THUMBNAILS_DIR / f"{server_id}.png"
@@ -111,28 +123,37 @@ class PreviewManager:
 
         return img
 
-    @staticmethod
+    @classmethod
     def get_thumbnail_ctk(
+        cls,
         server_id: str,
         name: str,
         host: str,
         width: int = 260,
         height: int = 145
     ) -> ctk.CTkImage:
-        """Retorna o CTkImage da miniatura (real se existir, ou mockup padrão)."""
-        thumb_file = PreviewManager.get_thumbnail_path(server_id)
+        """Retorna o CTkImage da miniatura em cache (real se existir, ou mockup padrão)."""
+        cache_key = f"{server_id}_{width}_{height}"
+        if cache_key in cls._cache:
+            return cls._cache[cache_key]
+
+        thumb_file = cls.get_thumbnail_path(server_id)
         
         if thumb_file.exists():
             try:
                 pil_img = Image.open(thumb_file)
                 pil_img = pil_img.resize((width, height), Image.Resampling.LANCZOS)
-                return ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=(width, height))
+                ctk_img = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=(width, height))
+                cls._cache[cache_key] = ctk_img
+                return ctk_img
             except Exception as e:
                 print(f"[Aviso] Falha ao abrir miniatura {thumb_file}: {e}")
 
         # Se não existe print real salvo, gera o mockup elegante
-        default_img = PreviewManager.generate_default_preview(name, host, width, height)
-        return ctk.CTkImage(light_image=default_img, dark_image=default_img, size=(width, height))
+        default_img = cls.generate_default_preview(name, host, width, height)
+        ctk_img = ctk.CTkImage(light_image=default_img, dark_image=default_img, size=(width, height))
+        cls._cache[cache_key] = ctk_img
+        return ctk_img
 
     @staticmethod
     def capture_rdp_window(server_id: str, host: str) -> bool:
@@ -225,6 +246,7 @@ class PreviewManager:
             # Converte e salva redimensionado
             thumb_path = PreviewManager.get_thumbnail_path(server_id)
             img.convert("RGB").save(thumb_path, "PNG")
+            PreviewManager.invalidate_cache(server_id)
             print(f"[Preview] Captura de tela salva para {server_id} ({host}) em {thumb_path}")
             return True
         except Exception as e:
