@@ -322,13 +322,30 @@ class SetupApp(ctk.CTk):
 
     def _finish_and_launch(self, exe_path: Path):
         try:
+            clean_env = {
+                k: v for k, v in os.environ.items()
+                if not k.startswith("_MEI") and not k.startswith("PYI_") and not k.startswith("_PYI_")
+            }
+            clean_env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
             creation_flags = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
-            subprocess.Popen([str(exe_path)], creationflags=creation_flags)
+            if hasattr(subprocess, "CREATE_NEW_PROCESS_GROUP"):
+                creation_flags |= subprocess.CREATE_NEW_PROCESS_GROUP
+            if hasattr(subprocess, "DETACHED_PROCESS"):
+                creation_flags |= subprocess.DETACHED_PROCESS
+
+            subprocess.Popen(
+                [str(exe_path)],
+                cwd=str(exe_path.parent),
+                env=clean_env,
+                creationflags=creation_flags
+            )
         except Exception:
             pass
         self.destroy()
 
 
 if __name__ == "__main__":
+    import multiprocessing
+    multiprocessing.freeze_support()
     app = SetupApp()
     app.mainloop()

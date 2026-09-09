@@ -1,5 +1,6 @@
 import sys
 import ctypes
+import multiprocessing
 
 def enable_high_dpi_awareness():
     """Habilita reconhecimento de alta densidade de pixels no Windows para fontes nítidas."""
@@ -20,4 +21,5 @@ def main():
     app.mainloop()
 
 if __name__ == "__main__":
+    multiprocessing.freeze_support()
     main()

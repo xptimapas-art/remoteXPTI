@@ -188,20 +188,43 @@ class SilentAutoUpdater:
             return
 
         # Modo executável compilado (.exe):
-        # Usa PowerShell em segundo plano (oculto e sem criar nenhum arquivo .bat no disco)
-        # para aguardar 1 segundo até o processo encerrar, substituir o executável e reabrir.
+        # 1. Prepara ambiente limpo sem resquícios do processo PyInstaller anterior
+        clean_env = {
+            k: v for k, v in os.environ.items()
+            if not k.startswith("_MEI") and not k.startswith("PYI_") and not k.startswith("_PYI_")
+        }
+        clean_env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+
+        # 2. Comando PowerShell em segundo plano:
+        # Aguarda o processo anterior encerrar por completo, substitui o arquivo com retry,
+        # limpa as variáveis de ambiente e inicializa a nova versão como processo independente.
         ps_cmd = (
-            f"Start-Sleep -Seconds 1; "
-            f"Move-Item -Force -Path '{str(self.downloaded_file)}' -Destination '{str(current_exe)}'; "
-            f"Start-Process -FilePath '{str(current_exe)}'"
+            f"Start-Sleep -Milliseconds 1500; "
+            f"for ($i=0; $i -lt 5; $i++) {{ "
+            f"    try {{ Move-Item -Force -Path '{str(self.downloaded_file)}' -Destination '{str(current_exe)}' -ErrorAction Stop; break }} "
+            f"    catch {{ Start-Sleep -Milliseconds 500 }} "
+            f"}}; "
+            f"Get-ChildItem env: | Where-Object {{ $_.Name -like '_MEI*' -or $_.Name -like '*PYI*' }} | ForEach-Object {{ Remove-Item \"env:$($_.Name)\" -ErrorAction SilentlyContinue }}; "
+            f"[Environment]::SetEnvironmentVariable('PYINSTALLER_RESET_ENVIRONMENT', '1', 'Process'); "
+            f"Start-Process -FilePath '{str(current_exe)}' -WorkingDirectory '{str(current_exe.parent)}'"
         )
-        creation_flags = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
+
+        creation_flags = 0
+        if hasattr(subprocess, "CREATE_NO_WINDOW"):
+            creation_flags |= subprocess.CREATE_NO_WINDOW
+        if hasattr(subprocess, "CREATE_NEW_PROCESS_GROUP"):
+            creation_flags |= subprocess.CREATE_NEW_PROCESS_GROUP
+        if hasattr(subprocess, "DETACHED_PROCESS"):
+            creation_flags |= subprocess.DETACHED_PROCESS
+
         subprocess.Popen(
             ["powershell.exe", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass", "-Command", ps_cmd],
+            cwd=str(current_exe.parent),
+            env=clean_env,
             creationflags=creation_flags
         )
 
-        # Encerra o processo atual
+        # Encerra o processo atual imediatamente
         os._exit(0)
 
 
