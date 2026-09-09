@@ -19,8 +19,8 @@ from uninstaller import Uninstaller
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
 
-CARD_WIDTH = 240
-CARD_HEIGHT = 160
+CARD_WIDTH = 276
+CARD_HEIGHT = 180
 
 class ServerCard(ctk.CTkFrame):
     """Componente de Card 100% no padrão visual e interativo do AnyDesk."""
@@ -56,7 +56,7 @@ class ServerCard(ctk.CTkFrame):
         self._bind_events()
 
     def _build_ui(self):
-        # 1. Imagem de fundo completa estilo AnyDesk
+        # Imagem de fundo completa estilo AnyDesk (renderiza 100% dos ícones e textos sem caixas pretas)
         self.current_img = PreviewManager.get_card_ctk(
             server_id=self.server["id"],
             name=self.server.get("name", "Servidor"),
@@ -76,41 +76,30 @@ class ServerCard(ctk.CTkFrame):
         )
         self.lbl_card.place(x=0, y=0)
 
-        # 2. Botão invisível sobre os 3 pontos para abrir opções/edição
-        self.btn_dots = ctk.CTkButton(
-            self,
-            text="",
-            width=28,
-            height=34,
-            fg_color="transparent",
-            hover_color=("#3c4050", "#22242e"),
-            corner_radius=4,
-            cursor="hand2",
-            command=lambda: self.on_edit(self.server)
-        )
-        self.btn_dots.place(x=CARD_WIDTH - 30, y=CARD_HEIGHT - 38)
-
-        # 3. Botão invisível sobre a estrela de favoritos
-        self.btn_star = ctk.CTkButton(
-            self,
-            text="",
-            width=28,
-            height=28,
-            fg_color="transparent",
-            hover_color=("#3c4050", "#22242e"),
-            corner_radius=4,
-            cursor="hand2",
-            command=self._toggle_favorite
-        )
-        self.btn_star.place(x=CARD_WIDTH - 30, y=4)
-
     def _bind_events(self):
         clickable = [self, self.lbl_card]
         for w in clickable:
-            w.bind("<Button-1>", lambda e: self.on_connect(self.server))
+            w.bind("<Button-1>", self._on_card_click)
             w.bind("<Button-3>", lambda e: self.on_edit(self.server))
             w.bind("<Enter>", lambda e: self._set_hover(True))
             w.bind("<Leave>", lambda e: self._set_hover(False))
+
+    def _on_card_click(self, event):
+        x = event.x
+        y = event.y
+
+        # Canto Superior Direito: Estrela de favoritos (área de 44x44px)
+        if x >= CARD_WIDTH - 44 and y <= 44:
+            self._toggle_favorite()
+            return
+
+        # Canto Inferior Direito: 3 pontos de edição/opções (área de 42x46px)
+        if x >= CARD_WIDTH - 42 and y >= CARD_HEIGHT - 46:
+            self.on_edit(self.server)
+            return
+
+        # Clique no restante do card: Conexão direta RDP
+        self.on_connect(self.server)
 
     def _set_hover(self, is_hover: bool):
         if is_hover:
@@ -430,8 +419,8 @@ class RemoteXPTIApp(ctk.CTk):
         if w <= 200:
             return
 
-        slot_w = CARD_WIDTH + 16
-        avail_w = max(CARD_WIDTH, w - 44)
+        slot_w = CARD_WIDTH + 10
+        avail_w = max(CARD_WIDTH, w - 34)
         new_cols = max(1, avail_w // slot_w)
 
         # Reorganiza os cards apenas se o número de colunas mudou de fato
@@ -509,8 +498,8 @@ class RemoteXPTIApp(ctk.CTk):
         if w <= 200:
             w = 1100
 
-        slot_w = CARD_WIDTH + 16
-        avail_w = max(CARD_WIDTH, w - 44)
+        slot_w = CARD_WIDTH + 10
+        avail_w = max(CARD_WIDTH, w - 34)
         cols = max(1, avail_w // slot_w)
         self.last_cols = cols
 
@@ -548,7 +537,7 @@ class RemoteXPTIApp(ctk.CTk):
                 )
                 self.card_widgets[s_id] = card
 
-            card.grid(row=row, column=col, padx=8, pady=8)
+            card.grid(row=row, column=col, padx=5, pady=5)
 
     def connect_to_server(self, server: Dict[str, Any]):
         server_id = server["id"]

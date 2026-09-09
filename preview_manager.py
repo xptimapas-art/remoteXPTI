@@ -63,16 +63,16 @@ class PreviewManager:
         name: str,
         host: str,
         is_online: Optional[bool] = None,
-        width: int = 240,
-        height: int = 160,
+        width: int = 276,
+        height: int = 180,
         is_fav: bool = False
     ) -> Image.Image:
         """
         Gera o card completo no padrão exato do AnyDesk:
         - Wallpaper de fundo em tela cheia (print real capturado ou ondas AnyDesk em tons variados).
         - Gradiente escuro inferior para máxima legibilidade de texto.
-        - Círculo de status no canto superior esquerdo (🟢 online, 🚫 offline, ⚪ checando).
-        - Estrela de favoritos no canto superior direito.
+        - Círculo de status no canto superior esquerdo (🟢 online, 🚫 offline com traço diagonal, ⚪ checando).
+        - Estrela de favoritos no canto superior direito (☆ contorno limpo / ⭐ preenchida).
         - Ícone de monitor + Nome em negrito + IP no canto inferior esquerdo.
         - 3 pontos verticais (menu de opções) no canto inferior direito.
         """
@@ -99,27 +99,27 @@ class PreviewManager:
 
             for y in range(height):
                 ratio = y / height
-                r = int(base_rgb[0] * (1.12 - 0.42 * ratio))
-                g = int(base_rgb[1] * (1.12 - 0.42 * ratio))
-                b = int(base_rgb[2] * (1.12 - 0.42 * ratio))
+                r = int(base_rgb[0] * (1.14 - 0.44 * ratio))
+                g = int(base_rgb[1] * (1.14 - 0.44 * ratio))
+                b = int(base_rgb[2] * (1.14 - 0.44 * ratio))
                 draw.line([(0, y), (width, y)], fill=(min(255, max(0, r)), min(255, max(0, g)), min(255, max(0, b)), 255))
 
             # Ondas estilizadas suaves do AnyDesk
             wave_img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
             wdraw = ImageDraw.Draw(wave_img)
-            wdraw.arc([int(width * 0.1), int(-height * 0.5), int(width * 1.6), int(height * 1.8)], start=160, end=270, fill=(255, 255, 255, 36), width=16)
-            wdraw.arc([int(width * 0.25), int(-height * 0.3), int(width * 1.7), int(height * 1.7)], start=160, end=260, fill=(255, 255, 255, 44), width=10)
-            wdraw.arc([int(width * 0.4), int(-height * 0.1), int(width * 1.8), int(height * 1.6)], start=165, end=255, fill=(255, 255, 255, 28), width=5)
+            wdraw.arc([int(width * 0.1), int(-height * 0.5), int(width * 1.6), int(height * 1.8)], start=160, end=270, fill=(255, 255, 255, 38), width=18)
+            wdraw.arc([int(width * 0.25), int(-height * 0.3), int(width * 1.7), int(height * 1.7)], start=160, end=260, fill=(255, 255, 255, 45), width=12)
+            wdraw.arc([int(width * 0.4), int(-height * 0.1), int(width * 1.8), int(height * 1.6)], start=165, end=255, fill=(255, 255, 255, 30), width=6)
             wave_img = wave_img.filter(ImageFilter.GaussianBlur(radius=5))
             img = Image.alpha_composite(img, wave_img)
 
         # 2. Gradiente escuro no rodapé para garantir contraste das legendas
-        start_y = int(height * 0.46)
+        start_y = int(height * 0.42)
         grad_overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
         gdraw = ImageDraw.Draw(grad_overlay)
         for y in range(start_y, height):
             ratio = (y - start_y) / (height - start_y)
-            alpha = int(210 * (ratio ** 1.25))
+            alpha = int(225 * (ratio ** 1.2))
             gdraw.line([(0, y), (width, y)], fill=(0, 0, 0, alpha))
         img = Image.alpha_composite(img, grad_overlay)
 
@@ -127,50 +127,54 @@ class PreviewManager:
 
         # 3. Indicador de Status (Canto Superior Esquerdo)
         if is_online is True:
-            draw.ellipse([(13, 12), (25, 24)], fill=(0, 204, 102, 255))
+            draw.ellipse([(14, 14), (28, 28)], fill=(40, 200, 64, 255))
         elif is_online is False:
-            draw.ellipse([(13, 12), (25, 24)], fill=(235, 60, 60, 255))
-            draw.line([(15, 22), (23, 14)], fill=(255, 255, 255, 230), width=2)
+            draw.ellipse([(14, 14), (28, 28)], fill=(235, 50, 50, 255))
+            draw.line([(16, 26), (26, 16)], fill=(255, 255, 255, 240), width=2)
         else:
-            draw.ellipse([(13, 12), (25, 24)], fill=(160, 160, 160, 255))
+            draw.ellipse([(14, 14), (28, 28)], fill=(150, 155, 165, 255))
 
         # 4. Estrela de Favoritos (Canto Superior Direito)
-        def draw_star(cx, cy, r_out=7, r_in=3):
+        def draw_star(cx, cy, r_out=9, r_in=4):
             pts = []
             for i in range(10):
                 r = r_out if i % 2 == 0 else r_in
                 ang = i * math.pi / 5 - math.pi / 2
                 pts.append((cx + r * math.cos(ang), cy + r * math.sin(ang)))
-            outline_col = (255, 205, 50, 255) if is_fav else (220, 225, 235, 200)
-            fill_col = (255, 205, 50, 255) if is_fav else None
-            draw.polygon(pts, fill=fill_col, outline=outline_col)
+            if is_fav:
+                draw.polygon(pts, fill=(255, 205, 40, 255), outline=(255, 225, 70, 255))
+            else:
+                draw.line(pts + [pts[0]], fill=(255, 255, 255, 240), width=2)
 
-        draw_star(width - 20, 18)
+        draw_star(width - 22, 21)
 
         # 5. Ícone de Monitor (Canto Inferior Esquerdo)
-        mx, my = 14, height - 38
-        mw, mh = 19, 13
-        draw.rounded_rectangle([(mx, my), (mx + mw, my + mh)], radius=2, outline=(255, 255, 255, 230), width=1)
-        draw.line([(mx + mw // 2, my + mh), (mx + mw // 2, my + mh + 3)], fill=(255, 255, 255, 230), width=1)
-        draw.line([(mx + mw // 2 - 4, my + mh + 3), (mx + mw // 2 + 4, my + mh + 3)], fill=(255, 255, 255, 230), width=1)
+        mx, my = 16, height - 44
+        mw, mh = 24, 16
+        draw.rounded_rectangle([(mx, my), (mx + mw, my + mh)], radius=2, outline=(255, 255, 255, 240), width=2)
+        draw.line([(mx + mw // 2, my + mh), (mx + mw // 2, my + mh + 4)], fill=(255, 255, 255, 240), width=2)
+        draw.line([(mx + mw // 2 - 5, my + mh + 4), (mx + mw // 2 + 5, my + mh + 4)], fill=(255, 255, 255, 240), width=2)
 
         # 6. Textos: Nome do Servidor e Host
         try:
-            font_name = ImageFont.truetype("segoeuib.ttf", 12)
-            font_host = ImageFont.truetype("segoeui.ttf", 10)
+            font_name = ImageFont.truetype("segoeuib.ttf", 13)
+            font_host = ImageFont.truetype("segoeui.ttf", 11)
         except Exception:
             font_name = ImageFont.load_default()
             font_host = ImageFont.load_default()
 
-        display_name = name if len(name) <= 20 else name[:18] + "..."
-        tx = mx + mw + 8
-        draw.text((tx, my - 4), display_name, fill=(255, 255, 255, 255), font=font_name)
-        draw.text((tx, my + 12), host, fill=(200, 205, 220, 230), font=font_host)
+        display_name = name if len(name) <= 22 else name[:20] + "..."
+        tx = mx + mw + 10
+        draw.text((tx, my - 3), display_name, fill=(255, 255, 255, 255), font=font_name)
+        draw.text((tx, my + 16), host, fill=(200, 210, 225, 240), font=font_host)
 
         # 7. Três Pontos Verticais ⋮ (Canto Inferior Direito)
-        cx = width - 16
-        for dy in [my + 2, my + 7, my + 12]:
-            draw.ellipse([(cx, dy), (cx + 2, dy + 2)], fill=(255, 255, 255, 220))
+        cx = width - 18
+        for dy in [my + 2, my + 8, my + 14]:
+            draw.ellipse([(cx - 1, dy - 1), (cx + 2, dy + 2)], fill=(255, 255, 255, 240))
+
+        # 8. Linha sutil de destaque no rodapé do card
+        draw.line([(0, height - 2), (width, height - 2)], fill=(55, 95, 145, 255), width=2)
 
         return img
 
@@ -181,8 +185,8 @@ class PreviewManager:
         name: str,
         host: str,
         is_online: Optional[bool] = None,
-        width: int = 240,
-        height: int = 160,
+        width: int = 276,
+        height: int = 180,
         is_fav: bool = False
     ) -> ctk.CTkImage:
         """Retorna o CTkImage completo do card no estilo AnyDesk com cache inteligente."""
@@ -196,7 +200,7 @@ class PreviewManager:
         return ctk_img
 
     @classmethod
-    def get_thumbnail_ctk(cls, server_id: str, name: str, host: str, width: int = 240, height: int = 160) -> ctk.CTkImage:
+    def get_thumbnail_ctk(cls, server_id: str, name: str, host: str, width: int = 276, height: int = 180) -> ctk.CTkImage:
         """Alias para compatibilidade retroativa."""
         return cls.get_card_ctk(server_id, name, host, None, width, height)
 
