@@ -240,7 +240,7 @@ class SetupApp(ctk.CTk):
                         except Exception:
                             pass
 
-                if source_key.exists() and not dest_key.exists():
+                if source_key.exists():
                     shutil.copy2(source_key, dest_key)
 
             # 4. Cria atalhos

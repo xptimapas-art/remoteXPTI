@@ -19,6 +19,7 @@ def get_app_dir() -> Path:
 
 DATA_FILE = get_app_dir() / "servers.json"
 KEY_FILE = get_app_dir() / ".secret.key"
+MASTER_KEY = b"myJFkZlC1kOdsKoL0Glf120KMwUIfyjj09Waqem33TQ="
 
 class CredentialVault:
     """Gerenciador de criptografia local para senhas."""
@@ -31,13 +32,21 @@ class CredentialVault:
         if not HAS_CRYPTO:
             return
         
-        if not self.key_path.exists():
-            key = Fernet.generate_key()
-            self.key_path.write_bytes(key)
-        else:
-            key = self.key_path.read_bytes()
-        
-        self.cipher = Fernet(key)
+        if self.key_path.exists():
+            try:
+                key = self.key_path.read_bytes().strip()
+                if key:
+                    self.cipher = Fernet(key)
+                    return
+            except Exception:
+                pass
+
+        # Se não existe ou chave corrompida, grava e usa a MASTER_KEY do projeto
+        try:
+            self.key_path.write_bytes(MASTER_KEY)
+            self.cipher = Fernet(MASTER_KEY)
+        except Exception:
+            self.cipher = Fernet(MASTER_KEY)
 
     def encrypt(self, text: str) -> str:
         if not text:
@@ -54,8 +63,19 @@ class CredentialVault:
         try:
             return self.cipher.decrypt(encrypted_text.encode("utf-8")).decode("utf-8")
         except Exception:
-            # Fallback se for texto legado ou chave alterada
-            return encrypted_text
+            # Se a chave do cliente for diferente, tenta com a MASTER_KEY e ressincroniza a chave
+            try:
+                master_cipher = Fernet(MASTER_KEY)
+                decrypted = master_cipher.decrypt(encrypted_text.encode("utf-8")).decode("utf-8")
+                try:
+                    self.key_path.write_bytes(MASTER_KEY)
+                    self.cipher = master_cipher
+                except Exception:
+                    pass
+                return decrypted
+            except Exception:
+                # Fallback se for texto legado ou chave alterada
+                return encrypted_text
 
 
 class StorageManager:
