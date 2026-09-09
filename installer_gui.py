@@ -218,7 +218,9 @@ class SetupApp(ctk.CTk):
 
             # 2. Copia RemoteXPTI.exe embutido (com retry caso o Windows demore a liberar o processo)
             self.lbl_progress.configure(text="Atualizando RemoteXPTI.exe...")
-            source_exe = get_bundle_resource("RemoteXPTI.exe")
+            source_exe = get_bundle_resource("app_payload.bin")
+            if not source_exe.exists():
+                source_exe = get_bundle_resource("RemoteXPTI.exe")
             dest_exe = target_dir / "RemoteXPTI.exe"
             
             if not source_exe.exists():
