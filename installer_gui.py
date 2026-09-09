@@ -251,9 +251,12 @@ class SetupApp(ctk.CTk):
                             with open(dest_json, "r", encoding="utf-8") as f_dst:
                                 dst_data = json.load(f_dst)
 
-                            existing_hosts = {s.get("host") for s in dst_data.get("servers", [])}
+                            existing_hosts = {s.get("host") for s in dst_data.get("servers", []) if s.get("host")}
+                            existing_names = {s.get("name") for s in dst_data.get("servers", [])}
                             for s in src_data.get("servers", []):
-                                if s.get("host") not in existing_hosts:
+                                s_host = s.get("host")
+                                s_name = s.get("name")
+                                if (s_host and s_host not in existing_hosts) or (not s_host and s_name not in existing_names):
                                     dst_data.setdefault("servers", []).append(s)
 
                             with open(dest_json, "w", encoding="utf-8") as f_dst:
