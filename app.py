@@ -1,4 +1,7 @@
+import os
 import sys
+import ctypes
+import subprocess
 from pathlib import Path
 import customtkinter as ctk
 import tkinter as tk
@@ -145,6 +148,62 @@ def get_resource_path(relative_path: str) -> Path:
             return p
     return Path(__file__).parent.resolve() / relative_path
 
+def sync_windows_shortcuts_icon():
+    """
+    Garante que os atalhos existentes na Área de Trabalho e Menu Iniciar
+    usem o ícone oficial moderno (squircle escuro arredondado com o X estilizado),
+    notificando o Windows Shell para atualizar a exibição imediatamente.
+    """
+    if sys.platform != "win32":
+        return
+
+    try:
+        current_exe = Path(sys.executable).resolve()
+        app_dir = current_exe.parent
+        icon_file = app_dir / "imagens" / "app_icon.ico"
+        if not icon_file.exists():
+            icon_file = app_dir / "imagens" / "icon.ico"
+        if not icon_file.exists():
+            icon_file = current_exe
+
+        userprofile = Path(os.environ.get("USERPROFILE", str(Path.home())))
+        appdata = Path(os.environ.get("APPDATA", ""))
+
+        candidates = [
+            userprofile / "Desktop" / "RemoteXPTI.lnk",
+            userprofile / "OneDrive" / "Desktop" / "RemoteXPTI.lnk",
+            userprofile / "OneDrive" / "Área de Trabalho" / "RemoteXPTI.lnk",
+            userprofile / "Área de Trabalho" / "RemoteXPTI.lnk",
+            appdata / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "RemoteXPTI.lnk"
+        ]
+
+        found_any = False
+        ps_lines = ["$w = New-Object -ComObject WScript.Shell"]
+        for sc in candidates:
+            if sc.exists():
+                found_any = True
+                ps_lines.append(f"""
+                $s = $w.CreateShortcut('{str(sc)}')
+                $s.TargetPath = '{str(current_exe)}'
+                $s.WorkingDirectory = '{str(app_dir)}'
+                $s.IconLocation = '{str(icon_file)},0'
+                $s.Save()
+                """)
+
+        if found_any:
+            ps_script = "\n".join(ps_lines)
+            creation_flags = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
+            subprocess.run(
+                ["powershell.exe", "-NoProfile", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass", "-Command", ps_script],
+                capture_output=True,
+                creationflags=creation_flags
+            )
+            # Notifica o Explorer para recarregar o cache de ícones
+            ctypes.windll.shell32.SHChangeNotify(0x08000000, 0x0000, None, None)
+    except Exception:
+        pass
+
+
 class RemoteXPTIApp(ctk.CTk):
     """Janela principal da aplicação RemoteXPTI."""
 
@@ -170,6 +229,9 @@ class RemoteXPTIApp(ctk.CTk):
                 self.wm_iconphoto(True, self._app_icon_photo)
             except Exception:
                 pass
+
+        # Sincroniza atalhos da Área de Trabalho e Menu Iniciar com o novo ícone oficial
+        threading.Thread(target=sync_windows_shortcuts_icon, daemon=True).start()
 
         self.storage = StorageManager()
         self.card_widgets: Dict[str, ServerCard] = {}

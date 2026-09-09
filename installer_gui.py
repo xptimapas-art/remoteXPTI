@@ -7,6 +7,7 @@ import subprocess
 from pathlib import Path
 from PIL import Image
 import customtkinter as ctk
+from typing import Optional
 from version import CURRENT_VERSION
 
 ctk.set_appearance_mode("Dark")
@@ -24,20 +25,22 @@ def get_bundle_resource(filename: str) -> Path:
                 return base_path / "dist" / filename
     return base_path / filename
 
-def create_windows_shortcut(target: Path, shortcut_dest: Path, description: str = ""):
-    """Cria atalho .lnk no Windows com o ícone do próprio aplicativo."""
+def create_windows_shortcut(target: Path, shortcut_dest: Path, description: str = "", icon_path: Optional[Path] = None):
+    """Cria atalho .lnk no Windows com o ícone oficial estilizado (squircle escuro + X)."""
+    if not icon_path or not icon_path.exists():
+        icon_path = target
     script = f"""
     $WshShell = New-Object -ComObject WScript.Shell
     $Shortcut = $WshShell.CreateShortcut('{str(shortcut_dest)}')
     $Shortcut.TargetPath = '{str(target)}'
     $Shortcut.WorkingDirectory = '{str(target.parent)}'
     $Shortcut.Description = '{description}'
-    $Shortcut.IconLocation = '{str(target)},0'
+    $Shortcut.IconLocation = '{str(icon_path)},0'
     $Shortcut.Save()
     """
     creation_flags = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
     subprocess.run(
-        ["powershell", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass", "-Command", script],
+        ["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass", "-Command", script],
         capture_output=True,
         creationflags=creation_flags
     )
@@ -312,6 +315,11 @@ class SetupApp(ctk.CTk):
             # 4. Cria atalhos
             self.lbl_progress.configure(text="Criando atalhos no Windows...")
             
+            dest_ico = dest_imagens / "app_icon.ico"
+            if not dest_ico.exists():
+                dest_ico = dest_imagens / "icon.ico"
+            shortcut_icon = dest_ico if dest_ico.exists() else dest_exe
+
             # Atalho Desktop
             if self.chk_desktop.get():
                 userprofile = Path(os.environ.get("USERPROFILE", str(Path.home())))
@@ -323,7 +331,7 @@ class SetupApp(ctk.CTk):
                 ]
                 for d in desktop_candidates:
                     if d.exists() and d.is_dir():
-                        create_windows_shortcut(dest_exe, d / "RemoteXPTI.lnk", "RemoteXPTI - RDP Quick Launcher")
+                        create_windows_shortcut(dest_exe, d / "RemoteXPTI.lnk", "RemoteXPTI - RDP Quick Launcher", shortcut_icon)
                         break
 
             # Atalho Menu Iniciar
@@ -331,7 +339,13 @@ class SetupApp(ctk.CTk):
                 appdata = os.environ.get("APPDATA", "")
                 start_menu = Path(appdata) / "Microsoft" / "Windows" / "Start Menu" / "Programs"
                 if start_menu.exists():
-                    create_windows_shortcut(dest_exe, start_menu / "RemoteXPTI.lnk", "RemoteXPTI - RDP Quick Launcher")
+                    create_windows_shortcut(dest_exe, start_menu / "RemoteXPTI.lnk", "RemoteXPTI - RDP Quick Launcher", shortcut_icon)
+
+            try:
+                import ctypes
+                ctypes.windll.shell32.SHChangeNotify(0x08000000, 0x0000, None, None)
+            except Exception:
+                pass
 
             time.sleep(0.4)
 
