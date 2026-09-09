@@ -19,13 +19,11 @@ from uninstaller import Uninstaller
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
 
-CARD_WIDTH = 250
-CARD_HEIGHT = 245
-THUMB_WIDTH = 230
-THUMB_HEIGHT = 130
+CARD_WIDTH = 240
+CARD_HEIGHT = 160
 
 class ServerCard(ctk.CTkFrame):
-    """Componente de Card individual limpo, compacto e minimalista estilo AnyDesk."""
+    """Componente de Card 100% no padrão visual e interativo do AnyDesk."""
 
     def __init__(
         self,
@@ -39,179 +37,112 @@ class ServerCard(ctk.CTkFrame):
             parent,
             width=CARD_WIDTH,
             height=CARD_HEIGHT,
-            corner_radius=10,
-            fg_color=("#e6e8ec", "#1f2026"),
+            corner_radius=4,
+            fg_color="#181a20",
             border_width=1,
-            border_color=("#d0d4dc", "#2c2d36")
+            border_color=("#363a48", "#242630"),
+            cursor="hand2"
         )
         self.server = server
         self.on_connect = on_connect
         self.on_edit = on_edit
+        self.is_online = initial_status[0] if initial_status is not None else None
+        self.is_fav = bool(server.get("favorite", False))
 
         self.pack_propagate(False)
         self.grid_propagate(False)
 
-        self._build_ui(initial_status)
+        self._build_ui()
         self._bind_events()
 
-    def _build_ui(self, initial_status: Optional[Tuple[bool, str]]):
-        # 1. Linha Superior: Status (Esquerda) e Engrenagem + Grupo (Direita)
-        top_row = ctk.CTkFrame(self, fg_color="transparent", height=26)
-        top_row.pack(fill="x", padx=10, pady=(8, 4))
-
-        # Status inicial baseado no cache (não volta para 'Checando' se já conhecido)
-        if initial_status is not None:
-            is_online, _ = initial_status
-            status_text = "🟢 Online" if is_online else "🔴 Offline"
-            status_color = "#00cc66" if is_online else "#ff4d4d"
-        else:
-            status_text = "⚪ Checando..."
-            status_color = "#888888"
-
-        self.lbl_status = ctk.CTkLabel(
-            top_row,
-            text=status_text,
-            font=ctk.CTkFont(size=10, weight="bold"),
-            text_color=status_color
+    def _build_ui(self):
+        # 1. Imagem de fundo completa estilo AnyDesk
+        self.current_img = PreviewManager.get_card_ctk(
+            server_id=self.server["id"],
+            name=self.server.get("name", "Servidor"),
+            host=self.server.get("host", "0.0.0.0"),
+            is_online=self.is_online,
+            width=CARD_WIDTH,
+            height=CARD_HEIGHT,
+            is_fav=self.is_fav
         )
-        self.lbl_status.pack(side="left")
-
-        # Badge do Grupo (Pill)
-        group_name = self.server.get("group", "Geral")
-        lbl_group = ctk.CTkLabel(
-            top_row,
-            text=f" {group_name} ",
-            font=ctk.CTkFont(size=9, weight="bold"),
-            fg_color=("#cfd4de", "#2a2c36"),
-            text_color=("gray20", "#b0b4c2"),
-            corner_radius=4
+        self.lbl_card = ctk.CTkLabel(
+            self,
+            text="",
+            image=self.current_img,
+            width=CARD_WIDTH,
+            height=CARD_HEIGHT,
+            cursor="hand2"
         )
-        lbl_group.pack(side="right")
+        self.lbl_card.place(x=0, y=0)
 
-        # Botão de Engrenagem (Único botão de configurações/edição)
-        self.btn_edit = ctk.CTkButton(
-            top_row,
-            text="⚙️",
-            width=26,
-            height=24,
-            fg_color=("#d6dae2", "#2e303b"),
-            hover_color=("#c2c7d2", "#3a3c4a"),
-            text_color=("gray10", "#ffffff"),
-            font=ctk.CTkFont(size=11),
+        # 2. Botão invisível sobre os 3 pontos para abrir opções/edição
+        self.btn_dots = ctk.CTkButton(
+            self,
+            text="",
+            width=28,
+            height=34,
+            fg_color="transparent",
+            hover_color=("#3c4050", "#22242e"),
+            corner_radius=4,
+            cursor="hand2",
             command=lambda: self.on_edit(self.server)
         )
-        self.btn_edit.pack(side="right", padx=(0, 6))
+        self.btn_dots.place(x=CARD_WIDTH - 30, y=CARD_HEIGHT - 38)
 
-        # 2. Miniatura / Preview de Tela (16:9 ajustado)
-        self.preview_container = ctk.CTkFrame(
+        # 3. Botão invisível sobre a estrela de favoritos
+        self.btn_star = ctk.CTkButton(
             self,
-            width=THUMB_WIDTH,
-            height=THUMB_HEIGHT,
-            corner_radius=6,
-            fg_color=("#d2d6df", "#14151a"),
-            cursor="hand2"
-        )
-        self.preview_container.pack(padx=10, pady=(0, 4))
-        self.preview_container.pack_propagate(False)
-
-        self.current_thumb_img = PreviewManager.get_thumbnail_ctk(
-            self.server["id"],
-            self.server.get("name", ""),
-            self.server.get("host", ""),
-            width=THUMB_WIDTH,
-            height=THUMB_HEIGHT
-        )
-        self.lbl_preview = ctk.CTkLabel(
-            self.preview_container,
             text="",
-            image=self.current_thumb_img,
-            cursor="hand2"
+            width=28,
+            height=28,
+            fg_color="transparent",
+            hover_color=("#3c4050", "#22242e"),
+            corner_radius=4,
+            cursor="hand2",
+            command=self._toggle_favorite
         )
-        self.lbl_preview.pack(fill="both", expand=True)
-
-        # 3. Informações do Servidor
-        self.content_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self.content_frame.pack(fill="x", padx=12, pady=(1, 6))
-
-        # Nome em destaque
-        name_text = self.server.get("name", "Servidor Sem Nome")
-        if len(name_text) > 22:
-            name_text = name_text[:20] + "..."
-        self.lbl_name = ctk.CTkLabel(
-            self.content_frame,
-            text=name_text,
-            font=ctk.CTkFont(size=13, weight="bold"),
-            text_color=("gray10", "#ffffff"),
-            anchor="w"
-        )
-        self.lbl_name.pack(fill="x")
-
-        # IP e Porta
-        host = self.server.get("host", "0.0.0.0")
-        port = self.server.get("port", 3389)
-        self.display_host = f"{host}:{port}" if port and port != 3389 else host
-        self.lbl_host = ctk.CTkLabel(
-            self.content_frame,
-            text=f"🌐 {self.display_host}",
-            font=ctk.CTkFont(size=11),
-            text_color=("gray30", "#8e92a0"),
-            anchor="w"
-        )
-        self.lbl_host.pack(fill="x")
-
-        # Usuário
-        user = self.server.get("username", "")
-        display_user = f"👤 {user}" if user else "👤 (Padrão)"
-        self.lbl_user = ctk.CTkLabel(
-            self.content_frame,
-            text=display_user,
-            font=ctk.CTkFont(size=10),
-            text_color=("gray40", "#767986"),
-            anchor="w"
-        )
-        self.lbl_user.pack(fill="x")
+        self.btn_star.place(x=CARD_WIDTH - 30, y=4)
 
     def _bind_events(self):
-        # Todo o card vira um botão de conexão (com cursor de mão e efeito hover sutil)
-        clickable_widgets = [
-            self,
-            self.preview_container,
-            self.lbl_preview,
-            self.content_frame,
-            self.lbl_name,
-            self.lbl_host,
-            self.lbl_user
-        ]
-
-        for w in clickable_widgets:
-            w.configure(cursor="hand2")
+        clickable = [self, self.lbl_card]
+        for w in clickable:
             w.bind("<Button-1>", lambda e: self.on_connect(self.server))
+            w.bind("<Button-3>", lambda e: self.on_edit(self.server))
             w.bind("<Enter>", lambda e: self._set_hover(True))
             w.bind("<Leave>", lambda e: self._set_hover(False))
 
     def _set_hover(self, is_hover: bool):
         if is_hover:
-            self.configure(border_color="#0066cc", fg_color=("#dfe4ec", "#262832"))
+            self.configure(border_color="#0078d7", border_width=2)
         else:
-            self.configure(border_color=("#d0d4dc", "#2c2d36"), fg_color=("#e6e8ec", "#1f2026"))
+            self.configure(border_color=("#363a48", "#242630"), border_width=1)
+
+    def _toggle_favorite(self):
+        self.is_fav = not self.is_fav
+        self.server["favorite"] = self.is_fav
+        top = self.winfo_toplevel()
+        if hasattr(top, "storage"):
+            top.storage.update_server(self.server["id"], {"favorite": self.is_fav})
+        self.reload_thumbnail()
 
     def update_status(self, is_online: bool, message: str = ""):
         """Atualiza o status sem piscar ou resetar."""
-        if is_online:
-            self.lbl_status.configure(text="🟢 Online", text_color="#00cc66")
-        else:
-            self.lbl_status.configure(text="🔴 Offline", text_color="#ff4d4d")
+        self.is_online = is_online
+        self.reload_thumbnail()
 
     def reload_thumbnail(self):
-        """Atualiza a imagem do preview na tela."""
-        self.current_thumb_img = PreviewManager.get_thumbnail_ctk(
-            self.server["id"],
-            self.server.get("name", ""),
-            self.server.get("host", ""),
-            width=THUMB_WIDTH,
-            height=THUMB_HEIGHT
+        """Atualiza a imagem do card na tela."""
+        self.current_img = PreviewManager.get_card_ctk(
+            server_id=self.server["id"],
+            name=self.server.get("name", "Servidor"),
+            host=self.server.get("host", "0.0.0.0"),
+            is_online=self.is_online,
+            width=CARD_WIDTH,
+            height=CARD_HEIGHT,
+            is_fav=self.is_fav
         )
-        self.lbl_preview.configure(image=self.current_thumb_img)
+        self.lbl_card.configure(image=self.current_img)
 
 
 def get_resource_path(relative_path: str) -> Path:
