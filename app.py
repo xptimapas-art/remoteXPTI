@@ -11,7 +11,7 @@ from PIL import Image
 from storage import StorageManager
 from rdp_manager import RDPManager
 from preview_manager import PreviewManager
-from dialogs import ServerDialog, ConfirmDialog, UpdateMenuDialog
+from dialogs import ServerDialog, ConfirmDialog, SettingsDialog
 from version import CURRENT_VERSION
 from updater import SilentAutoUpdater
 from uninstaller import Uninstaller
@@ -372,6 +372,20 @@ class RemoteXPTIApp(ctk.CTk):
         )
         self.btn_add.pack(side="left")
 
+        # Botão Engrenagem de Configurações Gerais
+        self.btn_settings = ctk.CTkButton(
+            actions_box,
+            text="⚙️",
+            width=36,
+            height=34,
+            fg_color=("#dce0e8", "#262832"),
+            text_color=("gray10", "#ffffff"),
+            hover_color=("#ccd2dc", "#343644"),
+            font=ctk.CTkFont(size=14),
+            command=self.open_settings_dialog
+        )
+        self.btn_settings.pack(side="left", padx=(8, 0))
+
     def _build_main_view(self):
         self.scroll_frame = ctk.CTkScrollableFrame(self, fg_color="transparent")
         self.scroll_frame.pack(fill="both", expand=True, padx=12, pady=10)
@@ -405,7 +419,7 @@ class RemoteXPTIApp(ctk.CTk):
         )
         self.lbl_server_count.pack(side="right", padx=(0, 16))
 
-        # Indicador de versão discreto no rodapé (clique abre menu de atualização e opções)
+        # Indicador de versão discreto no rodapé (clique abre configurações/atualizações)
         self.lbl_version_btn = ctk.CTkButton(
             self.status_bar,
             text=f"v{CURRENT_VERSION}",
@@ -414,18 +428,39 @@ class RemoteXPTIApp(ctk.CTk):
             fg_color="transparent",
             hover_color=("#d6dae4", "#20232e"),
             text_color=("gray35", "#8e92a0"),
-            command=self.open_version_menu
+            command=self.open_settings_dialog
         )
         self.lbl_version_btn.pack(side="right", padx=(0, 12))
 
-    def open_version_menu(self):
-        """Abre o menu discreto de opções e atualizações ao clicar na versão."""
-        UpdateMenuDialog(
-            self,
-            CURRENT_VERSION,
-            self.check_for_updates_manual,
-            self.confirm_uninstall_app
+    def open_settings_dialog(self):
+        """Abre a janela modal de configurações e preferências do sistema."""
+        SettingsDialog(
+            parent=self,
+            current_version=CURRENT_VERSION,
+            on_check_updates=self.check_for_updates_manual,
+            on_clean_thumbnails=self._clean_thumbnails_cache,
+            on_clean_credentials=self._clean_credentials_manual,
+            on_uninstall=self.confirm_uninstall_app
         )
+
+    def open_version_menu(self):
+        self.open_settings_dialog()
+
+    def _clean_thumbnails_cache(self):
+        PreviewManager.invalidate_cache()
+        t_dir = PreviewManager.get_thumbnail_path("dummy").parent
+        if t_dir.exists():
+            for f in t_dir.glob("*.png"):
+                try:
+                    f.unlink()
+                except Exception:
+                    pass
+        self.refresh_servers()
+        self.set_message("Cache de miniaturas limpo com sucesso!")
+
+    def _clean_credentials_manual(self):
+        Uninstaller.cleanup_windows_credentials()
+        self.set_message("Credenciais do Windows (TERMSRV) limpas com sucesso!")
 
     def check_for_updates_manual(self):
         self.set_message("🔍 Verificando atualizações no GitHub...")

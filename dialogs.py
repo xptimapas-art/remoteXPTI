@@ -451,71 +451,169 @@ class ConfirmDialog(ctk.CTkToplevel):
         btn_yes.pack(side="right")
 
 
-class UpdateMenuDialog(ctk.CTkToplevel):
-    """Menu modal discreto para checagem de atualizações e opções do sistema."""
+class SettingsDialog(ctk.CTkToplevel):
+    """Janela modal de Configurações Gerais e Manutenção do RemoteXPTI."""
+
     def __init__(
         self,
         parent,
         current_version: str,
         on_check_updates: Callable[[], None],
-        on_uninstall: Callable[[], None]
+        on_clean_thumbnails: Optional[Callable[[], None]] = None,
+        on_clean_credentials: Optional[Callable[[], None]] = None,
+        on_uninstall: Optional[Callable[[], None]] = None
     ):
         super().__init__(parent)
-        self.title("Opções e Atualizações")
-        self.geometry("380x270")
+        self.title("Configurações - RemoteXPTI")
+        self.geometry("450x520")
+        self.minsize(420, 480)
         self.resizable(False, False)
         self.transient(parent)
         self.grab_set()
 
-        frame = ctk.CTkFrame(self, corner_radius=12, fg_color=("gray92", "#1e1e24"))
-        frame.pack(fill="both", expand=True, padx=16, pady=16)
+        main_frame = ctk.CTkFrame(self, corner_radius=12, fg_color=("gray92", "#18191f"))
+        main_frame.pack(fill="both", expand=True, padx=14, pady=14)
 
+        # 1. Cabeçalho
         lbl_title = ctk.CTkLabel(
-            frame,
-            text=f"⚡ RemoteXPTI v{current_version}",
-            font=ctk.CTkFont(size=16, weight="bold"),
+            main_frame,
+            text="⚙️ Configurações do Sistema",
+            font=ctk.CTkFont(size=17, weight="bold"),
             text_color=("gray10", "#ffffff")
         )
-        lbl_title.pack(pady=(16, 2))
+        lbl_title.pack(anchor="w", padx=16, pady=(14, 2))
 
         lbl_sub = ctk.CTkLabel(
-            frame,
-            text="RDP Quick Launcher • Atualizações Automáticas",
+            main_frame,
+            text=f"RemoteXPTI v{current_version} • Gestão de Preferências e Manutenção",
             font=ctk.CTkFont(size=11),
             text_color=("gray40", "#8e92a0")
         )
-        lbl_sub.pack(pady=(0, 16))
+        lbl_sub.pack(anchor="w", padx=16, pady=(0, 10))
+
+        # 2. Container de Seções
+        scroll = ctk.CTkScrollableFrame(main_frame, fg_color="transparent")
+        scroll.pack(fill="both", expand=True, padx=8, pady=(0, 10))
+
+        # --- SEÇÃO 1: Atualizações ---
+        card_update = ctk.CTkFrame(scroll, corner_radius=8, fg_color=("gray86", "#21232b"))
+        card_update.pack(fill="x", padx=4, pady=6)
+
+        ctk.CTkLabel(
+            card_update,
+            text="🔄 Atualizações de Software",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color=("gray15", "#e0e4ee")
+        ).pack(anchor="w", padx=14, pady=(10, 2))
+
+        ctk.CTkLabel(
+            card_update,
+            text=f"Versão atual instalada: v{current_version}\nO app checa e baixa novas versões automaticamente em segundo plano.",
+            font=ctk.CTkFont(size=10),
+            text_color=("gray40", "#8e92a0"),
+            justify="left"
+        ).pack(anchor="w", padx=14, pady=(0, 8))
 
         btn_check = ctk.CTkButton(
-            frame,
-            text="🔍 Buscar Atualizações Agora",
-            height=34,
+            card_update,
+            text="🔍 Verificar Atualizações no GitHub",
+            height=32,
             fg_color="#0066cc",
             hover_color="#0052a3",
-            font=ctk.CTkFont(size=12, weight="bold"),
+            font=ctk.CTkFont(size=11, weight="bold"),
             command=lambda: (self.destroy(), on_check_updates())
         )
-        btn_check.pack(fill="x", padx=24, pady=4)
+        btn_check.pack(fill="x", padx=14, pady=(0, 12))
 
-        btn_uninst = ctk.CTkButton(
-            frame,
-            text="🗑️ Desinstalar RemoteXPTI por Completo",
-            height=34,
-            fg_color=("#ffdddd", "#381a1e"),
-            hover_color=("#ffc2c2", "#522228"),
-            text_color=("#cc0000", "#ff6b6b"),
-            font=ctk.CTkFont(size=11, weight="bold"),
-            command=lambda: (self.destroy(), on_uninstall())
-        )
-        btn_uninst.pack(fill="x", padx=24, pady=4)
+        # --- SEÇÃO 2: Manutenção e Limpeza ---
+        card_maint = ctk.CTkFrame(scroll, corner_radius=8, fg_color=("gray86", "#21232b"))
+        card_maint.pack(fill="x", padx=4, pady=6)
 
+        ctk.CTkLabel(
+            card_maint,
+            text="🧹 Manutenção e Diagnóstico",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color=("gray15", "#e0e4ee")
+        ).pack(anchor="w", padx=14, pady=(10, 2))
+
+        ctk.CTkLabel(
+            card_maint,
+            text="Ferramentas para limpar cache de imagens e redefinir credenciais salvas.",
+            font=ctk.CTkFont(size=10),
+            text_color=("gray40", "#8e92a0"),
+            justify="left"
+        ).pack(anchor="w", padx=14, pady=(0, 8))
+
+        if on_clean_thumbnails:
+            btn_clean_thumbs = ctk.CTkButton(
+                card_maint,
+                text="🖼️ Limpar Cache de Miniaturas",
+                height=30,
+                fg_color=("#d6dae2", "#2e303b"),
+                hover_color=("#c4c8d2", "#3b3d4a"),
+                text_color=("gray10", "#ffffff"),
+                font=ctk.CTkFont(size=11),
+                command=lambda: (self.destroy(), on_clean_thumbnails())
+            )
+            btn_clean_thumbs.pack(fill="x", padx=14, pady=(0, 6))
+
+        if on_clean_credentials:
+            btn_clean_creds = ctk.CTkButton(
+                card_maint,
+                text="🔐 Limpar Credenciais do Windows (TERMSRV)",
+                height=30,
+                fg_color=("#d6dae2", "#2e303b"),
+                hover_color=("#c4c8d2", "#3b3d4a"),
+                text_color=("gray10", "#ffffff"),
+                font=ctk.CTkFont(size=11),
+                command=lambda: (self.destroy(), on_clean_credentials())
+            )
+            btn_clean_creds.pack(fill="x", padx=14, pady=(0, 12))
+
+        # --- SEÇÃO 3: Desinstalação ---
+        if on_uninstall:
+            card_uninst = ctk.CTkFrame(scroll, corner_radius=8, fg_color=("gray86", "#21232b"))
+            card_uninst.pack(fill="x", padx=4, pady=6)
+
+            ctk.CTkLabel(
+                card_uninst,
+                text="🗑️ Desinstalação do Aplicativo",
+                font=ctk.CTkFont(size=12, weight="bold"),
+                text_color=("gray15", "#e0e4ee")
+            ).pack(anchor="w", padx=14, pady=(10, 2))
+
+            ctk.CTkLabel(
+                card_uninst,
+                text="Remove integralmente o RemoteXPTI, arquivos, atalhos e credenciais salvas.",
+                font=ctk.CTkFont(size=10),
+                text_color=("gray40", "#8e92a0"),
+                justify="left"
+            ).pack(anchor="w", padx=14, pady=(0, 8))
+
+            btn_uninst = ctk.CTkButton(
+                card_uninst,
+                text="Desinstalar RemoteXPTI por Completo...",
+                height=32,
+                fg_color=("#ffdddd", "#381a1e"),
+                hover_color=("#ffc2c2", "#522228"),
+                text_color=("#cc0000", "#ff6b6b"),
+                font=ctk.CTkFont(size=11, weight="bold"),
+                command=lambda: (self.destroy(), on_uninstall())
+            )
+            btn_uninst.pack(fill="x", padx=14, pady=(0, 12))
+
+        # 3. Rodapé
         btn_close = ctk.CTkButton(
-            frame,
+            main_frame,
             text="Fechar",
-            height=30,
-            fg_color=("gray75", "#2e303b"),
-            hover_color=("gray65", "#3a3c4a"),
+            height=32,
+            fg_color=("gray75", "#282a33"),
+            hover_color=("gray65", "#353742"),
             text_color=("gray10", "#ffffff"),
             command=self.destroy
         )
-        btn_close.pack(fill="x", padx=24, pady=(12, 16))
+        btn_close.pack(fill="x", padx=12, pady=(0, 6))
+
+
+# Alias de compatibilidade
+UpdateMenuDialog = SettingsDialog
