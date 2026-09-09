@@ -53,6 +53,8 @@ class RDPManager:
     def set_windows_credential(host: str, port: int, username: str, password: str) -> Tuple[bool, str]:
         """
         Injeta a credencial no Windows Credential Manager usando cmdkey.
+        Registra tanto como Senha do Domínio (/add:) para NLA/CredSSP
+        quanto como Genérico (/generic:) para compatibilidade total.
         """
         if not RDPManager.is_windows():
             return False, "Sistema operacional não é Windows"
@@ -65,26 +67,47 @@ class RDPManager:
         if port and port != 3389:
             targets.append(f"TERMSRV/{clean_host}:{port}")
 
-        creation_flags = 0
-        if hasattr(subprocess, "CREATE_NO_WINDOW"):
-            creation_flags = subprocess.CREATE_NO_WINDOW
+        creation_flags = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
 
         success = True
         err_msgs = []
 
+        safe_user = username.replace('"', '')
+        safe_pass = password.replace('"', '')
+
         for target in targets:
             try:
-                # cmdkey /generic:TERMSRV/<host> /user:<user> /pass:<pass>
-                cmd = ["cmdkey", f"/generic:{target}", f"/user:{username}", f"/pass:{password}"]
-                res = subprocess.run(
-                    cmd,
+                # 1. Limpa credencial antiga para evitar conflitos de cache
+                subprocess.run(
+                    f'cmdkey /delete:{target}',
+                    shell=True,
+                    capture_output=True,
+                    creationflags=creation_flags
+                )
+
+                # 2. Registra como Senha do Domínio (/add:) - Requisito fundamental do NLA/CredSSP do mstsc
+                cmd_add = f'cmdkey /add:{target} /user:"{safe_user}" /pass:"{safe_pass}"'
+                res_add = subprocess.run(
+                    cmd_add,
+                    shell=True,
                     capture_output=True,
                     text=True,
                     creationflags=creation_flags
                 )
-                if res.returncode != 0:
+
+                # 3. Registra também como Genérica (/generic:) para fallbacks de RDP legado
+                cmd_gen = f'cmdkey /generic:{target} /user:"{safe_user}" /pass:"{safe_pass}"'
+                res_gen = subprocess.run(
+                    cmd_gen,
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    creationflags=creation_flags
+                )
+
+                if res_add.returncode != 0 and res_gen.returncode != 0:
                     success = False
-                    err_msgs.append(res.stderr.strip() or res.stdout.strip())
+                    err_msgs.append(res_add.stderr.strip() or res_add.stdout.strip())
             except Exception as e:
                 success = False
                 err_msgs.append(str(e))
@@ -108,11 +131,8 @@ class RDPManager:
 
         for target in targets:
             try:
-                subprocess.run(
-                    ["cmdkey", f"/delete:{target}"],
-                    capture_output=True,
-                    creationflags=creation_flags
-                )
+                subprocess.run(f'cmdkey /delete:{target}', shell=True, capture_output=True, creationflags=creation_flags)
+                subprocess.run(f'cmdkey /delete:{target}', shell=True, capture_output=True, creationflags=creation_flags)
             except Exception:
                 pass
         return True
@@ -161,18 +181,25 @@ class RDPManager:
             f"redirectclipboard:i:1",
             f"redirectprinters:i:1",
             f"autoreconnection enabled:i:1",
-            f"authentication level:i:2",
+            f"authentication level:i:0",
+            f"promptcredentialonce:i:1",
             f"negotiate security layer:i:1",
             f"enablecredsspsupport:i:1"
         ]
+
         if username:
-            rdp_lines.append(f"username:s:{username}")
+            if "\\" in username:
+                dom, usr = username.split("\\", 1)
+                rdp_lines.append(f"domain:s:{dom.strip()}")
+                rdp_lines.append(f"username:s:{usr.strip()}")
+            else:
+                rdp_lines.append(f"username:s:{username.strip()}")
 
         temp_dir = Path(tempfile.gettempdir())
         clean_name = clean_host.replace(".", "_").replace(":", "_")
         rdp_file = temp_dir / f"remotexpti_{clean_name}.rdp"
         try:
-            rdp_file.write_text("\r\n".join(rdp_lines) + "\r\n", encoding="utf-8")
+            rdp_file.write_text("\r\n".join(rdp_lines) + "\r\n", encoding="utf-16")
             cmd = ["mstsc", str(rdp_file)]
         except Exception:
             cmd = ["mstsc", f"/v:{target_v}"]

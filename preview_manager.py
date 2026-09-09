@@ -14,8 +14,18 @@ def get_app_dir() -> Path:
         return Path(sys.executable).parent
     return Path(__file__).parent.resolve()
 
-THUMBNAILS_DIR = get_app_dir() / "thumbnails"
-THUMBNAILS_DIR.mkdir(exist_ok=True)
+def get_thumbnails_dir() -> Path:
+    base = get_app_dir() / "thumbnails"
+    try:
+        base.mkdir(parents=True, exist_ok=True)
+        return base
+    except Exception:
+        import tempfile
+        fallback = Path(tempfile.gettempdir()) / "remotexpti_thumbnails"
+        fallback.mkdir(parents=True, exist_ok=True)
+        return fallback
+
+THUMBNAILS_DIR = get_thumbnails_dir()
 
 class PreviewManager:
     """Gerencia captura, geração e exibição de miniaturas (previews) estilo AnyDesk."""

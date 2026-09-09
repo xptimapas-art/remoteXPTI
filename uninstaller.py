@@ -20,7 +20,9 @@ class Uninstaller:
                 if "TERMSRV/" in line:
                     target = line.split("TERMSRV/")[-1].strip()
                     if target:
-                        subprocess.run(["cmdkey", f"/delete:TERMSRV/{target}"], capture_output=True)
+                        # Executa duas vezes para remover tanto Tipo Senha do Domínio quanto Genérico
+                        subprocess.run(f'cmdkey /delete:TERMSRV/{target}', shell=True, capture_output=True)
+                        subprocess.run(f'cmdkey /delete:TERMSRV/{target}', shell=True, capture_output=True)
         except Exception as e:
             print(f"[Uninstaller] Erro ao limpar credenciais: {e}")
 
@@ -44,11 +46,19 @@ class Uninstaller:
         userprofile = os.environ.get("USERPROFILE", "")
         appdata = os.environ.get("APPDATA", "")
 
-        desktop_shortcut = Path(userprofile) / "Desktop" / "RemoteXPTI.lnk"
+        desktop_candidates = [
+            Path(userprofile) / "Desktop" / "RemoteXPTI.lnk",
+            Path(userprofile) / "OneDrive" / "Desktop" / "RemoteXPTI.lnk",
+            Path(userprofile) / "OneDrive" / "Área de Trabalho" / "RemoteXPTI.lnk",
+            Path(userprofile) / "Área de Trabalho" / "RemoteXPTI.lnk",
+        ]
         start_shortcut = Path(appdata) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "RemoteXPTI.lnk"
 
         temp_dir = Path(tempfile.gettempdir())
         script_path = temp_dir / "remotexpti_uninstall.cmd"
+        vbs_path = temp_dir / "remotexpti_uninst_run.vbs"
+
+        del_desktop_lines = "\n".join(f'del /f /q "{str(p)}" >nul 2>&1' for p in desktop_candidates)
 
         cmd_content = f"""@echo off
 chcp 65001 >nul
@@ -60,13 +70,15 @@ taskkill /f /im "{current_exe.name}" >nul 2>&1
 taskkill /f /im "RemoteXPTI.exe" >nul 2>&1
 
 :: 2. Remove atalhos da Area de Trabalho e Menu Iniciar
-del /f /q "{str(desktop_shortcut)}" >nul 2>&1
+{del_desktop_lines}
 del /f /q "{str(start_shortcut)}" >nul 2>&1
 
-:: 3. Remove perfis temporarios em %TEMP%
+:: 3. Remove perfis temporarios e scripts em %TEMP%
+del /f /q "%TEMP%\\remotexpti_*.rdp" >nul 2>&1
 del /f /q "%TEMP%\\remote_*.rdp" >nul 2>&1
 del /f /q "%TEMP%\\.pending_update*" >nul 2>&1
 del /f /q "%TEMP%\\remotexpti_update.cmd" >nul 2>&1
+del /f /q "%TEMP%\\remotexpti_run.vbs" >nul 2>&1
 
 :: 4. Remove pasta padrao de instalacao se existir
 if exist "{str(default_install_dir)}" (
@@ -85,13 +97,21 @@ rmdir /s /q "{str(app_dir / 'imagens')}" >nul 2>&1
 :: 6. Exibe mensagem de conclusao
 powershell.exe -NoProfile -WindowStyle Hidden -Command "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.MessageBox]::Show('O RemoteXPTI, seus atalhos, configuracoes e credenciais foram completamente desinstalados do computador.', 'RemoteXPTI - Desinstalacao Concluida', [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)"
 
-:: 7. Autoexclui este script
+:: 7. Autoexclui este script e o vbs
+del /f /q "{str(vbs_path)}" >nul 2>&1
 del "%~f0"
 """
         script_path.write_text(cmd_content, encoding="utf-8")
 
-        flags = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
-        subprocess.Popen(["cmd.exe", "/c", str(script_path)], creationflags=flags)
+        vbs_content = f'''Set WshShell = CreateObject("WScript.Shell")
+WshShell.Run "cmd.exe /c """ & "{str(script_path)}" & """", 0, False
+'''
+        vbs_path.write_text(vbs_content, encoding="utf-8")
+
+        try:
+            subprocess.run(["wscript.exe", "//b", "//nologo", str(vbs_path)], timeout=5.0)
+        except Exception:
+            os.startfile(str(script_path))
 
         # Encerra o processo imediatamente
         os._exit(0)

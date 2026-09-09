@@ -261,6 +261,7 @@ class RemoteXPTIApp(ctk.CTk):
         self._resize_timer = None
         self._auto_ping_timer = None
         self._search_debounce_timer = None
+        self._is_checking_status = False
         self._status_executor = ThreadPoolExecutor(max_workers=10)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -637,29 +638,51 @@ class RemoteXPTIApp(ctk.CTk):
         Verifica a conectividade silenciosamente em background.
         NUNCA reseta os badges para 'Checando...' durante a verificação.
         """
+        if getattr(self, "_is_checking_status", False):
+            if is_manual:
+                self.set_message("Verificação de status já em andamento...")
+            return
+
+        self._is_checking_status = True
         if is_manual:
             self.set_message("Verificando status dos servidores...")
 
+        pending = [len(self.storage.servers)]
+
         def check_worker(server_id: str, host: str, port: int):
-            is_online, msg = RDPManager.check_connection(host, port, timeout=1.5)
-            # Salva no cache
-            self.server_status[server_id] = (is_online, msg)
-            
-            # Atualiza o card suavemente apenas quando o resultado chegar
-            def update_card():
-                if server_id in self.card_widgets:
-                    self.card_widgets[server_id].update_status(is_online, msg)
-            self.after(0, update_card)
+            try:
+                is_online, msg = RDPManager.check_connection(host, port, timeout=1.5)
+                # Salva no cache
+                self.server_status[server_id] = (is_online, msg)
+                
+                # Atualiza o card suavemente apenas quando o resultado chegar
+                def update_card():
+                    if server_id in self.card_widgets:
+                        self.card_widgets[server_id].update_status(is_online, msg)
+                self.after(0, update_card)
+            finally:
+                pending[0] -= 1
+                if pending[0] <= 0:
+                    self._is_checking_status = False
 
         if not hasattr(self, "_status_executor") or self._status_executor._shutdown:
             self._status_executor = ThreadPoolExecutor(max_workers=10)
 
-        for server in self.storage.servers:
+        servers_to_check = list(self.storage.servers)
+        if not servers_to_check:
+            self._is_checking_status = False
+            return
+
+        for server in servers_to_check:
             s_id = server["id"]
             s_host = server.get("host", "")
             s_port = int(server.get("port", 3389))
             if s_host:
                 self._status_executor.submit(check_worker, s_id, s_host, s_port)
+            else:
+                pending[0] -= 1
+                if pending[0] <= 0:
+                    self._is_checking_status = False
 
     def _on_manual_refresh(self):
         self.start_status_checker(is_manual=True)

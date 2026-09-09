@@ -312,9 +312,17 @@ class SetupApp(ctk.CTk):
             
             # Atalho Desktop
             if self.chk_desktop.get():
-                desktop = Path(os.environ.get("USERPROFILE", "")) / "Desktop"
-                if desktop.exists():
-                    create_windows_shortcut(dest_exe, desktop / "RemoteXPTI.lnk", "RemoteXPTI - RDP Quick Launcher")
+                userprofile = Path(os.environ.get("USERPROFILE", str(Path.home())))
+                desktop_candidates = [
+                    userprofile / "Desktop",
+                    userprofile / "OneDrive" / "Desktop",
+                    userprofile / "OneDrive" / "Área de Trabalho",
+                    userprofile / "Área de Trabalho"
+                ]
+                for d in desktop_candidates:
+                    if d.exists() and d.is_dir():
+                        create_windows_shortcut(dest_exe, d / "RemoteXPTI.lnk", "RemoteXPTI - RDP Quick Launcher")
+                        break
 
             # Atalho Menu Iniciar
             if self.chk_startmenu.get():

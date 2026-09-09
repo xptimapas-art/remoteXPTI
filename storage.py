@@ -166,7 +166,7 @@ class StorageManager:
             "port": int(data.get("port", 3389)),
             "username": data.get("username", "").strip(),
             "password": self.vault.encrypt(plain_password),
-            "group": (data.get("group") or "Geral").strip(),
+            "group": (data.get("group") or "BEMTEVI").strip(),
             "fullscreen": bool(data.get("fullscreen", True)),
             "admin_mode": bool(data.get("admin_mode", False)),
             "multimon": bool(data.get("multimon", False)),
@@ -190,7 +190,7 @@ class StorageManager:
                 if "password" in data and data["password"] is not None:
                     s["password"] = self.vault.encrypt(data["password"])
                 
-                s["group"] = (data.get("group") or "Geral").strip()
+                s["group"] = (data.get("group") or "BEMTEVI").strip()
                 s["fullscreen"] = bool(data.get("fullscreen", s.get("fullscreen", True)))
                 s["admin_mode"] = bool(data.get("admin_mode", s.get("admin_mode", False)))
                 s["multimon"] = bool(data.get("multimon", s.get("multimon", False)))
