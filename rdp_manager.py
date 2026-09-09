@@ -1,6 +1,8 @@
 import subprocess
 import socket
 import sys
+import tempfile
+from pathlib import Path
 from typing import Tuple, Optional
 
 class RDPManager:
@@ -146,8 +148,35 @@ class RDPManager:
             if not ok:
                 print(f"[Aviso] Falha ao registrar credencial no cmdkey: {msg}")
 
-        # Monta parâmetros do mstsc
-        cmd = ["mstsc", f"/v:{target_v}"]
+        # Monta parâmetros do mstsc usando perfil temporário .rdp
+        # Isso garante que o mstsc saiba EXATAMENTE qual é o usuário solicitado
+        # e desative o prompt de login manual ('prompt for credentials:i:0')
+        rdp_lines = [
+            f"full address:s:{target_v}",
+            f"prompt for credentials:i:0",
+            f"administrative session:i:{1 if admin_mode else 0}",
+            f"screen mode id:i:{2 if fullscreen else 1}",
+            f"use multimon:i:{1 if multimon else 0}",
+            f"audiomode:i:0",
+            f"redirectclipboard:i:1",
+            f"redirectprinters:i:1",
+            f"autoreconnection enabled:i:1",
+            f"authentication level:i:2",
+            f"negotiate security layer:i:1",
+            f"enablecredsspsupport:i:1"
+        ]
+        if username:
+            rdp_lines.append(f"username:s:{username}")
+
+        temp_dir = Path(tempfile.gettempdir())
+        clean_name = clean_host.replace(".", "_").replace(":", "_")
+        rdp_file = temp_dir / f"remotexpti_{clean_name}.rdp"
+        try:
+            rdp_file.write_text("\r\n".join(rdp_lines) + "\r\n", encoding="utf-8")
+            cmd = ["mstsc", str(rdp_file)]
+        except Exception:
+            cmd = ["mstsc", f"/v:{target_v}"]
+
         if fullscreen:
             cmd.append("/f")
         if admin_mode:
