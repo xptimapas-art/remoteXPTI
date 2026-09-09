@@ -306,7 +306,7 @@ class RemoteXPTIApp(ctk.CTk):
             fg_color=("#dce0e8", "#262832"),
             text_color=("gray10", "#ffffff"),
             hover_color=("#ccd2dc", "#343644"),
-            command=lambda: self.start_status_checker(is_manual=True)
+            command=self._on_manual_refresh
         )
         self.btn_refresh.pack(side="left", padx=(0, 8))
 
@@ -565,9 +565,17 @@ class RemoteXPTIApp(ctk.CTk):
             if s_host:
                 threading.Thread(target=check_worker, args=(s_id, s_host, s_port), daemon=True).start()
 
+    def _on_manual_refresh(self):
+        self.start_status_checker(is_manual=True)
+        if hasattr(self, "updater") and self.updater:
+            self.updater.start_background_check()
+
     def _schedule_periodic_ping(self):
-        """Verifica os servidores automaticamente a cada 45 segundos em segundo plano."""
+        """Verifica os servidores e checa atualizações em segundo plano."""
         self.start_status_checker(is_manual=False)
+        # Também checa atualizações silenciosamente a cada ciclo
+        if hasattr(self, "updater") and self.updater:
+            self.updater.start_background_check()
         self._auto_ping_timer = self.after(45000, self._schedule_periodic_ping)
 
     def open_add_dialog(self):
