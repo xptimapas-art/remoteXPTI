@@ -241,7 +241,10 @@ class RemoteXPTIApp(ctk.CTk):
         self._schedule_periodic_ping()
         
         # Sistema de atualização silenciosa em background (estilo Antigravity)
-        self.updater = SilentAutoUpdater(on_ready_callback=self._on_update_ready)
+        self.updater = SilentAutoUpdater(
+            on_ready_callback=self._on_update_ready,
+            on_status_callback=self._on_update_status
+        )
         self.update_banner = None
         self.after(3500, self.updater.start_background_check)
 
@@ -310,6 +313,20 @@ class RemoteXPTIApp(ctk.CTk):
         )
         self.btn_refresh.pack(side="left", padx=(0, 8))
 
+        # Botão Buscar Atualizações Manual
+        self.btn_check_updates = ctk.CTkButton(
+            actions_box,
+            text="⚡ Atualizações",
+            width=115,
+            height=34,
+            fg_color=("#dce0e8", "#262832"),
+            text_color=("gray10", "#ffffff"),
+            hover_color=("#ccd2dc", "#343644"),
+            font=ctk.CTkFont(size=11, weight="bold"),
+            command=self.check_for_updates_manual
+        )
+        self.btn_check_updates.pack(side="left", padx=(0, 8))
+
         # Botão + Novo Servidor
         self.btn_add = ctk.CTkButton(
             actions_box,
@@ -355,14 +372,28 @@ class RemoteXPTIApp(ctk.CTk):
         )
         self.lbl_server_count.pack(side="right", padx=(0, 16))
 
-        # Indicador de versão
-        self.lbl_version_btn = ctk.CTkLabel(
+        # Indicador de versão clicável no rodapé
+        self.lbl_version_btn = ctk.CTkButton(
             self.status_bar,
-            text=f"v{CURRENT_VERSION}",
-            font=ctk.CTkFont(size=10),
-            text_color=("gray40", "#8e92a0")
+            text=f"v{CURRENT_VERSION} • ⚡ Buscar Atualizações",
+            height=22,
+            font=ctk.CTkFont(size=10, weight="bold"),
+            fg_color="transparent",
+            hover_color=("#d6dae4", "#20232e"),
+            text_color=("gray35", "#8e92a0"),
+            command=self.check_for_updates_manual
         )
         self.lbl_version_btn.pack(side="right", padx=(0, 12))
+
+    def check_for_updates_manual(self):
+        self.set_message("🔍 Verificando atualizações no GitHub...")
+        if hasattr(self, "updater") and self.updater:
+            self.updater.start_background_check(is_manual=True)
+
+    def _on_update_status(self, message: str):
+        def show():
+            self.set_message(message, duration_sec=7)
+        self.after(0, show)
 
     def _on_update_ready(self, new_version: str):
         """Chamado automaticamente quando a nova versão terminou de baixar em segundo plano."""
@@ -378,8 +409,18 @@ class RemoteXPTIApp(ctk.CTk):
 
             self.lbl_version_btn.configure(
                 text=f"🔄 Reiniciar para v{new_version}",
-                text_color="#00a8ff"
+                fg_color="#0066cc",
+                hover_color="#0052a3",
+                text_color="#ffffff",
+                command=self.updater.apply_update_and_restart
             )
+            if hasattr(self, "btn_check_updates"):
+                self.btn_check_updates.configure(
+                    text="🔄 Reiniciar",
+                    fg_color="#00a8ff",
+                    hover_color="#0088cc",
+                    command=self.updater.apply_update_and_restart
+                )
             self.set_message(f"🚀 Versão {new_version} pronta para instalar! Reinicie o app para aplicar.", duration_sec=10)
         self.after(0, show)
 

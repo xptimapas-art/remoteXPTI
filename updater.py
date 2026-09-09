@@ -32,23 +32,47 @@ class SilentAutoUpdater:
     4. Ao reiniciar, substitui o executável e abre o novo aplicativo.
     """
 
-    def __init__(self, on_ready_callback: Optional[Callable[[str], None]] = None):
+    def __init__(
+        self,
+        on_ready_callback: Optional[Callable[[str], None]] = None,
+        on_status_callback: Optional[Callable[[str], None]] = None
+    ):
         self.on_ready_callback = on_ready_callback
+        self.on_status_callback = on_status_callback
         self.is_checking = False
         self.is_downloading = False
         self.update_ready = False
         self.new_version = ""
         self.downloaded_file: Optional[Path] = None
 
-    def start_background_check(self):
+    def notify_status(self, msg: str):
+        if self.on_status_callback:
+            self.on_status_callback(msg)
+
+    def start_background_check(self, is_manual: bool = False):
         """Inicia a verificação e download automático em background."""
-        if self.is_checking or self.is_downloading or self.update_ready:
+        if self.update_ready:
+            if is_manual:
+                self.notify_status(f"🚀 Versão v{self.new_version} já está baixada e pronta!")
             return
 
-        threading.Thread(target=self._worker, daemon=True).start()
+        if self.is_downloading:
+            if is_manual:
+                self.notify_status(f"⬇️ Baixando nova versão v{self.new_version} em segundo plano...")
+            return
 
-    def _worker(self):
+        if self.is_checking:
+            if is_manual:
+                self.notify_status("🔍 Verificação já em andamento...")
+            return
+
+        threading.Thread(target=self._worker, args=(is_manual,), daemon=True).start()
+
+    def _worker(self, is_manual: bool = False):
         self.is_checking = True
+        if is_manual:
+            self.notify_status("🔍 Verificando atualizações no GitHub...")
+
         try:
             api_url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
             req = urllib.request.Request(
@@ -61,6 +85,8 @@ class SilentAutoUpdater:
 
             with urllib.request.urlopen(req, timeout=8.0) as resp:
                 if resp.status != 200:
+                    if is_manual:
+                        self.notify_status("⚠️ Servidor de atualizações indisponível.")
                     return
                 data = json.loads(resp.read().decode("utf-8"))
 
@@ -70,9 +96,13 @@ class SilentAutoUpdater:
 
             if remote_ver <= local_ver:
                 # Já está na versão mais recente
+                if is_manual:
+                    self.notify_status(f"✅ Você já está na versão mais recente (v{CURRENT_VERSION})!")
                 return
 
             self.new_version = tag_name.lstrip("v").lstrip("V")
+            if is_manual:
+                self.notify_status(f"⬇️ Nova versão v{self.new_version} encontrada! Baixando...")
 
             # Localiza o arquivo .exe nos assets
             assets = data.get("assets", [])
@@ -88,6 +118,8 @@ class SilentAutoUpdater:
                 download_url = assets[0].get("browser_download_url", "")
 
             if not download_url:
+                if is_manual:
+                    self.notify_status("⚠️ Arquivo da atualização não encontrado nos lançamentos.")
                 return
 
             # Inicia o download silencioso em segundo plano
@@ -96,6 +128,8 @@ class SilentAutoUpdater:
         except Exception as e:
             # Falhas de rede em background não interrompem o uso do usuário
             print(f"[SilentUpdater] Verificação de atualização: {e}")
+            if is_manual:
+                self.notify_status("⚠️ Não foi possível verificar atualizações no momento.")
         finally:
             self.is_checking = False
 
