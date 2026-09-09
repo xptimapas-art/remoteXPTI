@@ -11,9 +11,9 @@ from PIL import Image
 from storage import StorageManager
 from rdp_manager import RDPManager
 from preview_manager import PreviewManager
-from dialogs import ServerDialog, ConfirmDialog
+from dialogs import ServerDialog, ConfirmDialog, UpdateMenuDialog
 from version import CURRENT_VERSION
-from updater import SilentAutoUpdater, UpdatePromptBanner
+from updater import SilentAutoUpdater
 from uninstaller import Uninstaller
 
 ctk.set_appearance_mode("Dark")
@@ -235,11 +235,19 @@ class RemoteXPTIApp(ctk.CTk):
         self.geometry("1100x720")
         self.minsize(700, 480)
 
-        # Ícone oficial da janela
+        # Ícone oficial da janela e barra de tarefas / bandeja
         icon_path = get_resource_path("imagens/icon.ico")
         if icon_path.exists():
             try:
                 self.iconbitmap(str(icon_path))
+            except Exception:
+                pass
+
+        icon_png_path = get_resource_path("imagens/app_icon.png")
+        if icon_png_path.exists():
+            try:
+                self._app_icon_photo = tk.PhotoImage(file=str(icon_png_path))
+                self.wm_iconphoto(True, self._app_icon_photo)
             except Exception:
                 pass
 
@@ -257,8 +265,6 @@ class RemoteXPTIApp(ctk.CTk):
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
         self._build_header()
-        self.banner_container = ctk.CTkFrame(self, fg_color="transparent")
-        self.banner_container.pack(fill="x", side="top", padx=14, pady=(4, 0))
         self._build_main_view()
         self._build_statusbar()
 
@@ -273,7 +279,6 @@ class RemoteXPTIApp(ctk.CTk):
             on_ready_callback=self._on_update_ready,
             on_status_callback=self._on_update_status
         )
-        self.update_banner = None
         self.after(3500, self.updater.start_background_check)
 
         self.bind("<Configure>", self._on_window_configure)
@@ -354,20 +359,6 @@ class RemoteXPTIApp(ctk.CTk):
         )
         self.btn_refresh.pack(side="left", padx=(0, 8))
 
-        # Botão Buscar Atualizações Manual
-        self.btn_check_updates = ctk.CTkButton(
-            actions_box,
-            text="⚡ Atualizações",
-            width=115,
-            height=34,
-            fg_color=("#dce0e8", "#262832"),
-            text_color=("gray10", "#ffffff"),
-            hover_color=("#ccd2dc", "#343644"),
-            font=ctk.CTkFont(size=11, weight="bold"),
-            command=self.check_for_updates_manual
-        )
-        self.btn_check_updates.pack(side="left", padx=(0, 8))
-
         # Botão + Novo Servidor
         self.btn_add = ctk.CTkButton(
             actions_box,
@@ -378,21 +369,7 @@ class RemoteXPTIApp(ctk.CTk):
             font=ctk.CTkFont(size=12, weight="bold"),
             command=self.open_add_dialog
         )
-        self.btn_add.pack(side="left", padx=(0, 8))
-
-        # Botão Desinstalação Completa
-        self.btn_uninstall = ctk.CTkButton(
-            actions_box,
-            text="🗑️ Desinstalar",
-            width=105,
-            height=34,
-            fg_color=("#ffdddd", "#381a1e"),
-            hover_color=("#ffc2c2", "#522228"),
-            text_color=("#cc0000", "#ff6b6b"),
-            font=ctk.CTkFont(size=11, weight="bold"),
-            command=self.confirm_uninstall_app
-        )
-        self.btn_uninstall.pack(side="left")
+        self.btn_add.pack(side="left")
 
     def _build_main_view(self):
         self.scroll_frame = ctk.CTkScrollableFrame(self, fg_color="transparent")
@@ -427,18 +404,27 @@ class RemoteXPTIApp(ctk.CTk):
         )
         self.lbl_server_count.pack(side="right", padx=(0, 16))
 
-        # Indicador de versão clicável no rodapé
+        # Indicador de versão discreto no rodapé (clique abre menu de atualização e opções)
         self.lbl_version_btn = ctk.CTkButton(
             self.status_bar,
-            text=f"v{CURRENT_VERSION} • ⚡ Buscar Atualizações",
+            text=f"v{CURRENT_VERSION}",
             height=22,
             font=ctk.CTkFont(size=10, weight="bold"),
             fg_color="transparent",
             hover_color=("#d6dae4", "#20232e"),
             text_color=("gray35", "#8e92a0"),
-            command=self.check_for_updates_manual
+            command=self.open_version_menu
         )
         self.lbl_version_btn.pack(side="right", padx=(0, 12))
+
+    def open_version_menu(self):
+        """Abre o menu discreto de opções e atualizações ao clicar na versão."""
+        UpdateMenuDialog(
+            self,
+            CURRENT_VERSION,
+            self.check_for_updates_manual,
+            self.confirm_uninstall_app
+        )
 
     def check_for_updates_manual(self):
         self.set_message("🔍 Verificando atualizações no GitHub...")
@@ -451,41 +437,17 @@ class RemoteXPTIApp(ctk.CTk):
         self.after(0, show)
 
     def _on_update_ready(self, new_version: str):
-        """Chamado automaticamente quando a nova versão terminou de baixar em segundo plano."""
+        """Chamado quando o update terminou de baixar: muda discretamente o botão de versão para Restart."""
         def show():
-            try:
-                if not self.update_banner:
-                    self.update_banner = UpdatePromptBanner(
-                        parent=self.banner_container,
-                        new_version=new_version,
-                        on_restart_command=self.updater.apply_update_and_restart,
-                        on_dismiss=self._dismiss_update_banner
-                    )
-                    self.update_banner.pack(fill="x")
-            except Exception as e:
-                print(f"[Aviso] Falha ao exibir banner: {e}")
-
             self.lbl_version_btn.configure(
-                text=f"🔄 Reiniciar para v{new_version}",
+                text=f"🔄 Restart para Atualizar (v{new_version})",
                 fg_color="#0066cc",
                 hover_color="#0052a3",
                 text_color="#ffffff",
                 command=self.updater.apply_update_and_restart
             )
-            if hasattr(self, "btn_check_updates"):
-                self.btn_check_updates.configure(
-                    text="🔄 Reiniciar",
-                    fg_color="#00a8ff",
-                    hover_color="#0088cc",
-                    command=self.updater.apply_update_and_restart
-                )
-            self.set_message(f"🚀 Versão {new_version} pronta para instalar! Reinicie o app para aplicar.", duration_sec=10)
+            self.set_message(f"🚀 Versão {new_version} pronta! Clique em 'Restart para Atualizar' abaixo.", duration_sec=10)
         self.after(0, show)
-
-    def _dismiss_update_banner(self):
-        if self.update_banner:
-            self.update_banner.destroy()
-            self.update_banner = None
 
     def _on_window_configure(self, event):
         if event.widget != self:

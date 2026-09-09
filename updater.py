@@ -224,53 +224,63 @@ class SilentAutoUpdater:
         app_dir = current_exe.parent
 
         if not is_frozen:
-            # Modo dev (python main.py): apenas move para dist/RemoteXPTI.exe
+            # Modo dev (python main.py): move para dist/RemoteXPTI.exe e reinicia
             target = Path("dist/RemoteXPTI.exe")
             target.parent.mkdir(exist_ok=True)
             shutil.move(self.downloaded_file, target)
             print(f"[SilentUpdater] Atualização copiada para {target}")
-            return
+            subprocess.Popen([sys.executable, "main.py"], cwd=str(Path(__file__).parent.resolve()))
+            os._exit(0)
 
         # Modo executável compilado (.exe):
-        # 1. Prepara ambiente limpo sem resquícios do processo PyInstaller anterior
-        clean_env = {
-            k: v for k, v in os.environ.items()
-            if not k.startswith("_MEI") and not k.startswith("PYI_") and not k.startswith("_PYI_")
-        }
-        clean_env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
-
-        # 2. Gera script batch em %TEMP% para substituir e abrir o novo aplicativo
         import tempfile
-        script_path = Path(tempfile.gettempdir()) / "remotexpti_update.cmd"
+        temp_dir = Path(tempfile.gettempdir())
+        script_path = temp_dir / "remotexpti_update.cmd"
+        vbs_path = temp_dir / "remotexpti_run.vbs"
 
         cmd_content = f"""@echo off
 chcp 65001 >nul
-:: Aguarda o processo anterior encerrar e liberar o arquivo
+title Atualizando RemoteXPTI...
+
+:: 1. Aguarda 2 segundos para o processo anterior encerrar e liberar os arquivos
 ping 127.0.0.1 -n 3 >nul
-:: Tenta substituir com retry por ate 30 segundos
+taskkill /f /im "{current_exe.name}" >nul 2>&1
+taskkill /f /im "RemoteXPTI.exe" >nul 2>&1
+
+:: 2. Substitui o executavel com retry seguro (ate 30 tentativas)
 for /l %%i in (1, 1, 30) do (
-    move /y "{str(self.downloaded_file)}" "{str(current_exe)}" >nul 2>&1
-    if not exist "{str(self.downloaded_file)}" goto :launch
+    copy /y "{str(self.downloaded_file)}" "{str(current_exe)}" >nul 2>&1 && (
+        del /f /q "{str(self.downloaded_file)}" >nul 2>&1
+        goto :launch
+    )
     taskkill /f /im "{current_exe.name}" >nul 2>&1
     ping 127.0.0.1 -n 2 >nul
 )
+
 :launch
+:: 3. Aguarda 1 segundo, limpa ambiente e reinicia o aplicativo
+ping 127.0.0.1 -n 2 >nul
 set PYINSTALLER_RESET_ENVIRONMENT=1
 set _MEIPASS2=
 set _MEIPASS=
 cd /d "{str(app_dir)}"
 start "" "{str(current_exe)}"
 del "%~f0"
+exit
 """
         script_path.write_text(cmd_content, encoding="utf-8")
 
-        flags = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
-        subprocess.Popen(
-            ["cmd.exe", "/c", str(script_path)],
-            cwd=str(app_dir),
-            env=clean_env,
-            creationflags=flags
-        )
+        # Dispara via wscript.exe de forma 100% oculta e desvinculada do processo atual
+        vbs_content = f'''Set WshShell = CreateObject("WScript.Shell")
+WshShell.Run "cmd.exe /c """ & "{str(script_path)}" & """", 0, False
+'''
+        vbs_path.write_text(vbs_content, encoding="utf-8")
+
+        try:
+            subprocess.run(["wscript.exe", "//b", "//nologo", str(vbs_path)], timeout=5.0)
+        except Exception:
+            # Fallback caso wscript esteja restrito
+            os.startfile(str(script_path))
 
         # Encerra o processo atual imediatamente
         os._exit(0)

@@ -449,3 +449,73 @@ class ConfirmDialog(ctk.CTkToplevel):
             command=confirm_and_close
         )
         btn_yes.pack(side="right")
+
+
+class UpdateMenuDialog(ctk.CTkToplevel):
+    """Menu modal discreto para checagem de atualizações e opções do sistema."""
+    def __init__(
+        self,
+        parent,
+        current_version: str,
+        on_check_updates: Callable[[], None],
+        on_uninstall: Callable[[], None]
+    ):
+        super().__init__(parent)
+        self.title("Opções e Atualizações")
+        self.geometry("380x270")
+        self.resizable(False, False)
+        self.transient(parent)
+        self.grab_set()
+
+        frame = ctk.CTkFrame(self, corner_radius=12, fg_color=("gray92", "#1e1e24"))
+        frame.pack(fill="both", expand=True, padx=16, pady=16)
+
+        lbl_title = ctk.CTkLabel(
+            frame,
+            text=f"⚡ RemoteXPTI v{current_version}",
+            font=ctk.CTkFont(size=16, weight="bold"),
+            text_color=("gray10", "#ffffff")
+        )
+        lbl_title.pack(pady=(16, 2))
+
+        lbl_sub = ctk.CTkLabel(
+            frame,
+            text="RDP Quick Launcher • Atualizações Automáticas",
+            font=ctk.CTkFont(size=11),
+            text_color=("gray40", "#8e92a0")
+        )
+        lbl_sub.pack(pady=(0, 16))
+
+        btn_check = ctk.CTkButton(
+            frame,
+            text="🔍 Buscar Atualizações Agora",
+            height=34,
+            fg_color="#0066cc",
+            hover_color="#0052a3",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            command=lambda: (self.destroy(), on_check_updates())
+        )
+        btn_check.pack(fill="x", padx=24, pady=4)
+
+        btn_uninst = ctk.CTkButton(
+            frame,
+            text="🗑️ Desinstalar RemoteXPTI por Completo",
+            height=34,
+            fg_color=("#ffdddd", "#381a1e"),
+            hover_color=("#ffc2c2", "#522228"),
+            text_color=("#cc0000", "#ff6b6b"),
+            font=ctk.CTkFont(size=11, weight="bold"),
+            command=lambda: (self.destroy(), on_uninstall())
+        )
+        btn_uninst.pack(fill="x", padx=24, pady=4)
+
+        btn_close = ctk.CTkButton(
+            frame,
+            text="Fechar",
+            height=30,
+            fg_color=("gray75", "#2e303b"),
+            hover_color=("gray65", "#3a3c4a"),
+            text_color=("gray10", "#ffffff"),
+            command=self.destroy
+        )
+        btn_close.pack(fill="x", padx=24, pady=(12, 16))

@@ -62,6 +62,15 @@ class SetupApp(ctk.CTk):
             except Exception:
                 pass
 
+        icon_png_path = get_bundle_resource("imagens/app_icon.png")
+        if icon_png_path.exists():
+            try:
+                import tkinter as tk
+                self._app_icon_photo = tk.PhotoImage(file=str(icon_png_path))
+                self.wm_iconphoto(True, self._app_icon_photo)
+            except Exception:
+                pass
+
         # Pasta padrão: %LOCALAPPDATA%\Programs\RemoteXPTI (dispensa admin)
         local_appdata = os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))
         self.default_install_dir = Path(local_appdata) / "Programs" / "RemoteXPTI"
@@ -343,5 +352,10 @@ class SetupApp(ctk.CTk):
 if __name__ == "__main__":
     import multiprocessing
     multiprocessing.freeze_support()
+    try:
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("xpti.remotexpti.setup")
+    except Exception:
+        pass
     app = SetupApp()
     app.mainloop()

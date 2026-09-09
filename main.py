@@ -13,6 +13,11 @@ def enable_high_dpi_awareness():
                 ctypes.windll.user32.SetProcessDPIAware()
             except Exception:
                 pass
+        try:
+            # Associa explicitamente o ID do app para a barra de tarefas/bandeja exibir o ícone customizado
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("xpti.remotexpti.rdp.launcher")
+        except Exception:
+            pass
 
 def main():
     enable_high_dpi_awareness()
