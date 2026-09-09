@@ -1,3 +1,5 @@
+import sys
+from pathlib import Path
 import customtkinter as ctk
 import tkinter as tk
 from typing import List, Dict, Any, Optional, Tuple
@@ -210,6 +212,17 @@ class ServerCard(ctk.CTkFrame):
         self.lbl_preview.configure(image=self.current_thumb_img)
 
 
+def get_resource_path(relative_path: str) -> Path:
+    if hasattr(sys, "_MEIPASS"):
+        p = Path(sys._MEIPASS) / relative_path
+        if p.exists():
+            return p
+    if getattr(sys, "frozen", False):
+        p = Path(sys.executable).parent / relative_path
+        if p.exists():
+            return p
+    return Path(__file__).parent.resolve() / relative_path
+
 class RemoteXPTIApp(ctk.CTk):
     """Janela principal da aplicação RemoteXPTI."""
 
@@ -219,6 +232,14 @@ class RemoteXPTIApp(ctk.CTk):
         self.title("RemoteXPTI - RDP Quick Launcher")
         self.geometry("1100x720")
         self.minsize(700, 480)
+
+        # Ícone oficial da janela
+        icon_path = get_resource_path("imagens/icon.ico")
+        if icon_path.exists():
+            try:
+                self.iconbitmap(str(icon_path))
+            except Exception:
+                pass
 
         self.storage = StorageManager()
         self.card_widgets: Dict[str, ServerCard] = {}
@@ -255,20 +276,33 @@ class RemoteXPTIApp(ctk.CTk):
         header_frame.pack(fill="x", side="top")
         header_frame.pack_propagate(False)
 
-        # Título e Logo
+        # Título e Logo Oficial XPti
         title_box = ctk.CTkFrame(header_frame, fg_color="transparent")
-        title_box.pack(side="left", padx=16, pady=10)
+        title_box.pack(side="left", padx=16, pady=8)
+
+        logo_path = get_resource_path("imagens/XPti_negativo_color.png")
+        if logo_path.exists():
+            try:
+                pil_logo = Image.open(logo_path)
+                self.logo_header_img = ctk.CTkImage(light_image=pil_logo, dark_image=pil_logo, size=(92, 38))
+                lbl_logo = ctk.CTkLabel(title_box, image=self.logo_header_img, text="")
+                lbl_logo.pack(side="left", padx=(0, 10))
+            except Exception as e:
+                print(f"[Aviso] Falha ao carregar logo: {e}")
+
+        text_box = ctk.CTkFrame(title_box, fg_color="transparent")
+        text_box.pack(side="left")
 
         lbl_app_name = ctk.CTkLabel(
-            title_box,
-            text="⚡ RemoteXPTI",
-            font=ctk.CTkFont(size=18, weight="bold"),
+            text_box,
+            text="RemoteXPTI",
+            font=ctk.CTkFont(size=17, weight="bold"),
             text_color=("gray10", "#ffffff")
         )
         lbl_app_name.pack(anchor="w")
 
         lbl_app_sub = ctk.CTkLabel(
-            title_box,
+            text_box,
             text="RDP Quick Launcher",
             font=ctk.CTkFont(size=10),
             text_color=("gray40", "#8e92a0")

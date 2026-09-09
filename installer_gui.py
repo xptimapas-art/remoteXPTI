@@ -5,7 +5,9 @@ import time
 import threading
 import subprocess
 from pathlib import Path
+from PIL import Image
 import customtkinter as ctk
+from version import CURRENT_VERSION
 
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
@@ -23,14 +25,14 @@ def get_bundle_resource(filename: str) -> Path:
     return base_path / filename
 
 def create_windows_shortcut(target: Path, shortcut_dest: Path, description: str = ""):
-    """Cria atalho .lnk no Windows sem necessidade de dependências externas."""
+    """Cria atalho .lnk no Windows com o ícone do próprio aplicativo."""
     script = f"""
     $WshShell = New-Object -ComObject WScript.Shell
     $Shortcut = $WshShell.CreateShortcut('{str(shortcut_dest)}')
     $Shortcut.TargetPath = '{str(target)}'
     $Shortcut.WorkingDirectory = '{str(target.parent)}'
     $Shortcut.Description = '{description}'
-    $Shortcut.IconLocation = 'imageres.dll,24'
+    $Shortcut.IconLocation = '{str(target)},0'
     $Shortcut.Save()
     """
     creation_flags = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
@@ -51,6 +53,14 @@ class SetupApp(ctk.CTk):
         self.geometry("520x420")
         self.minsize(520, 420)
         self.resizable(False, False)
+
+        # Ícone da janela do instalador
+        icon_path = get_bundle_resource("imagens/icon.ico")
+        if icon_path.exists():
+            try:
+                self.iconbitmap(str(icon_path))
+            except Exception:
+                pass
 
         # Pasta padrão: %LOCALAPPDATA%\Programs\RemoteXPTI (dispensa admin)
         local_appdata = os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))
@@ -76,10 +86,21 @@ class SetupApp(ctk.CTk):
 
         ctk.CTkLabel(
             title_box,
-            text="RemoteXPTI - Gerenciador RDP Ágil v1.0.0",
+            text=f"RemoteXPTI - Gerenciador RDP Ágil v{CURRENT_VERSION}",
             font=ctk.CTkFont(size=11),
             text_color=("gray40", "#8e92a0")
         ).pack(anchor="w")
+
+        # Logo Oficial XPti no cabeçalho
+        logo_path = get_bundle_resource("imagens/XPti_negativo_color.png")
+        if logo_path.exists():
+            try:
+                pil_logo = Image.open(logo_path)
+                self.logo_header_img = ctk.CTkImage(light_image=pil_logo, dark_image=pil_logo, size=(92, 38))
+                lbl_logo = ctk.CTkLabel(header, image=self.logo_header_img, text="")
+                lbl_logo.pack(side="right", padx=20, pady=12)
+            except Exception:
+                pass
 
         # 2. Conteúdo Central
         self.content = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
@@ -242,6 +263,18 @@ class SetupApp(ctk.CTk):
 
                 if source_key.exists():
                     shutil.copy2(source_key, dest_key)
+
+            # Copia pasta de imagens oficiais
+            source_imagens = get_bundle_resource("imagens")
+            dest_imagens = target_dir / "imagens"
+            if source_imagens.exists() and source_imagens.is_dir():
+                dest_imagens.mkdir(parents=True, exist_ok=True)
+                for item in source_imagens.iterdir():
+                    if item.is_file():
+                        try:
+                            shutil.copy2(item, dest_imagens / item.name)
+                        except Exception:
+                            pass
 
             # 4. Cria atalhos
             self.lbl_progress.configure(text="Criando atalhos no Windows...")

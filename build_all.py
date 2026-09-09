@@ -27,6 +27,8 @@ def main():
         "--noconsole",
         "--onefile",
         "--clean",
+        "--icon", "imagens/icon.ico",
+        "--add-data", "imagens;imagens",
         "--collect-all", "customtkinter",
         "--name", "RemoteXPTI",
         "main.py"
@@ -40,10 +42,12 @@ def main():
         "--noconsole",
         "--onefile",
         "--clean",
+        "--icon", "imagens/icon.ico",
         "--collect-all", "customtkinter",
         "--add-data", "dist/RemoteXPTI.exe;.",
         "--add-data", "servers.json;.",
         "--add-data", ".secret.key;.",
+        "--add-data", "imagens;imagens",
         "--name", "Setup_RemoteXPTI",
         "installer_gui.py"
     ])
