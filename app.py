@@ -257,7 +257,7 @@ class RemoteXPTIApp(ctk.CTk):
         # Cache persistente do status para NUNCA piscar 'Checando' desnecessariamente
         self.server_status: Dict[str, Tuple[bool, str]] = {}
         
-        self.last_cols = 4
+        self.last_cols = -1
         self._resize_timer = None
         self._auto_ping_timer = None
         self._search_debounce_timer = None
@@ -282,7 +282,8 @@ class RemoteXPTIApp(ctk.CTk):
         )
         self.after(3500, self.updater.start_background_check)
 
-        self.bind("<Configure>", self._on_window_configure)
+        self.bind("<Configure>", self._on_window_configure, add="+")
+        self.after(50, self._check_column_recalculation)
 
     def _build_header(self):
         header_frame = ctk.CTkFrame(self, height=64, corner_radius=0, fg_color=("#f0f2f5", "#16171d"))
@@ -356,6 +357,7 @@ class RemoteXPTIApp(ctk.CTk):
             fg_color=("#dce0e8", "#262832"),
             text_color=("gray10", "#ffffff"),
             hover_color=("#ccd2dc", "#343644"),
+            font=ctk.CTkFont(family="Segoe UI Emoji", size=13),
             command=self._on_manual_refresh
         )
         self.btn_refresh.pack(side="left", padx=(0, 8))
@@ -381,7 +383,7 @@ class RemoteXPTIApp(ctk.CTk):
             fg_color=("#dce0e8", "#262832"),
             text_color=("gray10", "#ffffff"),
             hover_color=("#ccd2dc", "#343644"),
-            font=ctk.CTkFont(size=14),
+            font=ctk.CTkFont(family="Segoe UI Emoji", size=14),
             command=self.open_settings_dialog
         )
         self.btn_settings.pack(side="left", padx=(8, 0))
@@ -488,20 +490,18 @@ class RemoteXPTIApp(ctk.CTk):
     def _on_window_configure(self, event):
         if event.widget != self:
             return
-        if self._resize_timer:
+        if getattr(self, "_resize_timer", None):
             self.after_cancel(self._resize_timer)
-        self._resize_timer = self.after(150, self._check_column_recalculation)
+        self._resize_timer = self.after(35, self._check_column_recalculation)
 
     def _check_column_recalculation(self):
-        w = self.scroll_frame.winfo_width()
-        if w <= 200:
-            w = self.winfo_width()
+        w = self.winfo_width()
         if w <= 200:
             return
 
-        slot_w = CARD_WIDTH + 14
-        available_w = max(280, w - 24)
-        new_cols = max(1, available_w // slot_w)
+        slot_w = CARD_WIDTH + 16
+        avail_w = max(CARD_WIDTH, w - 44)
+        new_cols = max(1, avail_w // slot_w)
 
         # Reorganiza os cards apenas se o número de colunas mudou de fato
         if new_cols != self.last_cols:
@@ -574,22 +574,22 @@ class RemoteXPTIApp(ctk.CTk):
         else:
             self.empty_label.pack_forget()
 
-        w = self.scroll_frame.winfo_width()
-        if w <= 200:
-            w = self.winfo_width()
+        w = self.winfo_width()
         if w <= 200:
             w = 1100
 
-        slot_w = CARD_WIDTH + 14
-        available_w = max(280, w - 24)
-        cols = max(1, available_w // slot_w)
+        slot_w = CARD_WIDTH + 16
+        avail_w = max(CARD_WIDTH, w - 44)
+        cols = max(1, avail_w // slot_w)
         self.last_cols = cols
 
-        for i in range(25):
+        # Limpa configurações de colunas anteriores
+        for i in range(35):
             self.scroll_frame.grid_columnconfigure(i, weight=0, minsize=0)
 
+        # Configura colunas ativas para expandir proporcionalmente e preencher toda a largura
         for i in range(cols):
-            self.scroll_frame.grid_columnconfigure(i, weight=0, minsize=slot_w)
+            self.scroll_frame.grid_columnconfigure(i, weight=1, minsize=slot_w)
 
         visible_ids = {s["id"] for s in servers}
 
@@ -617,7 +617,7 @@ class RemoteXPTIApp(ctk.CTk):
                 )
                 self.card_widgets[s_id] = card
 
-            card.grid(row=row, column=col, padx=7, pady=7, sticky="nw")
+            card.grid(row=row, column=col, padx=8, pady=8)
 
     def connect_to_server(self, server: Dict[str, Any]):
         server_id = server["id"]
