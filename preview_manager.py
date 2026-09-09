@@ -5,8 +5,9 @@ import struct
 import ctypes
 from ctypes import wintypes
 from pathlib import Path
+import math
 from typing import Optional, Tuple
-from PIL import Image, ImageDraw, ImageFont, ImageFilter
+from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageEnhance
 import customtkinter as ctk
 
 def get_app_dir() -> Path:
@@ -56,6 +57,80 @@ class PreviewManager:
     def get_thumbnail_path(server_id: str) -> Path:
         return THUMBNAILS_DIR / f"{server_id}.png"
 
+    @staticmethod
+    def _render_status_badge(is_online: Optional[bool], size: int = 18) -> Image.Image:
+        """
+        Renderiza indicador de status em altíssima definição com 4x supersampling (SSAA)
+        e filtro Lanczos para bordas 100% perfeitas, acabamento vetorial e sombra suave.
+        """
+        scale = 4
+        ss = size * scale
+        pad = 2 * scale
+        d = ss - pad * 2
+
+        img = Image.new("RGBA", (ss, ss), (0, 0, 0, 0))
+
+        # 1. Sombra suave para destacar sobre qualquer papel de parede
+        shadow = Image.new("RGBA", (ss, ss), (0, 0, 0, 0))
+        sdraw = ImageDraw.Draw(shadow)
+        sdraw.ellipse([pad, pad + int(1.2 * scale), pad + d, pad + d + int(1.2 * scale)], fill=(0, 0, 0, 100))
+        shadow = shadow.filter(ImageFilter.GaussianBlur(radius=1.2 * scale))
+        img = Image.alpha_composite(img, shadow)
+
+        # 2. Badge principal
+        badge = Image.new("RGBA", (ss, ss), (0, 0, 0, 0))
+        bdraw = ImageDraw.Draw(badge)
+
+        if is_online is True:
+            # Verde vibrante estilo AnyDesk / Fluent (#2ebd59)
+            bdraw.ellipse([pad, pad, pad + d, pad + d], fill=(46, 189, 89, 255))
+            bdraw.ellipse([pad, pad, pad + d, pad + d], outline=(255, 255, 255, 110), width=scale)
+        elif is_online is False:
+            # Vermelho vibrante estilo AnyDesk (#f04438)
+            bdraw.ellipse([pad, pad, pad + d, pad + d], fill=(240, 68, 56, 255))
+            cx, cy = ss // 2, ss // 2
+            r_line = int(d * 0.32)
+            slash_w = int(2.4 * scale)
+            bdraw.line([cx - r_line, cy + r_line, cx + r_line, cy - r_line],
+                       fill=(255, 255, 255, 245), width=slash_w)
+            bdraw.ellipse([pad, pad, pad + d, pad + d], outline=(255, 255, 255, 110), width=scale)
+        else:
+            # Neutro checando (#94a3b8)
+            bdraw.ellipse([pad, pad, pad + d, pad + d], fill=(148, 163, 184, 255))
+            bdraw.ellipse([pad, pad, pad + d, pad + d], outline=(255, 255, 255, 110), width=scale)
+
+        img = Image.alpha_composite(img, badge)
+        return img.resize((size, size), Image.Resampling.LANCZOS)
+
+    @staticmethod
+    def _render_star_icon(is_fav: bool, size: int = 20) -> Image.Image:
+        """Renderiza estrela em alta definição com 4x supersampling."""
+        scale = 4
+        ss = size * scale
+        img = Image.new("RGBA", (ss, ss), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(img)
+
+        cx, cy = ss / 2, ss / 2
+        r_out = ss * 0.42
+        r_in = ss * 0.19
+
+        pts = []
+        for i in range(10):
+            r = r_out if i % 2 == 0 else r_in
+            ang = i * math.pi / 5 - math.pi / 2
+            pts.append((cx + r * math.cos(ang), cy + r * math.sin(ang)))
+
+        if is_fav:
+            s_pts = [(x, y + scale) for x, y in pts]
+            draw.polygon(s_pts, fill=(0, 0, 0, 80))
+            draw.polygon(pts, fill=(255, 205, 40, 255), outline=(255, 235, 100, 255))
+        else:
+            s_pts = [(x, y + scale) for x, y in pts]
+            draw.line(s_pts + [s_pts[0]], fill=(0, 0, 0, 70), width=int(2.2 * scale))
+            draw.line(pts + [pts[0]], fill=(255, 255, 255, 235), width=int(1.8 * scale))
+
+        return img.resize((size, size), Image.Resampling.LANCZOS)
+
     @classmethod
     def generate_anydesk_card(
         cls,
@@ -65,18 +140,19 @@ class PreviewManager:
         is_online: Optional[bool] = None,
         width: int = 276,
         height: int = 180,
-        is_fav: bool = False
+        is_fav: bool = False,
+        is_hover: bool = False
     ) -> Image.Image:
         """
         Gera o card completo no padrão exato do AnyDesk:
         - Wallpaper de fundo em tela cheia (print real capturado ou ondas AnyDesk em tons variados).
+        - Efeito hover dinâmico AnyDesk com iluminação ativa e borda azul vibrante.
         - Gradiente escuro inferior para máxima legibilidade de texto.
-        - Círculo de status no canto superior esquerdo (🟢 online, 🚫 offline com traço diagonal, ⚪ checando).
-        - Estrela de favoritos no canto superior direito (☆ contorno limpo / ⭐ preenchida).
+        - Círculo de status em alta definição (🟢 online, 🚫 offline com traço diagonal, ⚪ checando).
+        - Estrela de favoritos em alta definição no canto superior direito.
         - Ícone de monitor + Nome em negrito + IP no canto inferior esquerdo.
         - 3 pontos verticais (menu de opções) no canto inferior direito.
         """
-        import math
         thumb_file = cls.get_thumbnail_path(server_id)
 
         # 1. Base do Card (Print real se existir, ou Ondas AnyDesk)
@@ -113,49 +189,48 @@ class PreviewManager:
             wave_img = wave_img.filter(ImageFilter.GaussianBlur(radius=5))
             img = Image.alpha_composite(img, wave_img)
 
-        # 2. Gradiente escuro no rodapé para garantir contraste das legendas
-        start_y = int(height * 0.42)
+        # 2. Efeito de Iluminação Ativa no Hover
+        if is_hover:
+            enhancer = ImageEnhance.Brightness(img)
+            img = enhancer.enhance(1.14)
+            # Brilho luminoso superior (sheen)
+            sheen = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+            sdraw = ImageDraw.Draw(sheen)
+            for y in range(int(height * 0.45)):
+                alpha = int(35 * (1.0 - y / (height * 0.45)))
+                sdraw.line([(0, y), (width, y)], fill=(255, 255, 255, alpha))
+            tint = Image.new("RGBA", (width, height), (0, 120, 215, 22))
+            sheen = Image.alpha_composite(sheen, tint)
+            img = Image.alpha_composite(img, sheen)
+
+        # 3. Gradiente escuro no rodapé para legibilidade do texto
+        start_y = int(height * 0.40)
         grad_overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
         gdraw = ImageDraw.Draw(grad_overlay)
         for y in range(start_y, height):
             ratio = (y - start_y) / (height - start_y)
-            alpha = int(225 * (ratio ** 1.2))
+            alpha = int((210 if is_hover else 225) * (ratio ** 1.2))
             gdraw.line([(0, y), (width, y)], fill=(0, 0, 0, alpha))
         img = Image.alpha_composite(img, grad_overlay)
 
+        # 4. Indicador de Status em Alta Resolução (Canto Superior Esquerdo)
+        badge = cls._render_status_badge(is_online, size=18)
+        img.paste(badge, (13, 13), badge)
+
+        # 5. Estrela de Favoritos em Alta Resolução (Canto Superior Direito)
+        star = cls._render_star_icon(is_fav, size=20)
+        img.paste(star, (width - 33, 11), star)
+
         draw = ImageDraw.Draw(img)
 
-        # 3. Indicador de Status (Canto Superior Esquerdo)
-        if is_online is True:
-            draw.ellipse([(14, 14), (28, 28)], fill=(40, 200, 64, 255))
-        elif is_online is False:
-            draw.ellipse([(14, 14), (28, 28)], fill=(235, 50, 50, 255))
-            draw.line([(16, 26), (26, 16)], fill=(255, 255, 255, 240), width=2)
-        else:
-            draw.ellipse([(14, 14), (28, 28)], fill=(150, 155, 165, 255))
-
-        # 4. Estrela de Favoritos (Canto Superior Direito)
-        def draw_star(cx, cy, r_out=9, r_in=4):
-            pts = []
-            for i in range(10):
-                r = r_out if i % 2 == 0 else r_in
-                ang = i * math.pi / 5 - math.pi / 2
-                pts.append((cx + r * math.cos(ang), cy + r * math.sin(ang)))
-            if is_fav:
-                draw.polygon(pts, fill=(255, 205, 40, 255), outline=(255, 225, 70, 255))
-            else:
-                draw.line(pts + [pts[0]], fill=(255, 255, 255, 240), width=2)
-
-        draw_star(width - 22, 21)
-
-        # 5. Ícone de Monitor (Canto Inferior Esquerdo)
+        # 6. Ícone de Monitor (Canto Inferior Esquerdo)
         mx, my = 16, height - 44
         mw, mh = 24, 16
-        draw.rounded_rectangle([(mx, my), (mx + mw, my + mh)], radius=2, outline=(255, 255, 255, 240), width=2)
-        draw.line([(mx + mw // 2, my + mh), (mx + mw // 2, my + mh + 4)], fill=(255, 255, 255, 240), width=2)
-        draw.line([(mx + mw // 2 - 5, my + mh + 4), (mx + mw // 2 + 5, my + mh + 4)], fill=(255, 255, 255, 240), width=2)
+        draw.rounded_rectangle([(mx, my), (mx + mw, my + mh)], radius=2, outline=(255, 255, 255, 245), width=2)
+        draw.line([(mx + mw // 2, my + mh), (mx + mw // 2, my + mh + 4)], fill=(255, 255, 255, 245), width=2)
+        draw.line([(mx + mw // 2 - 5, my + mh + 4), (mx + mw // 2 + 5, my + mh + 4)], fill=(255, 255, 255, 245), width=2)
 
-        # 6. Textos: Nome do Servidor e Host
+        # 7. Textos: Nome do Servidor e Host
         try:
             font_name = ImageFont.truetype("segoeuib.ttf", 13)
             font_host = ImageFont.truetype("segoeui.ttf", 11)
@@ -166,15 +241,25 @@ class PreviewManager:
         display_name = name if len(name) <= 22 else name[:20] + "..."
         tx = mx + mw + 10
         draw.text((tx, my - 3), display_name, fill=(255, 255, 255, 255), font=font_name)
-        draw.text((tx, my + 16), host, fill=(200, 210, 225, 240), font=font_host)
+        draw.text((tx, my + 16), host, fill=(215, 225, 240, 245) if is_hover else (195, 205, 220, 240), font=font_host)
 
-        # 7. Três Pontos Verticais ⋮ (Canto Inferior Direito)
+        # 8. Três Pontos Verticais ⋮ (Canto Inferior Direito)
         cx = width - 18
         for dy in [my + 2, my + 8, my + 14]:
-            draw.ellipse([(cx - 1, dy - 1), (cx + 2, dy + 2)], fill=(255, 255, 255, 240))
+            draw.ellipse([(cx - 1, dy - 1), (cx + 2, dy + 2)], fill=(255, 255, 255, 245))
 
-        # 8. Linha sutil de destaque no rodapé do card
-        draw.line([(0, height - 2), (width, height - 2)], fill=(55, 95, 145, 255), width=2)
+        # 9. Borda do Card e Linha de Destaque
+        if is_hover:
+            # Borda luminosa AnyDesk Blue (#0082f0)
+            draw.rounded_rectangle([(0, 0), (width - 1, height - 1)], radius=4, outline=(0, 130, 240, 255), width=2)
+            # Glow interno sutil de 1px
+            draw.rounded_rectangle([(2, 2), (width - 3, height - 3)], radius=3, outline=(0, 150, 255, 70), width=1)
+            # Linha inferior de destaque AnyDesk vibrante
+            draw.line([(2, height - 3), (width - 3, height - 3)], fill=(0, 160, 255, 255), width=3)
+        else:
+            # Borda sutil padrão AnyDesk
+            draw.rounded_rectangle([(0, 0), (width - 1, height - 1)], radius=4, outline=(54, 58, 72, 200), width=1)
+            draw.line([(1, height - 2), (width - 2, height - 2)], fill=(55, 95, 145, 255), width=2)
 
         return img
 
@@ -187,14 +272,15 @@ class PreviewManager:
         is_online: Optional[bool] = None,
         width: int = 276,
         height: int = 180,
-        is_fav: bool = False
+        is_fav: bool = False,
+        is_hover: bool = False
     ) -> ctk.CTkImage:
         """Retorna o CTkImage completo do card no estilo AnyDesk com cache inteligente."""
-        cache_key = f"{server_id}_{width}_{height}_{is_online}_{is_fav}"
+        cache_key = f"{server_id}_{width}_{height}_{is_online}_{is_fav}_{is_hover}"
         if cache_key in cls._cache:
             return cls._cache[cache_key]
 
-        pil_img = cls.generate_anydesk_card(server_id, name, host, is_online, width, height, is_fav)
+        pil_img = cls.generate_anydesk_card(server_id, name, host, is_online, width, height, is_fav, is_hover)
         ctk_img = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=(width, height))
         cls._cache[cache_key] = ctk_img
         return ctk_img

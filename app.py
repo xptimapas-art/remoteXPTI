@@ -42,8 +42,7 @@ class ServerCard(ctk.CTkFrame):
             height=CARD_HEIGHT,
             corner_radius=4,
             fg_color="#181a20",
-            border_width=1,
-            border_color=("#363a48", "#242630"),
+            border_width=0,
             cursor="hand2"
         )
         self.server = server
@@ -51,6 +50,7 @@ class ServerCard(ctk.CTkFrame):
         self.on_edit = on_edit
         self.is_online = initial_status[0] if initial_status is not None else None
         self.is_fav = bool(server.get("favorite", False))
+        self._is_hovering = False
 
         self.pack_propagate(False)
         self.grid_propagate(False)
@@ -58,21 +58,36 @@ class ServerCard(ctk.CTkFrame):
         self._build_ui()
         self._bind_events()
 
-    def _build_ui(self):
-        # Imagem de fundo completa estilo AnyDesk (renderiza 100% dos ícones e textos sem caixas pretas)
-        self.current_img = PreviewManager.get_card_ctk(
+    def _load_images(self):
+        """Pré-carrega as imagens normal e hover para transição instantânea a 0ms."""
+        self.img_normal = PreviewManager.get_card_ctk(
             server_id=self.server["id"],
             name=self.server.get("name", "Servidor"),
             host=self.server.get("host", "0.0.0.0"),
             is_online=self.is_online,
             width=CARD_WIDTH,
             height=CARD_HEIGHT,
-            is_fav=self.is_fav
+            is_fav=self.is_fav,
+            is_hover=False
         )
+        self.img_hover = PreviewManager.get_card_ctk(
+            server_id=self.server["id"],
+            name=self.server.get("name", "Servidor"),
+            host=self.server.get("host", "0.0.0.0"),
+            is_online=self.is_online,
+            width=CARD_WIDTH,
+            height=CARD_HEIGHT,
+            is_fav=self.is_fav,
+            is_hover=True
+        )
+
+    def _build_ui(self):
+        # Imagem de fundo completa estilo AnyDesk (renderiza 100% dos ícones e textos sem caixas pretas)
+        self._load_images()
         self.lbl_card = ctk.CTkLabel(
             self,
             text="",
-            image=self.current_img,
+            image=self.img_normal,
             width=CARD_WIDTH,
             height=CARD_HEIGHT,
             cursor="hand2"
@@ -105,10 +120,8 @@ class ServerCard(ctk.CTkFrame):
         self.on_connect(self.server)
 
     def _set_hover(self, is_hover: bool):
-        if is_hover:
-            self.configure(border_color="#0078d7", border_width=2)
-        else:
-            self.configure(border_color=("#363a48", "#242630"), border_width=1)
+        self._is_hovering = is_hover
+        self.lbl_card.configure(image=self.img_hover if is_hover else self.img_normal)
 
     def _toggle_favorite(self):
         self.is_fav = not self.is_fav
@@ -124,17 +137,9 @@ class ServerCard(ctk.CTkFrame):
         self.reload_thumbnail()
 
     def reload_thumbnail(self):
-        """Atualiza a imagem do card na tela."""
-        self.current_img = PreviewManager.get_card_ctk(
-            server_id=self.server["id"],
-            name=self.server.get("name", "Servidor"),
-            host=self.server.get("host", "0.0.0.0"),
-            is_online=self.is_online,
-            width=CARD_WIDTH,
-            height=CARD_HEIGHT,
-            is_fav=self.is_fav
-        )
-        self.lbl_card.configure(image=self.current_img)
+        """Atualiza a imagem do card na tela mantendo o estado de hover se ativo."""
+        self._load_images()
+        self.lbl_card.configure(image=self.img_hover if self._is_hovering else self.img_normal)
 
 
 def get_resource_path(relative_path: str) -> Path:
