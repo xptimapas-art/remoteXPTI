@@ -710,12 +710,19 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         async function loadServers() {
             try {
                 const res = await fetch('/api/servers');
-                const text = await res.text();
-                lastServersJson = text;
-                serversData = JSON.parse(text);
-                renderMarkers(serversData);
+                if (res.ok) {
+                    const text = await res.text();
+                    lastServersJson = text;
+                    serversData = JSON.parse(text);
+                    renderMarkers(serversData);
+                } else {
+                    const badge = document.getElementById('serverCountBadge');
+                    if (badge) badge.innerText = '0 servidores no mapa';
+                }
             } catch (err) {
                 console.error('Falha ao carregar servidores:', err);
+                const badge = document.getElementById('serverCountBadge');
+                if (badge) badge.innerText = 'Falha ao carregar lista';
             }
         }
 
@@ -1001,7 +1008,10 @@ class WebMapServer:
     def start(self):
         handler_cls = self._make_handler()
 
-        class QuietTCPServer(socketserver.TCPServer):
+        class QuietTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
+            daemon_threads = True
+            allow_reuse_address = True
+
             def handle_error(self, request, client_address):
                 pass  # Silencia desconexoes abruptas ao fechar o app
 
@@ -1269,6 +1279,10 @@ class WebMapManager:
             f"--user-data-dir={str(cache_dir)}",
             "--no-first-run",
             "--no-default-browser-check",
+            "--proxy-bypass-list=<-loopback>;127.0.0.1;localhost",
+            "--disable-extensions",
+            "--disable-component-update",
+            "--disable-sync",
             "--disable-features=Translate",
             "--disable-backgrounding-occluded-windows",
             "--disable-renderer-backgrounding",

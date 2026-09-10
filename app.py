@@ -1,5 +1,6 @@
 import os
 import sys
+import json
 import ctypes
 import subprocess
 import queue
@@ -274,6 +275,7 @@ class RemoteXPTIApp(ctk.CTk):
         self.server_status: Dict[str, Tuple[bool, str]] = {}
         # Rastreamento de tempo de inatividade (loss/offline) por servidor: server_id -> timestamp float
         self.server_downtime: Dict[str, float] = {}
+        self._load_downtime_history()
         self.view_mode = "grade"
         self.filtered_servers: List[Dict[str, Any]] = list(self.storage.servers)
         self.web_map: Optional[WebMapManager] = None
@@ -990,12 +992,18 @@ class RemoteXPTIApp(ctk.CTk):
                 # Salva no cache de status
                 self.server_status[server_id] = (is_online, msg)
                 
-                # Gerencia o rastreador de tempo de loss / downtime
+                # Gerencia o rastreador de tempo de loss / downtime com persistência em disco
+                changed = False
                 if not is_online:
                     if server_id not in self.server_downtime:
                         self.server_downtime[server_id] = time.time()
+                        changed = True
                 else:
-                    self.server_downtime.pop(server_id, None)
+                    if server_id in self.server_downtime:
+                        self.server_downtime.pop(server_id, None)
+                        changed = True
+                if changed:
+                    self._save_downtime_history()
                 
                 # Atualiza o card da grade suavemente apenas quando o resultado chegar
                 def update_ui():
@@ -1056,6 +1064,30 @@ class RemoteXPTIApp(ctk.CTk):
         # Ordenação estrita: maior tempo offline primeiro, menores abaixo
         incidents.sort(key=lambda x: x["duration_seconds"], reverse=True)
         return incidents
+
+    def _load_downtime_history(self):
+        """Carrega o histórico persistente de inatividade de servidores do disco."""
+        try:
+            from config_manager import get_config_dir
+            hist_file = get_config_dir() / "downtime_history.json"
+            if hist_file.exists():
+                with open(hist_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    if isinstance(data, dict):
+                        self.server_downtime = {str(k): float(v) for k, v in data.items()}
+                        log.info(f"[RemoteXPTI] Histórico de downtime carregado do disco: {len(self.server_downtime)} servidores em falha.")
+        except Exception as e:
+            log.warning(f"[RemoteXPTI] Falha ao carregar downtime_history.json: {e}")
+
+    def _save_downtime_history(self):
+        """Persiste o histórico de downtime no disco para sobreviver a reinicializações do app."""
+        try:
+            from config_manager import get_config_dir
+            hist_file = get_config_dir() / "downtime_history.json"
+            with open(hist_file, "w", encoding="utf-8") as f:
+                json.dump(self.server_downtime, f, indent=2)
+        except Exception as e:
+            log.warning(f"[RemoteXPTI] Falha ao salvar downtime_history.json: {e}")
 
     def _on_manual_refresh(self):
         self.start_status_checker(is_manual=True)
@@ -1152,7 +1184,9 @@ class RemoteXPTIApp(ctk.CTk):
                     pass
             # Remove do cache de status e histórico de downtime
             self.server_status.pop(server_id, None)
-            self.server_downtime.pop(server_id, None)
+            if server_id in self.server_downtime:
+                self.server_downtime.pop(server_id, None)
+                self._save_downtime_history()
             
             # Destrói o card da interface
             if server_id in self.card_widgets:
