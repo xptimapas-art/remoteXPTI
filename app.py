@@ -23,6 +23,7 @@ from web_map_manager import WebMapManager
 from logger import log
 from config_manager import ConfigManager
 from cloud_sync import CloudSyncManager
+from splash_screen import SplashScreen
 
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
@@ -217,9 +218,24 @@ class RemoteXPTIApp(ctk.CTk):
     def __init__(self):
         super().__init__()
 
+        # Oculta imediatamente a janela principal para exibir a tela de carregamento (Splash)
+        # e evitar qualquer flickering, renderização parcial ou botões se alinhando na tela
+        self.withdraw()
+
         self.title("RemoteXPTI - RDP Quick Launcher")
         self.geometry("1100x720")
         self.minsize(700, 480)
+
+        # Centraliza a janela principal no monitor para quando for exibida
+        try:
+            sw = self.winfo_screenwidth()
+            sh = self.winfo_screenheight()
+            win_w, win_h = 1100, 720
+            win_x = max(0, (sw - win_w) // 2)
+            win_y = max(0, (sh - win_h) // 2)
+            self.geometry(f"{win_w}x{win_h}+{win_x}+{win_y}")
+        except Exception:
+            pass
 
         # Ícone oficial da janela e barra de tarefas / bandeja
         icon_path = get_resource_path("imagens/icon.ico")
@@ -237,10 +253,18 @@ class RemoteXPTIApp(ctk.CTk):
             except Exception:
                 pass
 
+        # Inicia a Splash Screen com o motion do X da XPti
+        self.splash = SplashScreen(parent=self, current_version=CURRENT_VERSION)
+        self.splash_min_duration = 1.8  # Segundos mínimos para apreciar o motion com elegância
+        self.splash_start_time = time.time()
+        self._splash_closed = False
+
         # Sincroniza atalhos da Área de Trabalho e Menu Iniciar com o novo ícone oficial
         threading.Thread(target=sync_windows_shortcuts_icon, daemon=True).start()
 
         log.info(f"[RemoteXPTI] Inicializando RemoteXPTIApp v{CURRENT_VERSION}...")
+        self.splash.set_status("Carregando credenciais e dados locais...")
+
         self.storage = StorageManager()
         log.info(f"[RemoteXPTI] Servidores carregados do storage local: {len(self.storage.servers)}")
         self.card_widgets: Dict[str, ServerCard] = {}
@@ -260,12 +284,14 @@ class RemoteXPTIApp(ctk.CTk):
         self._action_queue = queue.Queue()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
+        self.splash.set_status("Construindo interface gráfica...")
         self._build_header()
         self._build_main_view()
         self._build_statusbar()
         self._process_action_queue()
 
         # Inicializa o mapa web Leaflet com aceleração de GPU
+        self.splash.set_status("Inicializando serviços e mapa web...")
         self.web_map = WebMapManager(
             container_widget=self.map_container,
             get_servers_func=lambda: self.filtered_servers if self.filtered_servers is not None else self.storage.servers,
@@ -275,6 +301,7 @@ class RemoteXPTIApp(ctk.CTk):
         )
         self.web_map.start()
 
+        self.splash.set_status("Organizando servidores e layout...")
         self.refresh_servers()
         
         # Inicia a checagem inicial de status
@@ -289,13 +316,42 @@ class RemoteXPTIApp(ctk.CTk):
         self.after(3500, self.updater.start_background_check)
 
         self.bind("<Configure>", self._on_window_configure, add="+")
-        self.after(50, self._check_column_recalculation)
-        self.after(150, self._check_column_recalculation)
-        self.after(350, self._check_column_recalculation)
+        
+        # Pré-calcula e assenta colunas nos bastidores enquanto oculta
+        self.update_idletasks()
+        self._check_column_recalculation()
 
         # Sincronização em nuvem automática com Supabase se configurado
         if CloudSyncManager.is_configured():
             threading.Thread(target=self._sync_servers_from_cloud, daemon=True).start()
+
+        # Agenda a transição suave para a janela principal
+        self.after(200, self._check_splash_ready)
+
+    def _check_splash_ready(self):
+        """Verifica se a aplicação concluiu seu warmup e se o tempo mínimo da animação decorreu."""
+        if self._splash_closed:
+            return
+        elapsed = time.time() - self.splash_start_time
+        if elapsed < self.splash_min_duration:
+            remaining_ms = max(40, int((self.splash_min_duration - elapsed) * 1000))
+            self.after(remaining_ms, self._check_splash_ready)
+            return
+
+        # Animação e carregamento completos: dispara transição suave
+        self.splash.set_status("Pronto!")
+        self.splash.finish(on_finished=self._reveal_main_window)
+
+    def _reveal_main_window(self):
+        """Revela a janela principal perfeitamente montada, calculada e sem nenhum flickering."""
+        if self._splash_closed:
+            return
+        self._splash_closed = True
+        self.deiconify()
+        self.lift()
+        self.focus_force()
+        self._check_column_recalculation()
+        log.info("[RemoteXPTI] Splash finalizada com sucesso. Janela principal revelada.")
 
     def _build_header(self):
         header_frame = ctk.CTkFrame(self, height=64, corner_radius=0, fg_color=("#f0f2f5", "#16171d"))
@@ -653,6 +709,12 @@ class RemoteXPTIApp(ctk.CTk):
     def _on_close(self):
         """Encerra a aplicação de forma limpa, finalizando o Edge e o pool de threads em segundo plano."""
         log.info("[RemoteXPTI] Encerrando aplicação (WM_DELETE_WINDOW)...")
+        if hasattr(self, "splash") and self.splash:
+            try:
+                if hasattr(self.splash, "window") and self.splash.window.winfo_exists():
+                    self.splash.window.destroy()
+            except Exception:
+                pass
         try:
             if hasattr(self, "web_map") and self.web_map:
                 self.web_map.shutdown()
