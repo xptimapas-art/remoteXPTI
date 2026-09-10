@@ -272,6 +272,8 @@ class RemoteXPTIApp(ctk.CTk):
         
         # Cache persistente do status para NUNCA piscar 'Checando' desnecessariamente
         self.server_status: Dict[str, Tuple[bool, str]] = {}
+        # Rastreamento de tempo de inatividade (loss/offline) por servidor: server_id -> timestamp float
+        self.server_downtime: Dict[str, float] = {}
         self.view_mode = "grade"
         self.filtered_servers: List[Dict[str, Any]] = list(self.storage.servers)
         self.web_map: Optional[WebMapManager] = None
@@ -314,6 +316,7 @@ class RemoteXPTIApp(ctk.CTk):
                 container_widget=self.map_container,
                 get_servers_func=lambda: self.filtered_servers if self.filtered_servers is not None else self.storage.servers,
                 get_status_func=lambda: self.server_status,
+                get_incidents_func=self.get_active_incidents,
                 on_connect_func=self.connect_to_server_by_id,
                 on_edit_func=self.open_edit_dialog_by_id,
             )
@@ -984,8 +987,15 @@ class RemoteXPTIApp(ctk.CTk):
         def check_worker(server_id: str, host: str, port: int):
             try:
                 is_online, msg = RDPManager.check_connection(host, port, timeout=1.5)
-                # Salva no cache
+                # Salva no cache de status
                 self.server_status[server_id] = (is_online, msg)
+                
+                # Gerencia o rastreador de tempo de loss / downtime
+                if not is_online:
+                    if server_id not in self.server_downtime:
+                        self.server_downtime[server_id] = time.time()
+                else:
+                    self.server_downtime.pop(server_id, None)
                 
                 # Atualiza o card da grade suavemente apenas quando o resultado chegar
                 def update_ui():
@@ -1015,6 +1025,37 @@ class RemoteXPTIApp(ctk.CTk):
                 pending[0] -= 1
                 if pending[0] <= 0:
                     self._is_checking_status = False
+
+    def get_active_incidents(self) -> List[Dict[str, Any]]:
+        """
+        Retorna a lista de servidores atualmente em falha (loss/offline),
+        ordenados estritamente pelo maior tempo de inatividade no topo.
+        """
+        now = time.time()
+        incidents = []
+        server_map = {s["id"]: s for s in self.storage.servers}
+        
+        for s_id, offline_since in list(self.server_downtime.items()):
+            srv = server_map.get(s_id)
+            if not srv:
+                continue
+            duration = max(0, int(now - offline_since))
+            from map_manager import resolve_server_coordinates
+            coords = resolve_server_coordinates(srv)
+            incidents.append({
+                "id": s_id,
+                "name": srv.get("name", "Servidor"),
+                "host": srv.get("host", ""),
+                "port": srv.get("port", 3389),
+                "offline_since": offline_since,
+                "duration_seconds": duration,
+                "latitude": coords[0] if coords else None,
+                "longitude": coords[1] if coords else None,
+            })
+            
+        # Ordenação estrita: maior tempo offline primeiro, menores abaixo
+        incidents.sort(key=lambda x: x["duration_seconds"], reverse=True)
+        return incidents
 
     def _on_manual_refresh(self):
         self.start_status_checker(is_manual=True)
@@ -1109,8 +1150,9 @@ class RemoteXPTIApp(ctk.CTk):
                     thumb_path.unlink()
                 except Exception:
                     pass
-            # Remove do cache de status
+            # Remove do cache de status e histórico de downtime
             self.server_status.pop(server_id, None)
+            self.server_downtime.pop(server_id, None)
             
             # Destrói o card da interface
             if server_id in self.card_widgets:

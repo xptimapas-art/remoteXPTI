@@ -71,12 +71,23 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             overflow: hidden;
         }
 
-        /* Top Overlay Toolbar (HUD) */
-        .map-hud {
+        /* Container que une o HUD e a Bandeja Retrátil à esquerda */
+        .map-hud-container {
             position: absolute;
             top: 12px;
             left: 12px;
             z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 8px;
+            pointer-events: none;
+            max-height: calc(100vh - 24px);
+        }
+
+        /* Top Overlay Toolbar (HUD) */
+        .map-hud {
+            pointer-events: auto;
             display: flex;
             align-items: center;
             gap: 10px;
@@ -113,6 +124,183 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         .btn-action:hover {
             background: #34384a;
             color: #ffffff;
+        }
+
+        /* Botão de Incidentes no HUD */
+        .btn-incident {
+            background: #1f212a;
+            border-color: rgba(255, 255, 255, 0.12);
+            color: #cbd5e1;
+        }
+        .btn-incident:hover {
+            background: #2a2d39;
+            color: #ffffff;
+        }
+        .btn-incident.has-loss {
+            background: rgba(240, 68, 56, 0.16);
+            border-color: rgba(240, 68, 56, 0.45);
+            color: #ff6b6b;
+        }
+        .btn-incident.has-loss:hover {
+            background: rgba(240, 68, 56, 0.26);
+        }
+        .incident-badge-pill {
+            background: #333644;
+            color: #94a3b8;
+            font-size: 10px;
+            font-weight: 800;
+            padding: 1px 6px;
+            border-radius: 10px;
+            margin-left: 2px;
+            transition: all 0.2s;
+        }
+        .btn-incident.has-loss .incident-badge-pill {
+            background: #f04438;
+            color: #ffffff;
+            box-shadow: 0 0 8px rgba(240, 68, 56, 0.6);
+        }
+
+        /* Bandeja Retrátil de Incidentes saindo de baixo do menu */
+        .incident-tray {
+            pointer-events: auto;
+            width: 330px;
+            max-width: 90vw;
+            background: rgba(18, 20, 26, 0.94);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(240, 68, 56, 0.35);
+            border-radius: 10px;
+            box-shadow: 0 10px 32px rgba(0, 0, 0, 0.65), 0 0 16px rgba(240, 68, 56, 0.12);
+            overflow: hidden;
+            display: none;
+            flex-direction: column;
+            animation: traySlideDown 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        @keyframes traySlideDown {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .incident-tray-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 12px;
+            background: rgba(240, 68, 56, 0.12);
+            border-bottom: 1px solid rgba(240, 68, 56, 0.22);
+        }
+        .tray-title-box {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .tray-title {
+            font-size: 11px;
+            font-weight: 700;
+            color: #ff6b6b;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .tray-header-count {
+            font-size: 10px;
+            font-weight: 800;
+            background: #f04438;
+            color: #ffffff;
+            padding: 1px 6px;
+            border-radius: 8px;
+        }
+        .tray-close-btn {
+            background: transparent;
+            border: none;
+            color: #8e92a0;
+            font-size: 13px;
+            cursor: pointer;
+            padding: 2px 6px;
+            border-radius: 4px;
+            transition: all 0.15s;
+        }
+        .tray-close-btn:hover {
+            color: #ffffff;
+            background: rgba(255, 255, 255, 0.1);
+        }
+        .incident-list {
+            max-height: 320px;
+            overflow-y: auto;
+            padding: 6px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .incident-list::-webkit-scrollbar {
+            width: 4px;
+        }
+        .incident-list::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.18);
+            border-radius: 4px;
+        }
+        .incident-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 10px;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.07);
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            gap: 10px;
+        }
+        .incident-item:hover {
+            background: rgba(240, 68, 56, 0.15);
+            border-color: rgba(240, 68, 56, 0.45);
+            transform: translateX(3px);
+        }
+        .incident-name-box {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            overflow: hidden;
+            flex: 1;
+            min-width: 0;
+        }
+        .incident-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: #f04438;
+            box-shadow: 0 0 6px #f04438;
+            flex-shrink: 0;
+            animation: blinkDot 1.4s infinite ease-in-out;
+        }
+        @keyframes blinkDot {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.35; transform: scale(0.85); }
+        }
+        .incident-name {
+            font-size: 12px;
+            font-weight: 600;
+            color: #f1f3f7;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .incident-loss-badge {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            font-size: 11px;
+            font-weight: 700;
+            color: #ff5252;
+            background: rgba(240, 68, 56, 0.16);
+            border: 1px solid rgba(240, 68, 56, 0.32);
+            padding: 2px 7px;
+            border-radius: 4px;
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+        .incident-empty {
+            padding: 16px 12px;
+            text-align: center;
+            color: #8e92a0;
+            font-size: 11px;
+            font-style: italic;
         }
 
         /* Floating Bottom Card */
@@ -333,18 +521,37 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     </style>
 </head>
 <body>
-    <div class="map-hud">
-        <div class="map-title">🗺️ Mapa</div>
-        <div class="layer-switch-box">
-            <button id="btnLayerSat" class="btn-layer-toggle active" onclick="setMapLayer('satellite')">
-                🛰️ Satélite
+    <div class="map-hud-container">
+        <div class="map-hud">
+            <div class="map-title">🗺️ Mapa</div>
+            <div class="layer-switch-box">
+                <button id="btnLayerSat" class="btn-layer-toggle active" onclick="setMapLayer('satellite')">
+                    🛰️ Satélite
+                </button>
+                <button id="btnLayerRoads" class="btn-layer-toggle" onclick="setMapLayer('roads')">
+                    🗺️ Padrão
+                </button>
+            </div>
+            <button class="btn-action" onclick="centerSC()">📍 Centralizar SC</button>
+            <button id="btnToggleIncidents" class="btn-action btn-incident" onclick="toggleIncidentTray()">
+                <span class="incident-icon">🚨</span> Incidentes <span id="incidentCountBadge" class="incident-badge-pill">0</span>
             </button>
-            <button id="btnLayerRoads" class="btn-layer-toggle" onclick="setMapLayer('roads')">
-                🗺️ Padrão
-            </button>
+            <span id="serverCountBadge" style="font-size: 11px; color: #8e92a0; margin-left: 4px;">Carregando...</span>
         </div>
-        <button class="btn-action" onclick="centerSC()">📍 Centralizar SC</button>
-        <span id="serverCountBadge" style="font-size: 11px; color: #8e92a0; margin-left: 6px;">Carregando...</span>
+
+        <!-- Bandeja Retrátil de Incidentes -->
+        <div id="incidentTray" class="incident-tray">
+            <div class="incident-tray-header">
+                <div class="tray-title-box">
+                    <span class="tray-title">⚠️ Servidores em Falha / Loss</span>
+                    <span id="trayHeaderCount" class="tray-header-count">0</span>
+                </div>
+                <button class="tray-close-btn" onclick="toggleIncidentTray()" title="Recolher bandeja">✕</button>
+            </div>
+            <div id="incidentList" class="incident-list">
+                <div class="incident-empty">Carregando incidentes...</div>
+            </div>
+        </div>
     </div>
 
     <div id="map"></div>
@@ -600,6 +807,131 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             map.flyTo([-27.2423, -50.2189], 8, { duration: 1.2 });
         }
 
+        // --- Lógica da Bandeja de Incidentes (Loss / Downtime) ---
+        let activeIncidents = [];
+        let trayUserClosed = false;
+        let isTrayOpen = false;
+
+        function formatLossDuration(sec) {
+            sec = Math.max(0, Math.floor(sec));
+            if (sec < 60) {
+                return `${sec}s`;
+            }
+            const m = Math.floor(sec / 60);
+            const s = sec % 60;
+            if (m < 60) {
+                return `${m}m ${s < 10 ? '0' : ''}${s}s`;
+            }
+            const h = Math.floor(m / 60);
+            const remM = m % 60;
+            if (h < 24) {
+                return `${h}h ${remM < 10 ? '0' : ''}${remM}m`;
+            }
+            const d = Math.floor(h / 24);
+            const remH = h % 24;
+            return `${d}d ${remH}h`;
+        }
+
+        function toggleIncidentTray(forceState) {
+            const tray = document.getElementById('incidentTray');
+            if (!tray) return;
+            if (forceState !== undefined) {
+                isTrayOpen = forceState;
+            } else {
+                isTrayOpen = !isTrayOpen;
+                if (!isTrayOpen) {
+                    trayUserClosed = true;
+                } else {
+                    trayUserClosed = false;
+                }
+            }
+            tray.style.display = isTrayOpen ? 'flex' : 'none';
+        }
+
+        function renderIncidentsList() {
+            const listEl = document.getElementById('incidentList');
+            const btnToggle = document.getElementById('btnToggleIncidents');
+            const countBadge = document.getElementById('incidentCountBadge');
+            const trayCount = document.getElementById('trayHeaderCount');
+
+            const count = activeIncidents.length;
+            if (countBadge) countBadge.innerText = count;
+            if (trayCount) trayCount.innerText = count;
+
+            if (btnToggle) {
+                if (count > 0) {
+                    btnToggle.classList.add('has-loss');
+                } else {
+                    btnToggle.classList.remove('has-loss');
+                }
+            }
+
+            if (!listEl) return;
+
+            if (count === 0) {
+                listEl.innerHTML = '<div class="incident-empty">✨ Todos os servidores operando normalmente (0 em loss)</div>';
+                return;
+            }
+
+            // Garante ordenação estrita decrescente: maior tempo offline no topo
+            activeIncidents.sort((a, b) => b.duration_seconds - a.duration_seconds);
+
+            let html = '';
+            activeIncidents.forEach(inc => {
+                const durStr = formatLossDuration(inc.duration_seconds);
+                const safeName = (inc.name || 'Servidor').replace(/"/g, '&quot;');
+                html += `
+                    <div class="incident-item" onclick="onIncidentClick('${inc.id}')" title="Clique para focar no servidor ${safeName}">
+                        <div class="incident-name-box">
+                            <span class="incident-dot"></span>
+                            <span class="incident-name">${safeName}</span>
+                        </div>
+                        <span class="incident-loss-badge">${durStr}</span>
+                    </div>
+                `;
+            });
+            listEl.innerHTML = html;
+        }
+
+        function onIncidentClick(serverId) {
+            const srv = serversData.find(s => s.id === serverId);
+            if (srv) {
+                if (srv.latitude && srv.longitude) {
+                    map.flyTo([srv.latitude, srv.longitude], 13, { duration: 1.0 });
+                }
+                showCard(srv);
+            }
+        }
+
+        async function loadIncidents() {
+            try {
+                const res = await fetch('/api/incidents');
+                if (res.ok) {
+                    activeIncidents = await res.json();
+                    renderIncidentsList();
+
+                    // Abre a bandeja automaticamente se surgiram incidentes e o usuário não fechou
+                    if (activeIncidents.length > 0 && !trayUserClosed && !isTrayOpen) {
+                        toggleIncidentTray(true);
+                    }
+                }
+            } catch (err) {}
+        }
+
+        // Ticker local a cada 1s: avança contadores na tela suavemente ao vivo
+        setInterval(() => {
+            if (activeIncidents.length > 0) {
+                activeIncidents.forEach(inc => {
+                    inc.duration_seconds = (inc.duration_seconds || 0) + 1;
+                });
+                renderIncidentsList();
+            }
+        }, 1000);
+
+        // Polling de incidentes em segundo plano a cada 2.0s
+        setInterval(loadIncidents, 2000);
+        loadIncidents();
+
         // Polling de Status Ping em segundo plano (a cada 2.5s)
         setInterval(async () => {
             try {
@@ -655,11 +987,13 @@ class WebMapServer:
         get_status_func: Callable[[], dict],
         on_connect_func: Callable[[str], None],
         on_edit_func: Callable[[str], None],
+        get_incidents_func: Optional[Callable[[], list]] = None,
     ):
         self.get_servers_func = get_servers_func
         self.get_status_func = get_status_func
         self.on_connect_func = on_connect_func
         self.on_edit_func = on_edit_func
+        self.get_incidents_func = get_incidents_func
         self.httpd: Optional[socketserver.TCPServer] = None
         self.port = 0
         self._thread: Optional[threading.Thread] = None
@@ -759,6 +1093,10 @@ class WebMapServer:
                     }
                     self._send_json(payload)
 
+                elif self.path == "/api/incidents":
+                    incidents = server_self.get_incidents_func() if server_self.get_incidents_func else []
+                    self._send_json(incidents)
+
                 elif self.path.startswith("/api/connect"):
                     parsed = urllib.parse.urlparse(self.path)
                     params = urllib.parse.parse_qs(parsed.query)
@@ -818,6 +1156,7 @@ class WebMapManager:
         get_status_func: Callable[[], dict],
         on_connect_func: Callable[[str], None],
         on_edit_func: Callable[[str], None],
+        get_incidents_func: Optional[Callable[[], list]] = None,
     ):
         self.container = container_widget
         try:
@@ -829,12 +1168,14 @@ class WebMapManager:
         self.get_status_func = get_status_func
         self.on_connect_func = on_connect_func
         self.on_edit_func = on_edit_func
+        self.get_incidents_func = get_incidents_func
 
         self.server = WebMapServer(
             get_servers_func,
             get_status_func,
             on_connect_func,
-            on_edit_func
+            on_edit_func,
+            get_incidents_func
         )
         self.edge_proc: Optional[subprocess.Popen] = None
         self.edge_hwnd: Optional[int] = None
