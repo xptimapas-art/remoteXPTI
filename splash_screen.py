@@ -36,7 +36,7 @@ class SplashScreen:
     WIDTH = 480
     HEIGHT = 320
 
-    def __init__(self, parent: tk.Tk, current_version: str = "1.1.0"):
+    def __init__(self, parent: tk.Tk, current_version: str = "1.1.1"):
         self.parent = parent
         self.current_version = current_version
         self.start_time = time.time()
