@@ -157,31 +157,63 @@ class SilentAutoUpdater:
             )
             with urllib.request.urlopen(req_feed, timeout=8.0) as resp:
                 if resp.status == 200:
-                    root = ET.fromstring(resp.read())
-                    ns = {"atom": "http://www.w3.org/2005/Atom"}
-                    for entry in root.findall("atom:entry", ns):
-                        title = (entry.find("atom:title", ns).text or "").strip()
-                        updated = (entry.find("atom:updated", ns).text or "")[:10]
-                        link_elem = entry.find("atom:link", ns)
-                        link = link_elem.attrib.get("href", "") if link_elem is not None else ""
-                        if "/releases/tag/" in link:
-                            tag = link.split("/releases/tag/")[-1].strip()
-                        else:
-                            tag = title.split()[0].strip()
+                    raw_bytes = resp.read()
+                    import re
+                    # Sanitiza caracteres de controle ASCII que são ilegais no XML 1.0 (ex: \x0c)
+                    clean_text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', raw_bytes.decode('utf-8', errors='replace'))
+                    parsed = False
+                    try:
+                        root = ET.fromstring(clean_text)
+                        ns = {"atom": "http://www.w3.org/2005/Atom"}
+                        for entry in root.findall("atom:entry", ns):
+                            title = (entry.find("atom:title", ns).text or "").strip()
+                            updated = (entry.find("atom:updated", ns).text or "")[:10]
+                            link_elem = entry.find("atom:link", ns)
+                            link = link_elem.attrib.get("href", "") if link_elem is not None else ""
+                            if "/releases/tag/" in link:
+                                tag = link.split("/releases/tag/")[-1].strip()
+                            else:
+                                tag = title.split()[0].strip()
 
-                        is_pub = is_public_version(tag)
-                        channel_label = "Público (Beta)" if is_pub else "Beta Tester"
-                        dl_url = f"https://github.com/{GITHUB_REPO}/releases/download/{tag}/{APP_NAME}.exe"
+                            is_pub = is_public_version(tag)
+                            channel_label = "Público (Beta)" if is_pub else "Beta Tester"
+                            dl_url = f"https://github.com/{GITHUB_REPO}/releases/download/{tag}/{APP_NAME}.exe"
 
-                        releases.append({
-                            "tag": tag,
-                            "name": title,
-                            "published": updated,
-                            "is_public": is_pub,
-                            "is_prerelease": not is_pub,
-                            "channel_label": channel_label,
-                            "download_url": dl_url
-                        })
+                            releases.append({
+                                "tag": tag,
+                                "name": title,
+                                "published": updated,
+                                "is_public": is_pub,
+                                "is_prerelease": not is_pub,
+                                "channel_label": channel_label,
+                                "download_url": dl_url
+                            })
+                        parsed = True
+                    except Exception as parse_err:
+                        log.warning(f"[SilentUpdater] XML do feed com aviso ({parse_err}). Acionando parser Regex resiliente...")
+
+                    if not parsed or not releases:
+                        # Fallback por Regex puro (imune a qualquer falha ou caracter malformado de XML)
+                        entry_matches = re.findall(r'<entry>(.*?)</entry>', clean_text, re.DOTALL)
+                        for em in entry_matches:
+                            t_m = re.search(r'<title>(.*?)</title>', em)
+                            l_m = re.search(r'href="([^"]*/releases/tag/([^"]+))"', em)
+                            if l_m:
+                                tag = l_m.group(2).strip()
+                                title = t_m.group(1).strip() if t_m else tag
+                                is_pub = is_public_version(tag)
+                                channel_label = "Público (Beta)" if is_pub else "Beta Tester"
+                                dl_url = f"https://github.com/{GITHUB_REPO}/releases/download/{tag}/{APP_NAME}.exe"
+                                releases.append({
+                                    "tag": tag,
+                                    "name": title,
+                                    "published": "",
+                                    "is_public": is_pub,
+                                    "is_prerelease": not is_pub,
+                                    "channel_label": channel_label,
+                                    "download_url": dl_url
+                                })
+
                     log.info(f"[SilentUpdater] {len(releases)} versões carregadas com sucesso via Feed Atom do GitHub.")
         except Exception as e:
             log.error(f"[SilentUpdater] Falha também no fallback do feed de releases: {e}")
