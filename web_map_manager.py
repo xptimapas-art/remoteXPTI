@@ -817,11 +817,14 @@ class WebMapManager:
         """Garante que o Edge esteja iniciado, docado no container e visível."""
         self._is_visible = True
         if not self._is_docked:
-            self._launch_and_dock()
+            if not self.edge_proc or self.edge_proc.poll() is not None:
+                self._launch_and_dock()
         elif self.edge_hwnd:
             try:
                 win32gui.ShowWindow(self.edge_hwnd, win32con.SW_SHOW)
                 self.resize()
+                win32gui.InvalidateRect(self.edge_hwnd, None, True)
+                win32gui.UpdateWindow(self.edge_hwnd)
             except Exception:
                 pass
 
@@ -836,11 +839,12 @@ class WebMapManager:
 
     def resize(self):
         """Ajusta o tamanho do Edge para corresponder perfeitamente ao container."""
-        if not self.edge_hwnd or not self._is_visible:
+        if not self.edge_hwnd or not self._is_docked:
             return
         try:
-            w = self.container.winfo_width()
-            h = self.container.winfo_height()
+            rect = win32gui.GetClientRect(self.container.winfo_id())
+            w = rect[2]
+            h = rect[3]
             if w > 50 and h > 50:
                 win32gui.MoveWindow(self.edge_hwnd, 0, 0, w, h, True)
         except Exception:
@@ -872,6 +876,8 @@ class WebMapManager:
             "--no-first-run",
             "--no-default-browser-check",
             "--disable-features=Translate",
+            "--disable-backgrounding-occluded-windows",
+            "--disable-renderer-backgrounding",
             "--disable-background-networking",
             f"--window-size={w},{h}"
         ]
@@ -920,9 +926,16 @@ class WebMapManager:
                     # Acopla como janela filha inseparável do container Tkinter
                     win32gui.SetParent(found_hwnd, parent_hwnd)
 
+                    try:
+                        crect = win32gui.GetClientRect(parent_hwnd)
+                        final_w = max(crect[2], initial_w)
+                        final_h = max(crect[3], initial_h)
+                    except Exception:
+                        final_w, final_h = initial_w, initial_h
+
                     # Aplica forçadamente SWP_FRAMECHANGED para o DWM destruir fisicamente a barra de título e botões
                     win32gui.SetWindowPos(
-                        found_hwnd, 0, 0, 0, initial_w, initial_h,
+                        found_hwnd, 0, 0, 0, final_w, final_h,
                         win32con.SWP_FRAMECHANGED | win32con.SWP_NOZORDER | (win32con.SWP_SHOWWINDOW if self._is_visible else 0)
                     )
                     self._is_docked = True

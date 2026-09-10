@@ -437,9 +437,15 @@ class RemoteXPTIApp(ctk.CTk):
         self.btn_settings.pack(side="left", padx=(8, 0))
 
     def _build_main_view(self):
+        # Container unificado com layout grid permanente (evita unmap/pack_forget de HWNDs Win32)
+        self.content_area = ctk.CTkFrame(self, fg_color="transparent")
+        self.content_area.pack(fill="both", expand=True, padx=12, pady=10)
+        self.content_area.grid_rowconfigure(0, weight=1)
+        self.content_area.grid_columnconfigure(0, weight=1)
+
         # 1. Modo Grade (AnyDesk Cards)
-        self.scroll_frame = ctk.CTkScrollableFrame(self, fg_color="transparent")
-        self.scroll_frame.pack(fill="both", expand=True, padx=12, pady=10)
+        self.scroll_frame = ctk.CTkScrollableFrame(self.content_area, fg_color="transparent")
+        self.scroll_frame.grid(row=0, column=0, sticky="nsew")
         self.scroll_frame.bind("<Configure>", self._on_scroll_frame_configure, add="+")
 
         self.empty_label = ctk.CTkLabel(
@@ -451,8 +457,12 @@ class RemoteXPTIApp(ctk.CTk):
         )
 
         # 2. Modo Mapa Interativo (Container GPU do Edge / Leaflet)
-        self.map_container = ctk.CTkFrame(self, fg_color="#121318", corner_radius=0)
+        self.map_container = ctk.CTkFrame(self.content_area, fg_color="#121318", corner_radius=0)
+        self.map_container.grid(row=0, column=0, sticky="nsew")
         self.map_container.bind("<Configure>", self._on_map_container_configure, add="+")
+
+        # Inicia exibindo a grade por padrão
+        self.scroll_frame.tkraise()
 
     def _build_statusbar(self):
         self.status_bar = ctk.CTkFrame(self, height=28, corner_radius=0, fg_color=("#eaecef", "#121318"))
@@ -634,8 +644,7 @@ class RemoteXPTIApp(ctk.CTk):
     def _on_view_mode_changed(self, mode: str):
         if "Mapa" in mode:
             self.view_mode = "mapa"
-            self.scroll_frame.pack_forget()
-            self.map_container.pack(fill="both", expand=True, padx=12, pady=10)
+            self.map_container.tkraise()
             self.filter_servers()
             if self.web_map:
                 self.web_map.show()
@@ -643,8 +652,7 @@ class RemoteXPTIApp(ctk.CTk):
             self.view_mode = "grade"
             if self.web_map:
                 self.web_map.hide()
-            self.map_container.pack_forget()
-            self.scroll_frame.pack(fill="both", expand=True, padx=12, pady=10)
+            self.scroll_frame.tkraise()
             self.filter_servers()
 
     def _process_action_queue(self):
