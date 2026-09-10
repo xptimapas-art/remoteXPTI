@@ -70,7 +70,7 @@ class SilentAutoUpdater:
         """Inicia a verificação e download automático em background conforme o canal configurado."""
         from config_manager import ConfigManager
         channel = ConfigManager().get_update_channel()
-        channel_desc = "Beta Tester (1.1.x)" if channel == "beta_tester" else "Público (1.x.0)"
+        channel_desc = "Beta Tester (1.x.y)" if channel == "beta_tester" else "Público (1.x.0)"
         log.info(f"[SilentUpdater] Iniciando verificação (manual={is_manual}, canal={channel_desc}). Versão atual: v{CURRENT_VERSION}")
 
         if self.update_ready:

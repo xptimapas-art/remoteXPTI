@@ -41,7 +41,7 @@ class SplashScreen:
     def __init__(
         self,
         parent: tk.Tk,
-        current_version: str = "1.1.5",
+        current_version: str = "1.2.0",
         title: str = "RemoteXPTI",
         subtitle: Optional[str] = None,
         initial_status: str = "Iniciando..."
@@ -327,7 +327,7 @@ class SplashScreen:
 
 def run_isolated_splash(
     msg_queue,
-    current_version: str = "1.1.5",
+    current_version: str = "1.2.0",
     title: str = "RemoteXPTI",
     subtitle: Optional[str] = None
 ):
@@ -524,7 +524,7 @@ class SplashProcessManager:
     independentemente de qualquer trabalho pesado sendo executado no processo principal.
     """
 
-    def __init__(self, current_version: str = "1.1.5"):
+    def __init__(self, current_version: str = "1.2.0"):
         import multiprocessing
         self.queue = multiprocessing.Queue()
         self.process = multiprocessing.Process(

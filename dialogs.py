@@ -815,7 +815,7 @@ class SettingsDialog(ctk.CTkToplevel):
             text_color=("gray15", "#e0e4ee")
         ).pack(anchor="w", padx=14, pady=(10, 2))
 
-        channel_text = "Canal Beta Tester (1.1.x)" if active_channel == "beta_tester" else "Canal Beta Público (1.x.0)"
+        channel_text = "Canal Beta Tester (1.x.y)" if active_channel == "beta_tester" else "Canal Beta Público (1.x.0)"
         ctk.CTkLabel(
             card_update,
             text=f"Versão atual: v{self.current_version} • {channel_text}\nO app verifica e baixa novas versões automaticamente em segundo plano.",
@@ -906,10 +906,10 @@ class SettingsDialog(ctk.CTkToplevel):
 
             seg_channel = ctk.CTkSegmentedButton(
                 card_dev,
-                values=["Canal Beta Público (1.x.0)", "Canal Beta Tester (1.1.x)"],
+                values=["Canal Beta Público (1.x.0)", "Canal Beta Tester (1.x.y)"],
                 command=on_channel_changed
             )
-            seg_channel.set("Canal Beta Tester (1.1.x)" if active_channel == "beta_tester" else "Canal Beta Público (1.x.0)")
+            seg_channel.set("Canal Beta Tester (1.x.y)" if active_channel == "beta_tester" else "Canal Beta Público (1.x.0)")
             seg_channel.pack(fill="x", padx=14, pady=(0, 8))
 
             # 2. Seletor de Versões do GitHub
