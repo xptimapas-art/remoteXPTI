@@ -781,6 +781,27 @@ class WebMapServer:
         return Handler
 
 
+def cleanup_orphaned_edge_processes(cache_dir: Path):
+    """Encerra qualquer processo msedge.exe anterior que ainda esteja utilizando o diretório de cache do mapa."""
+    cache_str = str(cache_dir).lower()
+    try:
+        ps_cmd = f"""
+        $cache = '{cache_str}';
+        Get-CimInstance Win32_Process -Filter "name = 'msedge.exe'" | Where-Object {{ $_.CommandLine -and $_.CommandLine.ToLower().Contains($cache) }} | ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force }}
+        """
+        subprocess.run(["powershell", "-NoProfile", "-Command", ps_cmd], capture_output=True, timeout=5)
+    except Exception:
+        pass
+
+    for lock_name in ["SingletonLock", "SingletonSocket", "SingletonCookie"]:
+        lock_file = cache_dir / lock_name
+        if lock_file.exists():
+            try:
+                lock_file.unlink()
+            except Exception:
+                pass
+
+
 class WebMapManager:
     """Controlador que acopla o Microsoft Edge ao container do RemoteXPTI."""
 
@@ -810,7 +831,9 @@ class WebMapManager:
         self._is_visible = False
 
     def start(self):
-        """Inicia o servidor HTTP embutido."""
+        """Inicia o servidor HTTP embutido e limpa processos orfãos."""
+        cache_dir = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "RemoteXPTI" / "map_cache"
+        cleanup_orphaned_edge_processes(cache_dir)
         self.server.start()
 
     def show(self):
@@ -858,12 +881,8 @@ class WebMapManager:
 
         cache_dir = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "RemoteXPTI" / "map_cache"
         cache_dir.mkdir(parents=True, exist_ok=True)
-        lock_file = cache_dir / "SingletonLock"
-        if lock_file.exists():
-            try:
-                lock_file.unlink()
-            except Exception:
-                pass
+        cleanup_orphaned_edge_processes(cache_dir)
+        time.sleep(0.15)
 
         target_parent_hwnd = self.container.winfo_id()
         w = max(400, self.container.winfo_width())
@@ -888,10 +907,8 @@ class WebMapManager:
         def find_and_dock_thread(parent_hwnd, initial_w, initial_h):
             found_hwnd = None
             try:
-                for _ in range(50):
-                    time.sleep(0.06)
-                    if not self.edge_proc or self.edge_proc.poll() is not None:
-                        break
+                for _ in range(60):
+                    time.sleep(0.08)
 
                     def enum_cb(h, _):
                         nonlocal found_hwnd
@@ -900,7 +917,7 @@ class WebMapManager:
                             try:
                                 _, pid = win32process.GetWindowThreadProcessId(h)
                                 title = win32gui.GetWindowText(h)
-                                if pid == self.edge_proc.pid or f"{self.server.port}" in title or "RemoteXPTI" in title:
+                                if (self.edge_proc and pid == self.edge_proc.pid) or f"{self.server.port}" in title or "RemoteXPTI" in title:
                                     found_hwnd = h
                             except Exception:
                                 pass
@@ -938,8 +955,19 @@ class WebMapManager:
                         found_hwnd, 0, 0, 0, final_w, final_h,
                         win32con.SWP_FRAMECHANGED | win32con.SWP_NOZORDER | (win32con.SWP_SHOWWINDOW if self._is_visible else 0)
                     )
-                    self._is_docked = True
-                    print(f"[WebMapManager] Edge acoplado com sucesso sem bordas nem botoes no HWND {parent_hwnd}!")
+
+                    # Verificação de segurança: confirma se o pai no Windows é de fato o container
+                    if win32gui.GetParent(found_hwnd) == parent_hwnd:
+                        self._is_docked = True
+                        print(f"[WebMapManager] Edge acoplado com sucesso sem bordas nem botoes no HWND {parent_hwnd}!")
+                    else:
+                        print(f"[WebMapManager] Tentando re-acoplar no HWND {parent_hwnd}...")
+                        win32gui.SetParent(found_hwnd, parent_hwnd)
+                        win32gui.SetWindowPos(
+                            found_hwnd, 0, 0, 0, final_w, final_h,
+                            win32con.SWP_FRAMECHANGED | win32con.SWP_NOZORDER | (win32con.SWP_SHOWWINDOW if self._is_visible else 0)
+                        )
+                        self._is_docked = True
                 else:
                     print(f"[WebMapManager] Edge window not found. proc.pid={self.edge_proc.pid if self.edge_proc else None}, poll={self.edge_proc.poll() if self.edge_proc else None}")
             except Exception as ex:
@@ -964,4 +992,6 @@ class WebMapManager:
                 except Exception:
                     pass
             self.edge_proc = None
+        cache_dir = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "RemoteXPTI" / "map_cache"
+        cleanup_orphaned_edge_processes(cache_dir)
         self.server.stop()
