@@ -462,7 +462,11 @@ class RemoteXPTIApp(ctk.CTk):
         self.map_container.bind("<Configure>", self._on_map_container_configure, add="+")
 
         # Inicia exibindo a grade por padrão
-        self.scroll_frame.tkraise()
+        self.map_container.lower()
+        if hasattr(self.scroll_frame, "_parent_frame"):
+            self.scroll_frame._parent_frame.tkraise()
+        else:
+            self.scroll_frame.tkraise()
 
     def _build_statusbar(self):
         self.status_bar = ctk.CTkFrame(self, height=28, corner_radius=0, fg_color=("#eaecef", "#121318"))
@@ -644,6 +648,10 @@ class RemoteXPTIApp(ctk.CTk):
     def _on_view_mode_changed(self, mode: str):
         if "Mapa" in mode:
             self.view_mode = "mapa"
+            if hasattr(self.scroll_frame, "_parent_frame"):
+                self.scroll_frame._parent_frame.lower()
+            else:
+                self.scroll_frame.lower()
             self.map_container.tkraise()
             self.filter_servers()
             if self.web_map:
@@ -652,7 +660,11 @@ class RemoteXPTIApp(ctk.CTk):
             self.view_mode = "grade"
             if self.web_map:
                 self.web_map.hide()
-            self.scroll_frame.tkraise()
+            self.map_container.lower()
+            if hasattr(self.scroll_frame, "_parent_frame"):
+                self.scroll_frame._parent_frame.tkraise()
+            else:
+                self.scroll_frame.tkraise()
             self.filter_servers()
 
     def _process_action_queue(self):
