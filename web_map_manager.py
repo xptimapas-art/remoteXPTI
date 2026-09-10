@@ -814,6 +814,11 @@ class WebMapManager:
         on_edit_func: Callable[[str], None],
     ):
         self.container = container_widget
+        try:
+            self.container_hwnd = container_widget.winfo_id()
+        except Exception:
+            self.container_hwnd = None
+
         self.get_servers_func = get_servers_func
         self.get_status_func = get_status_func
         self.on_connect_func = on_connect_func
@@ -831,10 +836,12 @@ class WebMapManager:
         self._is_visible = False
 
     def start(self):
-        """Inicia o servidor HTTP embutido e limpa processos orfãos."""
+        """Inicia o servidor HTTP embutido, limpa processos orfãos e pré-carrega o mapa em segundo plano."""
         cache_dir = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "RemoteXPTI" / "map_cache"
         cleanup_orphaned_edge_processes(cache_dir)
         self.server.start()
+        # Pré-carrega o Edge totalmente fora da tela para inicialização instantânea (0ms) sem flashes visíveis
+        threading.Thread(target=self._launch_and_dock, daemon=True).start()
 
     def show(self):
         """Garante que o Edge esteja iniciado, docado no container e visível."""
@@ -862,10 +869,10 @@ class WebMapManager:
 
     def resize(self):
         """Ajusta o tamanho do Edge para corresponder perfeitamente ao container."""
-        if not self.edge_hwnd or not self._is_docked:
+        if not self.edge_hwnd or not self._is_docked or not self.container_hwnd:
             return
         try:
-            rect = win32gui.GetClientRect(self.container.winfo_id())
+            rect = win32gui.GetClientRect(self.container_hwnd)
             w = rect[2]
             h = rect[3]
             if w > 50 and h > 50:
@@ -884,10 +891,24 @@ class WebMapManager:
         cleanup_orphaned_edge_processes(cache_dir)
         time.sleep(0.15)
 
-        target_parent_hwnd = self.container.winfo_id()
-        w = max(400, self.container.winfo_width())
-        h = max(300, self.container.winfo_height())
+        if not self.container_hwnd:
+            try:
+                self.container_hwnd = self.container.winfo_id()
+            except Exception:
+                pass
+        target_parent_hwnd = self.container_hwnd
+        if not target_parent_hwnd:
+            print("[WebMapManager] Container HWND não disponível para acoplamento.")
+            return
 
+        try:
+            crect = win32gui.GetClientRect(target_parent_hwnd)
+            w = max(400, crect[2])
+            h = max(300, crect[3])
+        except Exception:
+            w, h = 1100, 700
+
+        # Inicia o Edge fora da tela (-10000, -10000) para NUNCA piscar ou mostrar '127.0.0.1_/' para o cliente
         cmd = [
             edge_exe,
             f"--app=http://127.0.0.1:{self.server.port}",
@@ -898,6 +919,7 @@ class WebMapManager:
             "--disable-backgrounding-occluded-windows",
             "--disable-renderer-backgrounding",
             "--disable-background-networking",
+            "--window-position=-10000,-10000",
             f"--window-size={w},{h}"
         ]
 
@@ -907,7 +929,7 @@ class WebMapManager:
         def find_and_dock_thread(parent_hwnd, initial_w, initial_h):
             found_hwnd = None
             try:
-                for _ in range(60):
+                for _ in range(70):
                     time.sleep(0.08)
 
                     def enum_cb(h, _):
@@ -917,7 +939,18 @@ class WebMapManager:
                             try:
                                 _, pid = win32process.GetWindowThreadProcessId(h)
                                 title = win32gui.GetWindowText(h)
-                                if (self.edge_proc and pid == self.edge_proc.pid) or f"{self.server.port}" in title or "RemoteXPTI" in title:
+                                style = win32gui.GetWindowLong(h, win32con.GWL_STYLE)
+                                rect = win32gui.GetWindowRect(h)
+                                rw = rect[2] - rect[0]
+                                rh = rect[3] - rect[1]
+
+                                is_our_pid = (self.edge_proc and pid == self.edge_proc.pid)
+                                has_title = "127.0.0.1" in title or "RemoteXPTI" in title or f"{self.server.port}" in title
+                                has_caption = (style & win32con.WS_CAPTION) != 0
+                                has_size = rw > 200 and rh > 200
+
+                                # Identifica a janela de aplicação real (com caption e tamanho de app)
+                                if (is_our_pid or has_title) and has_caption and has_size:
                                     found_hwnd = h
                             except Exception:
                                 pass
@@ -953,7 +986,7 @@ class WebMapManager:
                     # Aplica forçadamente SWP_FRAMECHANGED para o DWM destruir fisicamente a barra de título e botões
                     win32gui.SetWindowPos(
                         found_hwnd, 0, 0, 0, final_w, final_h,
-                        win32con.SWP_FRAMECHANGED | win32con.SWP_NOZORDER | (win32con.SWP_SHOWWINDOW if self._is_visible else 0)
+                        win32con.SWP_FRAMECHANGED | win32con.SWP_NOZORDER | (win32con.SWP_SHOWWINDOW if self._is_visible else win32con.SWP_HIDEWINDOW)
                     )
 
                     # Verificação de segurança: confirma se o pai no Windows é de fato o container
@@ -965,7 +998,7 @@ class WebMapManager:
                         win32gui.SetParent(found_hwnd, parent_hwnd)
                         win32gui.SetWindowPos(
                             found_hwnd, 0, 0, 0, final_w, final_h,
-                            win32con.SWP_FRAMECHANGED | win32con.SWP_NOZORDER | (win32con.SWP_SHOWWINDOW if self._is_visible else 0)
+                            win32con.SWP_FRAMECHANGED | win32con.SWP_NOZORDER | (win32con.SWP_SHOWWINDOW if self._is_visible else win32con.SWP_HIDEWINDOW)
                         )
                         self._is_docked = True
                 else:
