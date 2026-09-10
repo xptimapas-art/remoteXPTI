@@ -652,7 +652,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     🗺️ Padrão
                 </button>
             </div>
-            <button class="btn-action btn-compass-hud" onclick="centerSC()" title="Centralizar SC (Bússola / Orientação Norte)">🧭</button>
             <button id="btnToggleIncidents" class="btn-action btn-incident" onclick="toggleIncidentTray()">
                 <span class="incident-icon">🚨</span> Incidentes <span id="incidentCountBadge" class="incident-badge-pill">0</span>
             </button>
