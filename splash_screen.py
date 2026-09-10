@@ -7,6 +7,8 @@ ocultando todo o processo de inicialização, montagem de layout e alinhamento d
 import sys
 import time
 import math
+import threading
+import multiprocessing
 import tkinter as tk
 from pathlib import Path
 from typing import Optional, Callable
@@ -39,7 +41,7 @@ class SplashScreen:
     def __init__(
         self,
         parent: tk.Tk,
-        current_version: str = "1.1.3",
+        current_version: str = "1.1.4",
         title: str = "RemoteXPTI",
         subtitle: Optional[str] = None,
         initial_status: str = "Iniciando..."
@@ -321,3 +323,253 @@ class SplashScreen:
                     on_finished()
 
         step_fade()
+
+
+def run_isolated_splash(
+    msg_queue,
+    current_version: str = "1.1.4",
+    title: str = "RemoteXPTI",
+    subtitle: Optional[str] = None
+):
+    """
+    Executa a splash screen em um processo isolado e independente do SO.
+    Garante taxa fixa de 60 FPS com os arcos girando e a barra deslizando
+    SEM NUNCA CONGELAR, mesmo com carga pesada de inicialização no app principal.
+    """
+    WIDTH = 480
+    HEIGHT = 320
+
+    root = tk.Tk()
+    root.overrideredirect(True)
+    root.configure(bg="#121318")
+
+    sw = root.winfo_screenwidth()
+    sh = root.winfo_screenheight()
+    x = max(0, (sw - WIDTH) // 2)
+    y = max(0, (sh - HEIGHT) // 2)
+    root.geometry(f"{WIDTH}x{HEIGHT}+{x}+{y}")
+
+    try:
+        root.attributes("-topmost", True)
+        root.attributes("-alpha", 1.0)
+    except Exception:
+        pass
+
+    icon_path = get_resource_path("imagens/app_icon.png")
+    photo_icon = None
+    if icon_path.exists():
+        try:
+            photo_icon = tk.PhotoImage(file=str(icon_path))
+            root.iconphoto(True, photo_icon)
+        except Exception:
+            pass
+
+    canvas = tk.Canvas(root, width=WIDTH, height=HEIGHT, bg="#121318", highlightthickness=0)
+    canvas.pack(fill="both", expand=True)
+
+    # 1. Borda externa suave
+    canvas.create_rectangle(1, 1, WIDTH - 2, HEIGHT - 2, outline="#242630", width=1.5)
+    canvas.create_rectangle(2, 2, WIDTH - 3, HEIGHT - 3, outline="#16171e", width=1.0)
+
+    cx, cy = WIDTH // 2, 102
+    r = 58
+
+    # 2. Ícone squircle do 'X' da XPti
+    icon_img = None
+    if icon_path.exists():
+        try:
+            pil_icon = Image.open(icon_path).convert("RGBA").resize((98, 98), Image.Resampling.LANCZOS)
+            icon_img = ImageTk.PhotoImage(pil_icon)
+            canvas.create_image(cx, cy, image=icon_img)
+        except Exception as e:
+            log.warning(f"[SplashProcess] Falha ao desenhar ícone: {e}")
+
+    # 3. Arcos orbitais de neon
+    arc_primary = canvas.create_arc(
+        cx - r, cy - r, cx + r, cy + r,
+        start=0, extent=85,
+        outline="#df0209", width=2.8, style="arc"
+    )
+    arc_secondary = canvas.create_arc(
+        cx - (r + 7), cy - (r + 7), cx + (r + 7), cy + (r + 7),
+        start=160, extent=65,
+        outline="#ff4757", width=1.8, style="arc"
+    )
+    arc_spark = canvas.create_arc(
+        cx - (r - 6), cy - (r - 6), cx + (r - 6), cy + (r - 6),
+        start=280, extent=45,
+        outline="#ff7675", width=1.4, style="arc"
+    )
+
+    pr = 62
+    pulse_halo = canvas.create_oval(
+        cx - pr, cy - pr, cx + pr, cy + pr,
+        outline="#3d1419", width=1.5
+    )
+
+    # 4. Tipografia
+    canvas.create_text(
+        cx, 184,
+        text=title,
+        fill="#ffffff",
+        font=("Segoe UI", 16, "bold")
+    )
+    canvas.create_text(
+        cx, 212,
+        text=subtitle or f"XPti Tecnologia  •  v{current_version} Beta",
+        fill="#a2a7b8",
+        font=("Segoe UI", 10)
+    )
+
+    # 5. Barra de progresso
+    bar_w = 210
+    bar_h = 3
+    bar_x1 = cx - bar_w // 2
+    bar_y1 = 250
+    bar_x2 = cx + bar_w // 2
+    bar_y2 = bar_y1 + bar_h
+    canvas.create_rectangle(bar_x1, bar_y1, bar_x2, bar_y2, fill="#1c1e28", outline="")
+
+    slider_w = 60
+    slider_pos = bar_x1
+    slider_dir = 2.8
+    slider_id = canvas.create_rectangle(bar_x1, bar_y1, bar_x1 + slider_w, bar_y2, fill="#df0209", outline="")
+
+    # 6. Status dinâmico
+    status_id = canvas.create_text(cx, 274, text="Iniciando...", fill="#64687a", font=("Segoe UI", 9))
+
+    anim_angle = 0
+    pulse_phase = 0.0
+    is_closing = False
+
+    def anim_tick():
+        nonlocal anim_angle, pulse_phase, slider_pos, slider_dir
+        if is_closing:
+            return
+
+        anim_angle = (anim_angle + 4.8) % 360
+        angle2 = (anim_angle * 1.35 + 160) % 360
+        angle3 = (anim_angle * 0.85 + 280) % 360
+
+        try:
+            canvas.itemconfigure(arc_primary, start=anim_angle)
+            canvas.itemconfigure(arc_secondary, start=angle2)
+            canvas.itemconfigure(arc_spark, start=angle3)
+
+            pulse_phase += 0.08
+            p_delta = math.sin(pulse_phase) * 3.5
+            curr_pr = 62 + p_delta
+            canvas.coords(pulse_halo, cx - curr_pr, cy - curr_pr, cx + curr_pr, cy + curr_pr)
+
+            slider_pos += slider_dir
+            if slider_pos + slider_w >= bar_x2:
+                slider_pos = bar_x2 - slider_w
+                slider_dir = -abs(slider_dir)
+            elif slider_pos <= bar_x1:
+                slider_pos = bar_x1
+                slider_dir = abs(slider_dir)
+            canvas.coords(slider_id, slider_pos, bar_y1, slider_pos + slider_w, bar_y2)
+        except Exception:
+            pass
+
+        root.after(16, anim_tick)  # Locked 60 FPS contínuo
+
+    def poll_messages():
+        nonlocal is_closing
+        try:
+            while not msg_queue.empty():
+                msg = msg_queue.get_nowait()
+                if msg in ("__CLOSE__", "__FINISH__"):
+                    is_closing = True
+                    fade_out()
+                    return
+                else:
+                    canvas.itemconfigure(status_id, text=str(msg))
+        except Exception:
+            pass
+        if not is_closing:
+            root.after(25, poll_messages)
+
+    def fade_out():
+        alpha = 1.0
+        try:
+            canvas.itemconfigure(status_id, text="Pronto!")
+        except Exception:
+            pass
+        def step():
+            nonlocal alpha
+            alpha -= 0.16
+            if alpha <= 0.0:
+                try:
+                    root.destroy()
+                except Exception:
+                    pass
+                return
+            try:
+                root.attributes("-alpha", max(0.0, alpha))
+            except Exception:
+                pass
+            root.after(16, step)
+        step()
+
+    anim_tick()
+    poll_messages()
+    root.mainloop()
+
+
+class SplashProcessManager:
+    """
+    Gerencia a execução da Splash Screen em um processo separado independente.
+    Garante que a rotação e a barra de progresso NUNCA congelem ou travem,
+    independentemente de qualquer trabalho pesado sendo executado no processo principal.
+    """
+
+    def __init__(self, current_version: str = "1.1.4"):
+        import multiprocessing
+        self.queue = multiprocessing.Queue()
+        self.process = multiprocessing.Process(
+            target=run_isolated_splash,
+            args=(self.queue, current_version),
+            daemon=True
+        )
+        self.start_time = time.time()
+        self.min_duration = 3.5
+        self._finished = False
+        try:
+            self.process.start()
+        except Exception as e:
+            log.warning(f"[SplashProcessManager] Falha ao iniciar processo de splash isolado: {e}")
+            self.process = None
+
+    def set_status(self, text: str):
+        if self._finished or not self.process:
+            return
+        try:
+            self.queue.put(text)
+        except Exception:
+            pass
+
+    def finish(self, on_finished: Optional[Callable[[], None]] = None):
+        if self._finished:
+            if on_finished:
+                on_finished()
+            return
+        self._finished = True
+        if self.process:
+            try:
+                self.queue.put("__FINISH__")
+                threading.Thread(target=lambda: self.process.join(timeout=2), daemon=True).start()
+            except Exception:
+                pass
+        if on_finished:
+            on_finished()
+
+    def close_now(self):
+        self._finished = True
+        if self.process:
+            try:
+                self.queue.put("__CLOSE__")
+                threading.Thread(target=lambda: self.process.join(timeout=1), daemon=True).start()
+            except Exception:
+                pass
+

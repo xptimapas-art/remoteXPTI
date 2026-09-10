@@ -39,6 +39,62 @@ PALETTES = [
     (35, 85, 105),   # Teal Cyan
 ]
 
+@lru_cache(maxsize=16)
+def get_base_palette_wallpaper(palette_idx: int, width: int = 276, height: int = 180, is_hover: bool = False) -> Image.Image:
+    """Pré-calcula a base vetorial AnyDesk com ondas e gradiente inferior em cache de alta velocidade."""
+    base_rgb = PALETTES[palette_idx % len(PALETTES)]
+    img = Image.new("RGBA", (width, height), (*base_rgb, 255))
+    draw = ImageDraw.Draw(img)
+
+    for y in range(height):
+        ratio = y / height
+        r = int(base_rgb[0] * (1.14 - 0.44 * ratio))
+        g = int(base_rgb[1] * (1.14 - 0.44 * ratio))
+        b = int(base_rgb[2] * (1.14 - 0.44 * ratio))
+        draw.line([(0, y), (width, y)], fill=(min(255, max(0, r)), min(255, max(0, g)), min(255, max(0, b)), 255))
+
+    # Ondas estilizadas suaves do AnyDesk
+    wave_img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    wdraw = ImageDraw.Draw(wave_img)
+    wdraw.arc([int(width * 0.1), int(-height * 0.5), int(width * 1.6), int(height * 1.8)], start=160, end=270, fill=(255, 255, 255, 38), width=18)
+    wdraw.arc([int(width * 0.25), int(-height * 0.3), int(width * 1.7), int(height * 1.7)], start=160, end=260, fill=(255, 255, 255, 45), width=12)
+    wdraw.arc([int(width * 0.4), int(-height * 0.1), int(width * 1.8), int(height * 1.6)], start=165, end=255, fill=(255, 255, 255, 30), width=6)
+    wave_img = wave_img.filter(ImageFilter.GaussianBlur(radius=5))
+    img = Image.alpha_composite(img, wave_img)
+
+    if is_hover:
+        enhancer = ImageEnhance.Brightness(img)
+        img = enhancer.enhance(1.14)
+        sheen = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        sdraw = ImageDraw.Draw(sheen)
+        for y in range(int(height * 0.45)):
+            alpha = int(35 * (1.0 - y / (height * 0.45)))
+            sdraw.line([(0, y), (width, y)], fill=(255, 255, 255, alpha))
+        tint = Image.new("RGBA", (width, height), (0, 120, 215, 22))
+        sheen = Image.alpha_composite(sheen, tint)
+        img = Image.alpha_composite(img, sheen)
+
+    start_y = int(height * 0.40)
+    grad_overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    gdraw = ImageDraw.Draw(grad_overlay)
+    for y in range(start_y, height):
+        ratio = (y - start_y) / (height - start_y)
+        alpha = int((210 if is_hover else 225) * (ratio ** 1.2))
+        gdraw.line([(0, y), (width, y)], fill=(0, 0, 0, alpha))
+    img = Image.alpha_composite(img, grad_overlay)
+
+    return img
+
+
+@lru_cache(maxsize=8)
+def get_card_font(font_type: str, size: int):
+    try:
+        font_file = "segoeuib.ttf" if font_type == "bold" else "segoeui.ttf"
+        return ImageFont.truetype(font_file, size)
+    except Exception:
+        return ImageFont.load_default()
+
+
 class PreviewManager:
     """Gerencia captura, geração e exibição de miniaturas estilo AnyDesk autêntico."""
 
@@ -169,52 +225,20 @@ class PreviewManager:
             img = None
 
         if img is None:
-            # Seleção de paleta baseada no ID do servidor
+            # Seleção de paleta baseada no ID do servidor com base pré-renderizada ultra-rápida (0ms)
             h_idx = abs(hash(server_id)) % len(PALETTES)
-            base_rgb = PALETTES[h_idx]
-
-            img = Image.new("RGBA", (width, height), (*base_rgb, 255))
-            draw = ImageDraw.Draw(img)
-
-            for y in range(height):
-                ratio = y / height
-                r = int(base_rgb[0] * (1.14 - 0.44 * ratio))
-                g = int(base_rgb[1] * (1.14 - 0.44 * ratio))
-                b = int(base_rgb[2] * (1.14 - 0.44 * ratio))
-                draw.line([(0, y), (width, y)], fill=(min(255, max(0, r)), min(255, max(0, g)), min(255, max(0, b)), 255))
-
-            # Ondas estilizadas suaves do AnyDesk
-            wave_img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-            wdraw = ImageDraw.Draw(wave_img)
-            wdraw.arc([int(width * 0.1), int(-height * 0.5), int(width * 1.6), int(height * 1.8)], start=160, end=270, fill=(255, 255, 255, 38), width=18)
-            wdraw.arc([int(width * 0.25), int(-height * 0.3), int(width * 1.7), int(height * 1.7)], start=160, end=260, fill=(255, 255, 255, 45), width=12)
-            wdraw.arc([int(width * 0.4), int(-height * 0.1), int(width * 1.8), int(height * 1.6)], start=165, end=255, fill=(255, 255, 255, 30), width=6)
-            wave_img = wave_img.filter(ImageFilter.GaussianBlur(radius=5))
-            img = Image.alpha_composite(img, wave_img)
-
-        # 2. Efeito de Iluminação Ativa no Hover
-        if is_hover:
+            img = get_base_palette_wallpaper(h_idx, width, height, is_hover).copy()
+        elif is_hover:
             enhancer = ImageEnhance.Brightness(img)
             img = enhancer.enhance(1.14)
-            # Brilho luminoso superior (sheen)
-            sheen = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-            sdraw = ImageDraw.Draw(sheen)
-            for y in range(int(height * 0.45)):
-                alpha = int(35 * (1.0 - y / (height * 0.45)))
-                sdraw.line([(0, y), (width, y)], fill=(255, 255, 255, alpha))
-            tint = Image.new("RGBA", (width, height), (0, 120, 215, 22))
-            sheen = Image.alpha_composite(sheen, tint)
-            img = Image.alpha_composite(img, sheen)
-
-        # 3. Gradiente escuro no rodapé para legibilidade do texto
-        start_y = int(height * 0.40)
-        grad_overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-        gdraw = ImageDraw.Draw(grad_overlay)
-        for y in range(start_y, height):
-            ratio = (y - start_y) / (height - start_y)
-            alpha = int((210 if is_hover else 225) * (ratio ** 1.2))
-            gdraw.line([(0, y), (width, y)], fill=(0, 0, 0, alpha))
-        img = Image.alpha_composite(img, grad_overlay)
+            start_y = int(height * 0.40)
+            grad_overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+            gdraw = ImageDraw.Draw(grad_overlay)
+            for y in range(start_y, height):
+                ratio = (y - start_y) / (height - start_y)
+                alpha = int(210 * (ratio ** 1.2))
+                gdraw.line([(0, y), (width, y)], fill=(0, 0, 0, alpha))
+            img = Image.alpha_composite(img, grad_overlay)
 
         # 4. Indicador de Status em Alta Resolução (Canto Superior Esquerdo)
         badge = cls._render_status_badge(is_online, size=18)
@@ -233,13 +257,9 @@ class PreviewManager:
         draw.line([(mx + mw // 2, my + mh), (mx + mw // 2, my + mh + 4)], fill=(255, 255, 255, 245), width=2)
         draw.line([(mx + mw // 2 - 5, my + mh + 4), (mx + mw // 2 + 5, my + mh + 4)], fill=(255, 255, 255, 245), width=2)
 
-        # 7. Textos: Nome do Servidor e Host
-        try:
-            font_name = ImageFont.truetype("segoeuib.ttf", 13)
-            font_host = ImageFont.truetype("segoeui.ttf", 11)
-        except Exception:
-            font_name = ImageFont.load_default()
-            font_host = ImageFont.load_default()
+        # 7. Textos: Nome do Servidor e Host com Fontes em Cache
+        font_name = get_card_font("bold", 13)
+        font_host = get_card_font("regular", 11)
 
         display_name = name if len(name) <= 22 else name[:20] + "..."
         tx = mx + mw + 10

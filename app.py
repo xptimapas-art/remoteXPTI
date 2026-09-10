@@ -23,7 +23,7 @@ from web_map_manager import WebMapManager
 from logger import log
 from config_manager import ConfigManager
 from cloud_sync import CloudSyncManager
-from splash_screen import SplashScreen
+from splash_screen import SplashScreen, SplashProcessManager
 
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
@@ -65,7 +65,7 @@ class ServerCard(ctk.CTkFrame):
         self._bind_events()
 
     def _load_images(self):
-        """Pré-carrega as imagens normal e hover para transição instantânea a 0ms."""
+        """Carrega a imagem normal imediatamente e deixa a imagem hover para sob demanda (0ms no startup)."""
         self.img_normal = PreviewManager.get_card_ctk(
             server_id=self.server["id"],
             name=self.server.get("name", "Servidor"),
@@ -76,16 +76,7 @@ class ServerCard(ctk.CTkFrame):
             is_fav=self.is_fav,
             is_hover=False
         )
-        self.img_hover = PreviewManager.get_card_ctk(
-            server_id=self.server["id"],
-            name=self.server.get("name", "Servidor"),
-            host=self.server.get("host", "0.0.0.0"),
-            is_online=self.is_online,
-            width=CARD_WIDTH,
-            height=CARD_HEIGHT,
-            is_fav=self.is_fav,
-            is_hover=True
-        )
+        self.img_hover = None  # Carregamento sob demanda (lazy) ao passar o mouse
 
     def _build_ui(self):
         # Imagem de fundo completa estilo AnyDesk (renderiza 100% dos ícones e textos sem caixas pretas)
@@ -133,6 +124,17 @@ class ServerCard(ctk.CTkFrame):
 
     def _set_hover(self, is_hover: bool):
         self._is_hovering = is_hover
+        if is_hover and self.img_hover is None:
+            self.img_hover = PreviewManager.get_card_ctk(
+                server_id=self.server["id"],
+                name=self.server.get("name", "Servidor"),
+                host=self.server.get("host", "0.0.0.0"),
+                is_online=self.is_online,
+                width=CARD_WIDTH,
+                height=CARD_HEIGHT,
+                is_fav=self.is_fav,
+                is_hover=True
+            )
         self.lbl_card.configure(image=self.img_hover if is_hover else self.img_normal)
 
     def _toggle_favorite(self):
@@ -253,9 +255,9 @@ class RemoteXPTIApp(ctk.CTk):
             except Exception:
                 pass
 
-        # Inicia a Splash Screen com o motion do X da XPti com exibição IMEDIATA (0ms de atraso visual)
-        self.splash = SplashScreen(parent=self, current_version=CURRENT_VERSION)
-        self.splash.show_immediately()
+        # Inicia a Splash Screen em PROCESSO DEDICADO ISOLADO
+        # A rotação dos arcos e o slider da barra de progresso NUNCA congelam, rodando a 60 FPS dedicados!
+        self.splash_manager = SplashProcessManager(current_version=CURRENT_VERSION)
         self.splash_min_duration = 3.5  # Duração garantida de 3.5 segundos reais de animação visível
         self.splash_start_time = time.time()
         self._splash_closed = False
@@ -289,12 +291,12 @@ class RemoteXPTIApp(ctk.CTk):
 
         self.bind("<Configure>", self._on_window_configure, add="+")
 
-        # Inicia o warmup em estágios progressivos (o Tkinter mainloop já roda a 50 FPS sem engasgos)
+        # Inicia o warmup em estágios progressivos
         self.after(30, self._start_staged_warmup)
 
     def _start_staged_warmup(self):
         """Executa a inicialização em estágios para manter a animação orbital a 50 FPS sem nenhum travamento."""
-        self.splash.set_status("Carregando credenciais e dados locais...")
+        self.splash_manager.set_status("Carregando credenciais e dados locais...")
         threading.Thread(target=sync_windows_shortcuts_icon, daemon=True).start()
         
         # Etapa 2: Subsistema gráfico e mapa Edge
@@ -303,7 +305,7 @@ class RemoteXPTIApp(ctk.CTk):
     def _warmup_step2_map(self):
         if self._splash_closed:
             return
-        self.splash.set_status("Inicializando acelerador gráfico...")
+        self.splash_manager.set_status("Inicializando acelerador gráfico...")
         
         # Inicializa o mapa web Leaflet com aceleração de GPU
         try:
@@ -324,7 +326,7 @@ class RemoteXPTIApp(ctk.CTk):
     def _warmup_step3_layout(self):
         if self._splash_closed:
             return
-        self.splash.set_status("Organizando servidores e layout...")
+        self.splash_manager.set_status("Organizando servidores e layout...")
         self.refresh_servers()
         self.update_idletasks()
         self._check_column_recalculation()
@@ -335,7 +337,7 @@ class RemoteXPTIApp(ctk.CTk):
     def _warmup_step4_network(self):
         if self._splash_closed:
             return
-        self.splash.set_status("Otimizando conexões de rede...")
+        self.splash_manager.set_status("Otimizando conexões de rede...")
         
         # Inicia a checagem inicial de status
         self.start_status_checker(is_manual=False)
@@ -366,8 +368,8 @@ class RemoteXPTIApp(ctk.CTk):
             return
 
         # Animação e carregamento completos: dispara transição suave
-        self.splash.set_status("Pronto!")
-        self.splash.finish(on_finished=self._reveal_main_window)
+        self._splash_closed = True
+        self.splash_manager.finish(on_finished=self._reveal_main_window)
 
     def _reveal_main_window(self):
         """Revela a janela principal perfeitamente montada, calculada e sem nenhum flickering."""
@@ -736,6 +738,11 @@ class RemoteXPTIApp(ctk.CTk):
     def _on_close(self):
         """Encerra a aplicação de forma limpa, finalizando o Edge e o pool de threads em segundo plano."""
         log.info("[RemoteXPTI] Encerrando aplicação (WM_DELETE_WINDOW)...")
+        if hasattr(self, "splash_manager") and self.splash_manager:
+            try:
+                self.splash_manager.close_now()
+            except Exception:
+                pass
         if hasattr(self, "splash") and self.splash:
             try:
                 if hasattr(self.splash, "window") and self.splash.window.winfo_exists():
@@ -902,14 +909,6 @@ class RemoteXPTIApp(ctk.CTk):
                 self.card_widgets[s_id] = card
 
             card.grid(row=row, column=col, padx=5, pady=5)
-
-            # Mantém a animação orbital do 'X' 100% suave enquanto renderiza os cards
-            if (index + 1) % 5 == 0 and hasattr(self, "splash") and not getattr(self, "_splash_closed", True):
-                try:
-                    self.splash.tick_motion()
-                    self.update_idletasks()
-                except Exception:
-                    pass
 
     def connect_to_server(self, server: Dict[str, Any]):
         server_id = server["id"]
