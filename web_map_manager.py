@@ -249,56 +249,83 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             background: #3a3f4e;
         }
 
-        /* Pulsing Radar Markers */
-        .pulse-marker-online {
-            width: 16px;
-            height: 16px;
-            background: #2ebd59;
-            border-radius: 50%;
-            border: 2px solid #ffffff;
-            box-shadow: 0 0 0 0 rgba(46, 189, 89, 0.7);
-            animation: pulse-green 2s infinite;
-            cursor: pointer;
+        /* Layer Switcher no HUD */
+        .layer-switch-box {
+            display: flex;
+            background: #14161d;
+            border: 1px solid #363a4a;
+            border-radius: 6px;
+            padding: 2px;
+            gap: 2px;
         }
-        @keyframes pulse-green {
-            0% { box-shadow: 0 0 0 0 rgba(46, 189, 89, 0.8); }
-            70% { box-shadow: 0 0 0 14px rgba(46, 189, 89, 0); }
-            100% { box-shadow: 0 0 0 0 rgba(46, 189, 89, 0); }
+        .btn-layer-toggle {
+            background: transparent;
+            color: #9aa0b2;
+            border: none;
+            border-radius: 4px;
+            padding: 5px 11px;
+            font-size: 11px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            white-space: nowrap;
+        }
+        .btn-layer-toggle:hover {
+            color: #ffffff;
+            background: rgba(255, 255, 255, 0.08);
+        }
+        .btn-layer-toggle.active {
+            background: #0066cc;
+            color: #ffffff;
+            box-shadow: 0 2px 8px rgba(0, 102, 204, 0.4);
         }
 
-        .pulse-marker-offline {
-            width: 16px;
-            height: 16px;
-            background: #f04438;
-            border-radius: 50%;
-            border: 2px solid #ffffff;
-            box-shadow: 0 0 0 0 rgba(240, 68, 56, 0.7);
-            animation: pulse-red 2s infinite;
-            cursor: pointer;
+        /* Marcador em Alfinete de Alta Definição com Bolinha de Status */
+        .leaflet-pin-container {
+            background: transparent !important;
+            border: none !important;
         }
-        @keyframes pulse-red {
-            0% { box-shadow: 0 0 0 0 rgba(240, 68, 56, 0.8); }
-            70% { box-shadow: 0 0 0 12px rgba(240, 68, 56, 0); }
-            100% { box-shadow: 0 0 0 0 rgba(240, 68, 56, 0); }
-        }
-
-        .pulse-marker-checking {
-            width: 14px;
-            height: 14px;
-            background: #94a3b8;
-            border-radius: 50%;
-            border: 2px solid #ffffff;
+        .pin-marker {
+            width: 30px;
+            height: 38px;
             cursor: pointer;
+            filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.75));
+            transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            transform-origin: bottom center;
+        }
+        .pin-marker:hover {
+            transform: scale(1.22) translateY(-4px);
+            filter: drop-shadow(0 6px 14px rgba(0, 0, 0, 0.9));
+            z-index: 9999 !important;
+        }
+        .pin-online .pin-halo {
+            animation: pulse-halo-green 2.2s infinite ease-in-out;
+        }
+        @keyframes pulse-halo-green {
+            0%, 100% { r: 6.5px; opacity: 0.35; }
+            50% { r: 8.5px; opacity: 0.9; }
+        }
+        .pin-offline .pin-halo {
+            animation: pulse-halo-red 2.2s infinite ease-in-out;
+        }
+        @keyframes pulse-halo-red {
+            0%, 100% { r: 6.5px; opacity: 0.35; }
+            50% { r: 8.5px; opacity: 0.9; }
         }
 
         /* MarkerCluster Dark Custom Styling */
         .marker-cluster-small, .marker-cluster-medium, .marker-cluster-large {
-            background-color: rgba(0, 102, 204, 0.4) !important;
+            background-color: rgba(0, 102, 204, 0.45) !important;
         }
         .marker-cluster-small div, .marker-cluster-medium div, .marker-cluster-large div {
             background-color: #0066cc !important;
             color: #ffffff !important;
-            font-weight: 700 !important;
+            font-weight: 800 !important;
+            border: 2px solid #ffffff !important;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.6) !important;
         }
 
         /* Leaflet Dark Tooltips */
@@ -319,7 +346,15 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 </head>
 <body>
     <div class="map-hud">
-        <div class="map-title">🛰️ Mapa de Acessos</div>
+        <div class="map-title">🗺️ Mapa</div>
+        <div class="layer-switch-box">
+            <button id="btnLayerSat" class="btn-layer-toggle active" onclick="setMapLayer('satellite')">
+                🛰️ Satélite
+            </button>
+            <button id="btnLayerRoads" class="btn-layer-toggle" onclick="setMapLayer('roads')">
+                🗺️ Padrão
+            </button>
+        </div>
         <input type="text" id="searchInput" class="map-search" placeholder="🔍 Filtrar servidor ou cidade..." />
         <button class="btn-action" onclick="centerSC()">📍 Centralizar SC</button>
         <span id="serverCountBadge" style="font-size: 11px; color: #8e92a0; margin-left: 6px;">Carregando...</span>
@@ -394,6 +429,39 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         };
         L.control.layers(baseMaps, null, { position: 'topright' }).addTo(map);
 
+        function setMapLayer(type) {
+            if (type === 'satellite') {
+                if (map.hasLayer(googleRoads)) map.removeLayer(googleRoads);
+                if (map.hasLayer(cartoDark)) map.removeLayer(cartoDark);
+                if (map.hasLayer(osm)) map.removeLayer(osm);
+                if (!map.hasLayer(googleSatellite)) map.addLayer(googleSatellite);
+
+                document.getElementById('btnLayerSat').classList.add('active');
+                document.getElementById('btnLayerRoads').classList.remove('active');
+            } else if (type === 'roads') {
+                if (map.hasLayer(googleSatellite)) map.removeLayer(googleSatellite);
+                if (map.hasLayer(cartoDark)) map.removeLayer(cartoDark);
+                if (map.hasLayer(osm)) map.removeLayer(osm);
+                if (!map.hasLayer(googleRoads)) map.addLayer(googleRoads);
+
+                document.getElementById('btnLayerRoads').classList.add('active');
+                document.getElementById('btnLayerSat').classList.remove('active');
+            }
+        }
+
+        map.on('baselayerchange', (e) => {
+            if (e.name.includes('Satélite')) {
+                document.getElementById('btnLayerSat').classList.add('active');
+                document.getElementById('btnLayerRoads').classList.remove('active');
+            } else if (e.name.includes('Google Maps') || e.name.includes('Padrão')) {
+                document.getElementById('btnLayerRoads').classList.add('active');
+                document.getElementById('btnLayerSat').classList.remove('active');
+            } else {
+                document.getElementById('btnLayerSat').classList.remove('active');
+                document.getElementById('btnLayerRoads').classList.remove('active');
+            }
+        });
+
         // Cluster de Marcadores
         const clusterGroup = L.markerClusterGroup({
             spiderfyOnMaxZoom: true,
@@ -409,14 +477,39 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         let lastServersJson = '';
 
         function createCustomIcon(status) {
-            let cssClass = 'pulse-marker-checking';
-            if (status === true) cssClass = 'pulse-marker-online';
-            else if (status === false) cssClass = 'pulse-marker-offline';
+            let statusClass = 'pin-checking';
+            let dotColor = '#94a3b8';
+            let haloColor = 'rgba(148, 163, 184, 0.25)';
+            let pinBg = '#1c1f28';
+
+            if (status === true) {
+                statusClass = 'pin-online';
+                dotColor = '#2ebd59';
+                haloColor = 'rgba(46, 189, 89, 0.45)';
+                pinBg = '#142219';
+            } else if (status === false) {
+                statusClass = 'pin-offline';
+                dotColor = '#f04438';
+                haloColor = 'rgba(240, 68, 56, 0.45)';
+                pinBg = '#261618';
+            }
+
+            const html = `
+                <div class="pin-marker ${statusClass}">
+                    <svg width="30" height="38" viewBox="0 0 30 38" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path class="pin-base" d="M15 1.5C7.544 1.5 1.5 7.544 1.5 15C1.5 24.8 13.9 36.6 14.5 37.1C14.8 37.4 15.2 37.4 15.5 37.1C16.1 36.6 28.5 24.8 28.5 15C28.5 7.544 22.456 1.5 15 1.5Z" fill="${pinBg}" stroke="#ffffff" stroke-width="2"/>
+                        <circle class="pin-halo" cx="15" cy="15" r="7.5" fill="${haloColor}"/>
+                        <circle class="pin-dot" cx="15" cy="15" r="5" fill="${dotColor}" stroke="#ffffff" stroke-width="1.2"/>
+                    </svg>
+                </div>
+            `;
 
             return L.divIcon({
-                className: cssClass,
-                iconSize: [16, 16],
-                iconAnchor: [8, 8]
+                className: 'leaflet-pin-container',
+                html: html,
+                iconSize: [30, 38],
+                iconAnchor: [15, 37],
+                tooltipAnchor: [0, -38]
             });
         }
 
@@ -447,7 +540,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     permanent: false,
                     direction: 'top',
                     className: 'leaflet-tooltip-dark',
-                    offset: [0, -8]
+                    offset: [0, -38]
                 });
 
                 marker.on('click', () => {
@@ -594,7 +687,12 @@ class WebMapServer:
 
     def start(self):
         handler_cls = self._make_handler()
-        self.httpd = socketserver.TCPServer(("127.0.0.1", 0), handler_cls)
+
+        class QuietTCPServer(socketserver.TCPServer):
+            def handle_error(self, request, client_address):
+                pass  # Silencia desconexoes abruptas ao fechar o app
+
+        self.httpd = QuietTCPServer(("127.0.0.1", 0), handler_cls)
         self.port = self.httpd.server_address[1]
         self._thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
         self._thread.start()
@@ -771,7 +869,14 @@ class WebMapManager:
 
         cache_dir = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "RemoteXPTI" / "map_cache"
         cache_dir.mkdir(parents=True, exist_ok=True)
+        lock_file = cache_dir / "SingletonLock"
+        if lock_file.exists():
+            try:
+                lock_file.unlink()
+            except Exception:
+                pass
 
+        target_parent_hwnd = self.container.winfo_id()
         w = max(400, self.container.winfo_width())
         h = max(300, self.container.winfo_height())
 
@@ -783,52 +888,52 @@ class WebMapManager:
             "--no-default-browser-check",
             "--disable-features=Translate",
             "--disable-background-networking",
-            f"--window-size={w},{h}",
-            "--window-position=-32000,-32000"
+            f"--window-size={w},{h}"
         ]
 
         creation_flags = 0
         self.edge_proc = subprocess.Popen(cmd, creationflags=creation_flags)
 
-        def find_and_dock_thread():
-            target_parent_hwnd = self.container.winfo_id()
+        def find_and_dock_thread(parent_hwnd, initial_w, initial_h):
             found_hwnd = None
+            try:
+                for _ in range(50):
+                    time.sleep(0.06)
+                    if not self.edge_proc or self.edge_proc.poll() is not None:
+                        break
 
-            for _ in range(40):
-                time.sleep(0.08)
-                if not self.edge_proc or self.edge_proc.poll() is not None:
-                    break
-
-                def enum_cb(h, _):
-                    nonlocal found_hwnd
-                    if win32gui.IsWindowVisible(h):
+                    def enum_cb(h, _):
+                        nonlocal found_hwnd
                         cname = win32gui.GetClassName(h)
                         if "Chrome_WidgetWin_1" in cname:
                             try:
                                 _, pid = win32process.GetWindowThreadProcessId(h)
-                                if pid == self.edge_proc.pid:
+                                title = win32gui.GetWindowText(h)
+                                if pid == self.edge_proc.pid or f"{self.server.port}" in title or "RemoteXPTI" in title:
                                     found_hwnd = h
                             except Exception:
                                 pass
-                win32gui.EnumWindows(enum_cb, None)
+                    win32gui.EnumWindows(enum_cb, None)
+                    if found_hwnd:
+                        break
+
                 if found_hwnd:
-                    break
+                    self.edge_hwnd = found_hwnd
+                    old_style = win32gui.GetWindowLong(found_hwnd, win32con.GWL_STYLE)
+                    new_style = (old_style & ~win32con.WS_POPUP & ~win32con.WS_CAPTION & ~win32con.WS_THICKFRAME & ~win32con.WS_MINIMIZEBOX & ~win32con.WS_MAXIMIZEBOX & ~win32con.WS_SYSMENU) | win32con.WS_CHILD
+                    win32gui.SetWindowLong(found_hwnd, win32con.GWL_STYLE, new_style)
+                    win32gui.SetParent(found_hwnd, parent_hwnd)
 
-            if found_hwnd:
-                self.edge_hwnd = found_hwnd
-                old_style = win32gui.GetWindowLong(found_hwnd, win32con.GWL_STYLE)
-                new_style = (old_style & ~win32con.WS_POPUP & ~win32con.WS_CAPTION & ~win32con.WS_THICKFRAME & ~win32con.WS_MINIMIZEBOX & ~win32con.WS_MAXIMIZEBOX & ~win32con.WS_SYSMENU) | win32con.WS_CHILD
-                win32gui.SetWindowLong(found_hwnd, win32con.GWL_STYLE, new_style)
-                win32gui.SetParent(found_hwnd, target_parent_hwnd)
+                    win32gui.MoveWindow(found_hwnd, 0, 0, initial_w, initial_h, True)
+                    win32gui.ShowWindow(found_hwnd, win32con.SW_SHOW if self._is_visible else win32con.SW_HIDE)
+                    self._is_docked = True
+                    print(f"[WebMapManager] Edge acoplado com sucesso no HWND {parent_hwnd}!")
+                else:
+                    print(f"[WebMapManager] Edge window not found. proc.pid={self.edge_proc.pid if self.edge_proc else None}, poll={self.edge_proc.poll() if self.edge_proc else None}")
+            except Exception as ex:
+                print(f"[WebMapManager] Erro no docking do Edge: {ex}")
 
-                cur_w = self.container.winfo_width()
-                cur_h = self.container.winfo_height()
-                win32gui.MoveWindow(found_hwnd, 0, 0, cur_w, cur_h, True)
-                win32gui.ShowWindow(found_hwnd, win32con.SW_SHOW if self._is_visible else win32con.SW_HIDE)
-                self._is_docked = True
-                print(f"[WebMapManager] Edge acoplado com sucesso no HWND {target_parent_hwnd}!")
-
-        threading.Thread(target=find_and_dock_thread, daemon=True).start()
+        threading.Thread(target=find_and_dock_thread, args=(target_parent_hwnd, w, h), daemon=True).start()
 
     def shutdown(self):
         """Fecha o processo e o servidor na saída do RemoteXPTI."""
@@ -840,8 +945,11 @@ class WebMapManager:
                 pass
         if self.edge_proc:
             try:
-                self.edge_proc.terminate()
+                subprocess.run(["taskkill", "/F", "/T", "/PID", str(self.edge_proc.pid)], capture_output=True)
             except Exception:
-                pass
+                try:
+                    self.edge_proc.terminate()
+                except Exception:
+                    pass
             self.edge_proc = None
         self.server.stop()
