@@ -20,6 +20,7 @@ import win32gui
 import win32con
 import win32process
 
+from logger import log
 from map_manager import resolve_server_coordinates, DEFAULT_MAP_CENTER, DEFAULT_MAP_ZOOM
 
 
@@ -842,37 +843,43 @@ class WebMapManager:
 
     def start(self):
         """Inicia o servidor HTTP embutido, limpa processos orfãos e pré-carrega o mapa em segundo plano."""
+        log.info("[WebMapManager] Inicializando subsistema do mapa Leaflet...")
         cache_dir = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "RemoteXPTI" / "map_cache"
         cleanup_orphaned_edge_processes(cache_dir)
         self.server.start()
+        log.info(f"[WebMapServer] Servidor Leaflet pronto em http://127.0.0.1:{self.server.port}")
         # Pré-carrega o Edge totalmente fora da tela para inicialização instantânea (0ms) sem flashes visíveis
         threading.Thread(target=self._launch_and_dock, daemon=True).start()
 
     def show(self):
         """Garante que o Edge esteja iniciado, docado no container e visível."""
         self._is_visible = True
+        log.info(f"[WebMapManager] show() acionado (is_docked={self._is_docked}, edge_hwnd={self.edge_hwnd})")
         if not self._is_docked:
             if not self.edge_proc or self.edge_proc.poll() is not None:
+                log.info("[WebMapManager] Edge não estava em execução. Disparando _launch_and_dock()...")
                 self._launch_and_dock()
         if self.edge_hwnd and self._is_docked:
             try:
                 w = max(400, self.container.winfo_width())
                 h = max(300, self.container.winfo_height())
+                log.info(f"[WebMapManager] Posicionando Edge no HWND_TOP com tamanho {w}x{h}...")
                 win32gui.SetWindowPos(self.edge_hwnd, win32con.HWND_TOP, 0, 0, w, h, win32con.SWP_SHOWWINDOW)
                 win32gui.ShowWindow(self.edge_hwnd, win32con.SW_SHOW)
                 win32gui.InvalidateRect(self.edge_hwnd, None, True)
                 win32gui.UpdateWindow(self.edge_hwnd)
-            except Exception:
-                pass
+            except Exception as e:
+                log.error(f"[WebMapManager] Erro ao exibir janela do Edge: {e}")
 
     def hide(self):
         """Oculta o mapa web quando o usuário volta para a grade."""
         self._is_visible = False
+        log.info("[WebMapManager] hide() acionado - Ocultando janela do mapa")
         if self.edge_hwnd:
             try:
                 win32gui.ShowWindow(self.edge_hwnd, win32con.SW_HIDE)
-            except Exception:
-                pass
+            except Exception as e:
+                log.error(f"[WebMapManager] Erro ao ocultar janela do Edge: {e}")
 
     def resize(self):
         """Ajusta o tamanho do Edge para corresponder perfeitamente ao container."""
@@ -889,7 +896,7 @@ class WebMapManager:
     def _launch_and_dock(self):
         edge_exe = get_edge_executable()
         if not edge_exe:
-            print("[WebMapManager] Microsoft Edge não encontrado no sistema.")
+            log.error("[WebMapManager] Microsoft Edge não encontrado no sistema!")
             return
 
         cache_dir = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "RemoteXPTI" / "map_cache"
@@ -902,7 +909,7 @@ class WebMapManager:
                 pass
         target_parent_hwnd = self.container_hwnd
         if not target_parent_hwnd:
-            print("[WebMapManager] Container HWND não disponível para acoplamento.")
+            log.error("[WebMapManager] Container HWND não disponível para acoplamento.")
             return
 
         try:
@@ -911,6 +918,8 @@ class WebMapManager:
             h = max(300, crect[3])
         except Exception:
             w, h = 1100, 700
+
+        log.info(f"[WebMapManager] Iniciando Edge ({edge_exe}) para container HWND={target_parent_hwnd} ({w}x{h})...")
 
         # Inicia o Edge fora da tela (-10000, -10000) para NUNCA piscar ou mostrar '127.0.0.1_/' para o cliente
         cmd = [
@@ -929,11 +938,12 @@ class WebMapManager:
 
         creation_flags = 0
         self.edge_proc = subprocess.Popen(cmd, creationflags=creation_flags)
+        log.info(f"[WebMapManager] Processo Edge instanciado com PID={self.edge_proc.pid}")
 
         def find_and_dock_thread(parent_hwnd, initial_w, initial_h):
             found_hwnd = None
             try:
-                for _ in range(70):
+                for attempt in range(70):
                     time.sleep(0.08)
 
                     def enum_cb(h, _):
@@ -964,6 +974,8 @@ class WebMapManager:
 
                 if found_hwnd:
                     self.edge_hwnd = found_hwnd
+                    log.info(f"[WebMapManager] Janela do Edge localizada com sucesso: HWND={found_hwnd}")
+
                     # Oculta imediatamente enquanto estilizamos para nunca piscar como popup
                     win32gui.ShowWindow(found_hwnd, win32con.SW_HIDE)
 
@@ -993,19 +1005,20 @@ class WebMapManager:
                         win32con.SWP_FRAMECHANGED | (win32con.SWP_SHOWWINDOW if self._is_visible else win32con.SWP_HIDEWINDOW)
                     )
                     self._is_docked = True
-                    print(f"[WebMapManager] Edge acoplado com sucesso sem bordas nem botoes no HWND {parent_hwnd}!")
+                    log.info(f"[WebMapManager] Edge acoplado com sucesso sem bordas no container HWND={parent_hwnd} ({final_w}x{final_h})")
 
                     if self._is_visible:
                         self.show()
                 else:
-                    print(f"[WebMapManager] Edge window not found. proc.pid={self.edge_proc.pid if self.edge_proc else None}, poll={self.edge_proc.poll() if self.edge_proc else None}")
+                    log.error(f"[WebMapManager] Janela do Edge não foi localizada após 70 tentativas. proc.poll={self.edge_proc.poll() if self.edge_proc else None}")
             except Exception as ex:
-                print(f"[WebMapManager] Erro no docking do Edge: {ex}")
+                log.error(f"[WebMapManager] Erro no docking do Edge: {ex}", exc_info=True)
 
         threading.Thread(target=find_and_dock_thread, args=(target_parent_hwnd, w, h), daemon=True).start()
 
     def shutdown(self):
         """Fecha o processo e o servidor na saída do RemoteXPTI."""
+        log.info("[WebMapManager] shutdown() acionado - Encerrando Edge e servidor web...")
         self.hide()
         if self.edge_hwnd:
             try:
@@ -1025,3 +1038,4 @@ class WebMapManager:
         cache_dir = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "RemoteXPTI" / "map_cache"
         cleanup_orphaned_edge_processes(cache_dir)
         self.server.stop()
+        log.info("[WebMapManager] Subsistema do mapa finalizado com sucesso.")

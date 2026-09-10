@@ -4,6 +4,7 @@ import sys
 import tempfile
 from pathlib import Path
 from typing import Tuple, Optional
+from logger import log
 
 class RDPManager:
     """Gerencia conexões RDP, injeção de credenciais via cmdkey e testes de conectividade."""
@@ -162,11 +163,15 @@ class RDPManager:
         if port and port != 3389:
             target_v = f"{clean_host}:{port}"
 
+        log.info(f"[RDPManager] Disparando conexão RDP para {target_v} (Usuário: '{username}', Tela cheia: {fullscreen}, Admin: {admin_mode})")
+
         # Se houver usuário e senha, salva no Credential Manager
         if username and password:
             ok, msg = RDPManager.set_windows_credential(clean_host, port, username, password)
             if not ok:
-                print(f"[Aviso] Falha ao registrar credencial no cmdkey: {msg}")
+                log.warning(f"[RDPManager] Falha ao registrar credencial no cmdkey: {msg}")
+            else:
+                log.info(f"[RDPManager] Credencial registrada no Windows para {clean_host}:{port} ({username})")
 
         # Monta parâmetros do mstsc usando perfil temporário .rdp
         # Isso garante que o mstsc saiba EXATAMENTE qual é o usuário solicitado
@@ -214,6 +219,8 @@ class RDPManager:
         try:
             creation_flags = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
             subprocess.Popen(cmd, creationflags=creation_flags)
+            log.info(f"[RDPManager] Cliente mstsc iniciado com sucesso para {target_v}")
             return True, f"Conexão iniciada com {target_v}"
         except Exception as e:
+            log.error(f"[RDPManager] Erro ao iniciar mstsc para {target_v}: {e}", exc_info=True)
             return False, f"Falha ao executar mstsc: {str(e)}"

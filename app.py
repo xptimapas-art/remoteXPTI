@@ -20,6 +20,7 @@ from version import CURRENT_VERSION
 from updater import SilentAutoUpdater
 from uninstaller import Uninstaller
 from web_map_manager import WebMapManager
+from logger import log
 
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
@@ -237,7 +238,9 @@ class RemoteXPTIApp(ctk.CTk):
         # Sincroniza atalhos da Área de Trabalho e Menu Iniciar com o novo ícone oficial
         threading.Thread(target=sync_windows_shortcuts_icon, daemon=True).start()
 
+        log.info(f"[RemoteXPTI] Inicializando RemoteXPTIApp v{CURRENT_VERSION}...")
         self.storage = StorageManager()
+        log.info(f"[RemoteXPTI] Servidores carregados do storage local: {len(self.storage.servers)}")
         self.card_widgets: Dict[str, ServerCard] = {}
         
         # Cache persistente do status para NUNCA piscar 'Checando' desnecessariamente
@@ -606,17 +609,19 @@ class RemoteXPTIApp(ctk.CTk):
 
     def _on_close(self):
         """Encerra a aplicação de forma limpa, finalizando o Edge e o pool de threads em segundo plano."""
+        log.info("[RemoteXPTI] Encerrando aplicação (WM_DELETE_WINDOW)...")
         try:
             if hasattr(self, "web_map") and self.web_map:
                 self.web_map.shutdown()
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning(f"[RemoteXPTI] Erro ao encerrar web_map: {e}")
         try:
             if hasattr(self, "_status_executor"):
                 self._status_executor.shutdown(wait=False)
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning(f"[RemoteXPTI] Erro ao desligar executor de status: {e}")
         self.destroy()
+        log.info("[RemoteXPTI] Aplicação finalizada.")
 
     def refresh_servers(self):
         self.storage.load()
@@ -637,6 +642,7 @@ class RemoteXPTIApp(ctk.CTk):
             self.web_map.resize()
 
     def _on_view_mode_changed(self, mode: str):
+        log.info(f"[RemoteXPTI] Alternando modo de visualização para: {mode}")
         if "Mapa" in mode:
             self.view_mode = "mapa"
             if hasattr(self.scroll_frame, "_parent_frame"):
@@ -778,6 +784,7 @@ class RemoteXPTIApp(ctk.CTk):
         admin_mode = full_server.get("admin_mode", False)
         multimon = full_server.get("multimon", False)
 
+        log.info(f"[RemoteXPTI] Usuário solicitou conexão com servidor '{full_server.get('name')}' ({host}:{port}, user='{user}')")
         self.set_message(f"Injetando credenciais e conectando a {host}...")
 
         def launch_thread():
@@ -792,6 +799,7 @@ class RemoteXPTIApp(ctk.CTk):
             )
             def on_done():
                 if ok:
+                    log.info(f"[RemoteXPTI] Processo RDP para '{full_server.get('name')}' disparado com sucesso.")
                     self.set_message(f"Conectado a {host}! Aguardando tela remota...")
                     self.storage.record_connection(server_id)
 
@@ -804,6 +812,7 @@ class RemoteXPTIApp(ctk.CTk):
                         daemon=True
                     ).start()
                 else:
+                    log.error(f"[RemoteXPTI] Falha ao conectar em '{full_server.get('name')}': {msg}")
                     self.set_message(f"Erro ao conectar: {msg}", duration_sec=8)
             self._action_queue.put(on_done)
 
@@ -824,6 +833,7 @@ class RemoteXPTIApp(ctk.CTk):
             return
 
         self._is_checking_status = True
+        log.info(f"[RemoteXPTI] Iniciando checagem de status dos servidores (manual={is_manual}, total={len(self.storage.servers)})...")
         if is_manual:
             self.set_message("Verificando status dos servidores...")
 
@@ -881,12 +891,13 @@ class RemoteXPTIApp(ctk.CTk):
         def on_save(data):
             new_s = self.storage.add_server(data)
             server_id = new_s["id"]
+            log.info(f"[RemoteXPTI] Servidor adicionado com sucesso: '{new_s['name']}' (ID={server_id}, Host={new_s.get('host')}:{new_s.get('port')})")
             if data.get("custom_image"):
                 try:
                     img = Image.open(data["custom_image"])
                     img.convert("RGB").save(PreviewManager.get_thumbnail_path(server_id), "PNG")
                 except Exception as e:
-                    print(f"Erro ao salvar imagem customizada: {e}")
+                    log.warning(f"Erro ao salvar imagem customizada: {e}")
             elif data.get("reset_thumb"):
                 tpath = PreviewManager.get_thumbnail_path(server_id)
                 if tpath.exists():
@@ -910,13 +921,14 @@ class RemoteXPTIApp(ctk.CTk):
         def on_save(data):
             self.storage.update_server(server["id"], data)
             server_id = server["id"]
+            log.info(f"[RemoteXPTI] Servidor editado e salvo: '{data['name']}' (ID={server_id}, Host={data.get('host')}:{data.get('port')})")
             PreviewManager.invalidate_cache(server_id)
             if data.get("custom_image"):
                 try:
                     img = Image.open(data["custom_image"])
                     img.convert("RGB").save(PreviewManager.get_thumbnail_path(server_id), "PNG")
                 except Exception as e:
-                    print(f"Erro ao salvar imagem customizada: {e}")
+                    log.warning(f"Erro ao salvar imagem customizada: {e}")
             elif data.get("reset_thumb"):
                 tpath = PreviewManager.get_thumbnail_path(server_id)
                 if tpath.exists():
@@ -946,6 +958,7 @@ class RemoteXPTIApp(ctk.CTk):
         name = server.get("name", "este servidor")
         def do_delete():
             server_id = server["id"]
+            log.info(f"[RemoteXPTI] Excluindo servidor '{name}' (ID={server_id})")
             self.storage.delete_server(server_id)
             PreviewManager.invalidate_cache(server_id)
             thumb_path = PreviewManager.get_thumbnail_path(server_id)

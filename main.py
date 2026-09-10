@@ -21,11 +21,13 @@ def enable_high_dpi_awareness():
 
 def main():
     enable_high_dpi_awareness()
-    from logger import log
+    from logger import log, log_system_diagnostics, hook_tkinter_exceptions
     from version import CURRENT_VERSION
-    log.info(f"=== Iniciando RemoteXPTI v{CURRENT_VERSION} ===")
+    log_system_diagnostics(CURRENT_VERSION)
     from app import RemoteXPTIApp
     app = RemoteXPTIApp()
+    hook_tkinter_exceptions(app)
+    log.info("Interface inicializada com sucesso. Entrando no mainloop...")
     app.mainloop()
 
 if __name__ == "__main__":

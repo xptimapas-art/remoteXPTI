@@ -52,17 +52,21 @@ class SilentAutoUpdater:
 
     def start_background_check(self, is_manual: bool = False):
         """Inicia a verificação e download automático em background."""
+        log.info(f"[SilentUpdater] Iniciando verificação de atualizações (manual={is_manual}). Versão instalada: v{CURRENT_VERSION}")
         if self.update_ready:
+            log.info(f"[SilentUpdater] Nova versão v{self.new_version} já está baixada e pronta para reiniciar.")
             if is_manual:
                 self.notify_status(f"🚀 Versão v{self.new_version} já está baixada e pronta!")
             return
 
         if self.is_downloading:
+            log.info(f"[SilentUpdater] Download da versão v{self.new_version} já está em andamento.")
             if is_manual:
                 self.notify_status(f"⬇️ Baixando nova versão v{self.new_version} em segundo plano...")
             return
 
         if self.is_checking:
+            log.info("[SilentUpdater] Verificação de atualizações já em andamento.")
             if is_manual:
                 self.notify_status("🔍 Verificação já em andamento...")
             return
@@ -81,22 +85,26 @@ class SilentAutoUpdater:
         # Metodo 1: Redirecionamento Web (Sem limite de taxa de 60 req/h da API)
         try:
             web_url = f"https://github.com/{GITHUB_REPO}/releases/latest"
+            log.info(f"[SilentUpdater] Consultando versão mais recente via Web redirect: {web_url}")
             req = urllib.request.Request(
                 web_url,
                 headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
             )
             with urllib.request.urlopen(req, timeout=8.0) as resp:
                 final_url = resp.geturl()
+                log.info(f"[SilentUpdater] Resposta do redirect Web: {final_url}")
                 if "/releases/tag/" in final_url:
                     tag_name = final_url.split("/releases/tag/")[-1].split("/")[0].strip()
                     download_url = f"https://github.com/{GITHUB_REPO}/releases/download/{tag_name}/{APP_NAME}.exe"
+                    log.info(f"[SilentUpdater] Web redirect detectou versão: {tag_name}, URL: {download_url}")
                     return tag_name, download_url
         except Exception as e:
-            print(f"[SilentUpdater] Metodo web indisponivel: {e}")
+            log.warning(f"[SilentUpdater] Metodo web redirect indisponivel ({e}), tentando API REST...")
 
         # Metodo 2: Fallback para API REST do GitHub
         try:
             api_url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+            log.info(f"[SilentUpdater] Consultando API REST: {api_url}")
             req = urllib.request.Request(
                 api_url,
                 headers={
@@ -115,9 +123,10 @@ class SilentAutoUpdater:
                             break
                     if not download_url and data.get("assets"):
                         download_url = data["assets"][0].get("browser_download_url", "")
+                    log.info(f"[SilentUpdater] API REST detectou versão: {tag_name}, URL: {download_url}")
                     return tag_name, download_url
         except Exception as e:
-            print(f"[SilentUpdater] Fallback API GitHub indisponivel: {e}")
+            log.error(f"[SilentUpdater] Fallback API GitHub indisponivel: {e}")
 
         return tag_name, download_url
 
@@ -129,24 +138,29 @@ class SilentAutoUpdater:
         try:
             tag_name, download_url = self._get_latest_release_info()
             if not tag_name:
+                log.warning("[SilentUpdater] Servidor de atualizações indisponível ou nenhuma tag retornada.")
                 if is_manual:
                     self.notify_status("⚠️ Servidor de atualizações indisponível.")
                 return
 
             remote_ver = parse_version(tag_name)
             local_ver = parse_version(CURRENT_VERSION)
+            log.info(f"[SilentUpdater] Comparação de versões: Local=v{CURRENT_VERSION} ({local_ver}) vs Remota={tag_name} ({remote_ver})")
 
             if remote_ver <= local_ver:
                 # Já está na versão mais recente
+                log.info(f"[SilentUpdater] Aplicação já está na versão mais recente (v{CURRENT_VERSION}).")
                 if is_manual:
                     self.notify_status(f"✅ Você já está na versão mais recente (v{CURRENT_VERSION})!")
                 return
 
             self.new_version = tag_name.lstrip("v").lstrip("V")
+            log.info(f"[SilentUpdater] Nova versão encontrada: v{self.new_version}! Baixando em segundo plano...")
             if is_manual:
                 self.notify_status(f"⬇️ Nova versão v{self.new_version} encontrada! Baixando em segundo plano...")
 
             if not download_url:
+                log.warning(f"[SilentUpdater] Executável não encontrado nos assets da release {tag_name}.")
                 if is_manual:
                     self.notify_status("⚠️ Arquivo da atualização não encontrado nos lançamentos.")
                 return
@@ -156,7 +170,7 @@ class SilentAutoUpdater:
 
         except Exception as e:
             # Falhas de rede em background não interrompem o uso do usuário
-            print(f"[SilentUpdater] Verificação de atualização: {e}")
+            log.error(f"[SilentUpdater] Exceção na verificação de atualização: {e}", exc_info=True)
             if is_manual:
                 self.notify_status("⚠️ Não foi possível verificar atualizações no momento.")
         finally:
@@ -164,6 +178,7 @@ class SilentAutoUpdater:
 
     def _download_update_silent(self, download_url: str):
         self.is_downloading = True
+        log.info(f"[SilentUpdater] Iniciando download silencioso da v{self.new_version} a partir de: {download_url}")
         try:
             # Determina o diretório base da aplicação
             if getattr(sys, "frozen", False):
@@ -184,6 +199,7 @@ class SilentAutoUpdater:
                 download_url,
                 headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
             )
+            downloaded_bytes = 0
             with urllib.request.urlopen(req, timeout=60.0) as response:
                 block_size = 65536
                 with open(temp_part, "wb") as out_file:
@@ -192,6 +208,10 @@ class SilentAutoUpdater:
                         if not buf:
                             break
                         out_file.write(buf)
+                        downloaded_bytes += len(buf)
+
+            size_mb = downloaded_bytes / (1024 * 1024)
+            log.info(f"[SilentUpdater] Download concluído: {downloaded_bytes} bytes ({size_mb:.2f} MB)")
 
             # Download concluído com sucesso e verificado (> 5MB)
             if temp_part.exists() and temp_part.stat().st_size > 5000000:
@@ -203,22 +223,25 @@ class SilentAutoUpdater:
                 temp_part.replace(temp_dest)
                 self.downloaded_file = temp_dest
                 self.update_ready = True
-                print(f"[SilentUpdater] Nova versão {self.new_version} baixada e pronta!")
+                log.info(f"[SilentUpdater] Nova versão {self.new_version} baixada e pronta em {temp_dest}!")
 
                 if self.on_ready_callback:
                     self.on_ready_callback(self.new_version)
             else:
-                print("[SilentUpdater] Arquivo baixado incompleto ou corrompido.")
+                log.error(f"[SilentUpdater] Arquivo baixado incompleto ou corrompido (tamanho: {downloaded_bytes} bytes).")
 
         except Exception as e:
-            print(f"[SilentUpdater] Erro no download em background: {e}")
+            log.error(f"[SilentUpdater] Erro no download em background: {e}", exc_info=True)
         finally:
             self.is_downloading = False
 
     def apply_update_and_restart(self):
         """Substitui o executável atual e reinicia o aplicativo imediatamente."""
         if not self.downloaded_file or not self.downloaded_file.exists():
+            log.warning("[SilentUpdater] apply_update_and_restart chamado mas downloaded_file não existe.")
             return
+
+        log.info(f"[SilentUpdater] Aplicando atualização para v{self.new_version} e reiniciando a aplicação...")
 
         is_frozen = getattr(sys, "frozen", False)
         current_exe = Path(sys.executable).resolve()
