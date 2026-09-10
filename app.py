@@ -289,6 +289,8 @@ class RemoteXPTIApp(ctk.CTk):
 
         self.bind("<Configure>", self._on_window_configure, add="+")
         self.after(50, self._check_column_recalculation)
+        self.after(150, self._check_column_recalculation)
+        self.after(350, self._check_column_recalculation)
 
     def _build_header(self):
         header_frame = ctk.CTkFrame(self, height=64, corner_radius=0, fg_color=("#f0f2f5", "#16171d"))
@@ -410,6 +412,7 @@ class RemoteXPTIApp(ctk.CTk):
         # 1. Modo Grade (AnyDesk Cards)
         self.scroll_frame = ctk.CTkScrollableFrame(self, fg_color="transparent")
         self.scroll_frame.pack(fill="both", expand=True, padx=12, pady=10)
+        self.scroll_frame.bind("<Configure>", self._on_scroll_frame_configure, add="+")
 
         self.empty_label = ctk.CTkLabel(
             self.scroll_frame,
@@ -656,24 +659,34 @@ class RemoteXPTIApp(ctk.CTk):
             return
         if getattr(self, "_resize_timer", None):
             self.after_cancel(self._resize_timer)
-        self._resize_timer = self.after(35, self._check_column_recalculation)
+        self._resize_timer = self.after(20, self._check_column_recalculation)
+
+    def _on_scroll_frame_configure(self, event=None):
+        if getattr(self, "_resize_timer", None):
+            self.after_cancel(self._resize_timer)
+        self._resize_timer = self.after(20, self._check_column_recalculation)
 
     def _calculate_columns(self) -> int:
         """
         Calcula o número de colunas ideal considerando o DPI Scaling do Windows.
-        Evita que cards sejam esmagados ou percam a estrela e os 3 pontos na borda direita.
+        Garante que cards fiquem próximos, bem distribuídos e responsivos ao maximizar.
         """
         scale = ctk.ScalingTracker.get_widget_scaling(self)
-        slot_w_phys = (CARD_WIDTH + 10) * scale
+        slot_w_phys = (CARD_WIDTH + 8) * scale
 
-        scroll_w = self.scroll_frame.winfo_width()
-        if scroll_w > 200:
-            avail_w = scroll_w - 24
+        win_w = self.winfo_width()
+        scroll_w = self.scroll_frame.winfo_width() if hasattr(self, "scroll_frame") else 0
+
+        # Largura física real disponível para a grade de cards
+        if win_w > 200:
+            avail_w = win_w - (44 * scale)
+        elif scroll_w > 200:
+            avail_w = scroll_w - (24 * scale)
         else:
-            w = self.winfo_width()
-            if w <= 200:
-                w = 1100
-            avail_w = max(slot_w_phys, (w - 44) * scale)
+            avail_w = (1100 - 44) * scale
+
+        if scroll_w > 200 and (scroll_w - 24) > avail_w:
+            avail_w = scroll_w - 24
 
         return max(1, int(avail_w // slot_w_phys))
 
