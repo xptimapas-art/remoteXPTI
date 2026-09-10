@@ -392,50 +392,67 @@ Add-Type -AssemblyName System.Drawing
 
 $form = New-Object System.Windows.Forms.Form
 $form.Text = "Atualizando RemoteXPTI"
-$form.Size = New-Object System.Drawing.Size(440, 195)
+$form.Size = New-Object System.Drawing.Size(460, 290)
 $form.StartPosition = "CenterScreen"
-$form.FormBorderStyle = "FixedDialog"
-$form.MaximizeBox = $false
-$form.MinimizeBox = $false
+$form.FormBorderStyle = "None"
 $form.TopMost = $true
-$form.BackColor = [System.Drawing.Color]::FromArgb(24, 26, 32)
+$form.BackColor = [System.Drawing.Color]::FromArgb(18, 19, 24)
 $form.ForeColor = [System.Drawing.Color]::White
 
-$iconPath = Join-Path '{str(app_dir)}' "imagens\\icon.ico"
-if (Test-Path $iconPath) {{
-    try {{ $form.Icon = New-Object System.Drawing.Icon($iconPath) }} catch {{}}
+# Borda suave moderna e efeito visual na janela
+$form.Add_Paint({{
+    param($s, $e)
+    $penBorder = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(36, 38, 48), 1.5)
+    $e.Graphics.DrawRectangle($penBorder, 1, 1, $s.Width - 2, $s.Height - 2)
+    $penHalo = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(223, 2, 9), 2.0)
+    $e.Graphics.DrawEllipse($penHalo, 186, 20, 88, 88)
+}})
+
+$pngPath = Join-Path '{str(app_dir)}' "imagens\\app_icon.png"
+if (Test-Path $pngPath) {{
+    try {{
+        $pbox = New-Object System.Windows.Forms.PictureBox
+        $pbox.Size = New-Object System.Drawing.Size(76, 76)
+        $pbox.Location = New-Object System.Drawing.Point(192, 26)
+        $pbox.SizeMode = [System.Windows.Forms.PictureBoxSizeMode]::Zoom
+        $pbox.Image = [System.Drawing.Image]::FromFile($pngPath)
+        $form.Controls.Add($pbox)
+    }} catch {{}}
 }}
 
 $titleLabel = New-Object System.Windows.Forms.Label
-$titleLabel.Text = "⚡ RemoteXPTI - Atualizando Sistema"
-$titleLabel.Font = New-Object System.Drawing.Font("Segoe UI", 12, [System.Drawing.FontStyle]::Bold)
+$titleLabel.Text = "Atualizando RemoteXPTI"
+$titleLabel.Font = New-Object System.Drawing.Font("Segoe UI", 15, [System.Drawing.FontStyle]::Bold)
 $titleLabel.ForeColor = [System.Drawing.Color]::White
-$titleLabel.Location = New-Object System.Drawing.Point(24, 20)
-$titleLabel.Size = New-Object System.Drawing.Size(380, 26)
+$titleLabel.Location = New-Object System.Drawing.Point(20, 118)
+$titleLabel.Size = New-Object System.Drawing.Size(420, 28)
+$titleLabel.TextAlign = [System.Drawing.ContentAlignment]::MiddleCenter
 $form.Controls.Add($titleLabel)
 
-$statusLabel = New-Object System.Windows.Forms.Label
-$statusLabel.Text = "Aplicando atualização para a versão v{self.new_version}..."
-$statusLabel.Font = New-Object System.Drawing.Font("Segoe UI", 9.5)
-$statusLabel.ForeColor = [System.Drawing.Color]::FromArgb(160, 165, 180)
-$statusLabel.Location = New-Object System.Drawing.Point(24, 50)
-$statusLabel.Size = New-Object System.Drawing.Size(380, 24)
-$form.Controls.Add($statusLabel)
+$subLabel = New-Object System.Windows.Forms.Label
+$subLabel.Text = "XPti Tecnologia  •  Instalando v{self.new_version}"
+$subLabel.Font = New-Object System.Drawing.Font("Segoe UI", 9.5)
+$subLabel.ForeColor = [System.Drawing.Color]::FromArgb(126, 131, 148)
+$subLabel.Location = New-Object System.Drawing.Point(20, 148)
+$subLabel.Size = New-Object System.Drawing.Size(420, 20)
+$subLabel.TextAlign = [System.Drawing.ContentAlignment]::MiddleCenter
+$form.Controls.Add($subLabel)
 
 $pbar = New-Object System.Windows.Forms.ProgressBar
-$pbar.Location = New-Object System.Drawing.Point(24, 82)
-$pbar.Size = New-Object System.Drawing.Size(376, 18)
+$pbar.Location = New-Object System.Drawing.Point(115, 190)
+$pbar.Size = New-Object System.Drawing.Size(230, 4)
 $pbar.Style = [System.Windows.Forms.ProgressBarStyle]::Marquee
-$pbar.MarqueeAnimationSpeed = 20
+$pbar.MarqueeAnimationSpeed = 15
 $form.Controls.Add($pbar)
 
-$stepLabel = New-Object System.Windows.Forms.Label
-$stepLabel.Text = "Substituindo executável pela nova versão..."
-$stepLabel.Font = New-Object System.Drawing.Font("Segoe UI", 8.5)
-$stepLabel.ForeColor = [System.Drawing.Color]::FromArgb(100, 150, 255)
-$stepLabel.Location = New-Object System.Drawing.Point(24, 110)
-$stepLabel.Size = New-Object System.Drawing.Size(380, 20)
-$form.Controls.Add($stepLabel)
+$statusLabel = New-Object System.Windows.Forms.Label
+$statusLabel.Text = "Substituindo executável pela nova versão..."
+$statusLabel.Font = New-Object System.Drawing.Font("Segoe UI", 8.5)
+$statusLabel.ForeColor = [System.Drawing.Color]::FromArgb(100, 104, 122)
+$statusLabel.Location = New-Object System.Drawing.Point(20, 216)
+$statusLabel.Size = New-Object System.Drawing.Size(420, 22)
+$statusLabel.TextAlign = [System.Drawing.ContentAlignment]::MiddleCenter
+$form.Controls.Add($statusLabel)
 
 $logDir = Join-Path $env:LOCALAPPDATA "RemoteXPTI\\logs"
 if (-not (Test-Path $logDir)) {{ New-Item -ItemType Directory -Path $logDir -Force | Out-Null }}

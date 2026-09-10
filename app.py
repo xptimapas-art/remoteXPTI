@@ -253,9 +253,9 @@ class RemoteXPTIApp(ctk.CTk):
             except Exception:
                 pass
 
-        # Inicia a Splash Screen com o motion do X da XPti
+        # Inicia a Splash Screen com o motion do X da XPti (mínimo de 3 segundos solicitado pelo usuário)
         self.splash = SplashScreen(parent=self, current_version=CURRENT_VERSION)
-        self.splash_min_duration = 1.8  # Segundos mínimos para apreciar o motion com elegância
+        self.splash_min_duration = 3.0  # Duração de pelo menos 3 segundos para apreciar a animação
         self.splash_start_time = time.time()
         self._splash_closed = False
 
@@ -284,14 +284,12 @@ class RemoteXPTIApp(ctk.CTk):
         self._action_queue = queue.Queue()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
-        self.splash.set_status("Construindo interface gráfica...")
         self._build_header()
         self._build_main_view()
         self._build_statusbar()
         self._process_action_queue()
 
         # Inicializa o mapa web Leaflet com aceleração de GPU
-        self.splash.set_status("Inicializando serviços e mapa web...")
         self.web_map = WebMapManager(
             container_widget=self.map_container,
             get_servers_func=lambda: self.filtered_servers if self.filtered_servers is not None else self.storage.servers,
@@ -301,7 +299,6 @@ class RemoteXPTIApp(ctk.CTk):
         )
         self.web_map.start()
 
-        self.splash.set_status("Organizando servidores e layout...")
         self.refresh_servers()
         
         # Inicia a checagem inicial de status
@@ -321,12 +318,17 @@ class RemoteXPTIApp(ctk.CTk):
         self.update_idletasks()
         self._check_column_recalculation()
 
+        # Transições graduais e elegantes nos textos da splash ao longo dos 3 segundos
+        self.after(700, lambda: self.splash.set_status("Inicializando acelerador gráfico...") if not self._splash_closed else None)
+        self.after(1500, lambda: self.splash.set_status("Organizando servidores e layout...") if not self._splash_closed else None)
+        self.after(2300, lambda: self.splash.set_status("Otimizando conexões de rede...") if not self._splash_closed else None)
+
         # Sincronização em nuvem automática com Supabase se configurado
         if CloudSyncManager.is_configured():
             threading.Thread(target=self._sync_servers_from_cloud, daemon=True).start()
 
-        # Agenda a transição suave para a janela principal
-        self.after(200, self._check_splash_ready)
+        # Agenda a transição suave para a janela principal (após 3.0s)
+        self.after(300, self._check_splash_ready)
 
     def _check_splash_ready(self):
         """Verifica se a aplicação concluiu seu warmup e se o tempo mínimo da animação decorreu."""

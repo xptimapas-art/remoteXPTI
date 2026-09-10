@@ -36,9 +36,19 @@ class SplashScreen:
     WIDTH = 480
     HEIGHT = 320
 
-    def __init__(self, parent: tk.Tk, current_version: str = "1.1.1"):
+    def __init__(
+        self,
+        parent: tk.Tk,
+        current_version: str = "1.1.2",
+        title: str = "RemoteXPTI",
+        subtitle: Optional[str] = None,
+        initial_status: str = "Iniciando..."
+    ):
         self.parent = parent
         self.current_version = current_version
+        self.title_text = title
+        self.subtitle_text = subtitle or f"XPti Tecnologia  •  v{current_version} Beta"
+        self.initial_status = initial_status
         self.start_time = time.time()
         self._is_finishing = False
         self._anim_timer = None
@@ -148,14 +158,14 @@ class SplashScreen:
         # 4. Título & Subtítulo da Aplicação
         self.canvas.create_text(
             cx, 190,
-            text="RemoteXPTI",
+            text=self.title_text,
             fill="#ffffff",
             font=("Segoe UI", 18, "bold")
         )
 
         self.canvas.create_text(
             cx, 214,
-            text=f"XPti Tecnologia  •  v{self.current_version} Beta",
+            text=self.subtitle_text,
             fill="#7e8394",
             font=("Segoe UI", 10)
         )
@@ -186,7 +196,7 @@ class SplashScreen:
         # 6. Texto dinâmico de status
         self.status_id = self.canvas.create_text(
             cx, 274,
-            text="Iniciando...",
+            text=self.initial_status,
             fill="#64687a",
             font=("Segoe UI", 9)
         )

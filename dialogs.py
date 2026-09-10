@@ -1117,9 +1117,17 @@ class SettingsDialog(ctk.CTkToplevel):
             return
 
         def do_install():
-            self.lbl_custom_status.configure(text=f"⬇️ Baixando {tag}... Aguarde a conclusão.", text_color="#0080ff")
-            if hasattr(self, "btn_install_custom"):
-                self.btn_install_custom.configure(state="disabled")
+            from splash_screen import SplashScreen
+            # Fecha a janela de configurações e exibe a tela animada com o motion do X
+            self.destroy()
+
+            parent_window = self.parent if hasattr(self, "parent") and self.parent else None
+            update_splash = SplashScreen(
+                parent=parent_window,
+                title="Atualizando RemoteXPTI",
+                subtitle=f"XPti Tecnologia  •  Instalando {tag}",
+                initial_status=f"Baixando {tag} do GitHub..."
+            )
 
             status_queue = []
 
@@ -1127,22 +1135,24 @@ class SettingsDialog(ctk.CTkToplevel):
                 status_queue.append(msg)
 
             def poll_status():
-                if not self.winfo_exists():
-                    return
-                while status_queue:
-                    msg = status_queue.pop(0)
-                    self.lbl_custom_status.configure(text=msg, text_color="#0080ff")
-                self.after(150, poll_status)
+                if hasattr(update_splash, "window") and update_splash.window.winfo_exists():
+                    while status_queue:
+                        msg = status_queue.pop(0)
+                        update_splash.set_status(msg)
+                    if getattr(updater, "update_ready", False):
+                        update_splash.set_status(f"Versão {tag} pronta! Reiniciando...")
+                    else:
+                        parent_window.after(150, poll_status)
 
-            self.after(150, poll_status)
+            parent_window.after(150, poll_status)
 
-            updater = getattr(self.parent, "updater", None) or SilentAutoUpdater()
+            updater = getattr(parent_window, "updater", None) or SilentAutoUpdater()
             updater.download_and_install_specific(matched["tag"], matched["download_url"], on_status=on_status_bg)
 
         ConfirmDialog(
             parent=self,
             title=f"Instalar Versão {tag}",
-            message=f"Deseja baixar e instalar a versão {tag}?\n\nO RemoteXPTI será reiniciado automaticamente após a conclusão do download.",
+            message=f"Deseja baixar e instalar a versão {tag}?\n\nO RemoteXPTI exibirá o progresso com a animação de atualização e será reiniciado automaticamente.",
             confirm_text="Sim, Instalar Agora",
             confirm_color="#0066cc",
             on_confirm=do_install
