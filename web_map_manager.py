@@ -492,7 +492,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             50% { r: 8.5px; opacity: 0.9; }
         }
 
-        /* MarkerCluster Dark Custom Styling */
+        /* MarkerCluster Dark Custom Styling (Azul Padrão - Todos Online) */
         .marker-cluster-small, .marker-cluster-medium, .marker-cluster-large {
             background-color: rgba(0, 102, 204, 0.45) !important;
         }
@@ -502,6 +502,126 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             font-weight: 800 !important;
             border: 2px solid #ffffff !important;
             box-shadow: 0 4px 10px rgba(0,0,0,0.6) !important;
+        }
+
+        /* MarkerCluster Alerta Amarelo/Âmbar (Quando houver servidor offline no grupo) */
+        .marker-cluster-alert {
+            background-color: rgba(245, 158, 11, 0.45) !important;
+            animation: pulse-cluster-warning 2.5s infinite ease-in-out;
+        }
+        .marker-cluster-alert div {
+            background-color: #f59e0b !important;
+            color: #0f1117 !important;
+            font-weight: 900 !important;
+            border: 2px solid #ffffff !important;
+            box-shadow: 0 4px 14px rgba(245, 158, 11, 0.75) !important;
+        }
+        @keyframes pulse-cluster-warning {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.45); }
+            50% { box-shadow: 0 0 0 8px rgba(245, 158, 11, 0); }
+        }
+
+        /* Controles do Leaflet (Zoom, Bússola e Camadas em Dark Glass) */
+        .leaflet-bar {
+            border: 1px solid rgba(255, 255, 255, 0.15) !important;
+            border-radius: 8px !important;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6) !important;
+            overflow: hidden !important;
+            background: rgba(18, 20, 26, 0.88) !important;
+            backdrop-filter: blur(12px) !important;
+        }
+        .leaflet-bar a {
+            background-color: rgba(18, 20, 26, 0.88) !important;
+            color: #ffffff !important;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important;
+            width: 34px !important;
+            height: 34px !important;
+            line-height: 34px !important;
+            font-size: 16px !important;
+            font-weight: 700 !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            transition: all 0.2s ease !important;
+        }
+        .leaflet-bar a:last-child {
+            border-bottom: none !important;
+        }
+        .leaflet-bar a:hover {
+            background-color: #242936 !important;
+            color: #0066cc !important;
+        }
+
+        /* Bússola Estilo Google Maps */
+        .compass-control-container {
+            margin-bottom: 8px !important;
+            border-radius: 50% !important;
+            width: 36px !important;
+            height: 36px !important;
+            border: 1px solid rgba(255, 255, 255, 0.2) !important;
+        }
+        .compass-btn {
+            border-radius: 50% !important;
+            width: 36px !important;
+            height: 36px !important;
+            padding: 0 !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+        }
+        .compass-btn:hover {
+            background-color: #242936 !important;
+        }
+        .compass-btn:hover #compassNeedle {
+            filter: drop-shadow(0 0 6px rgba(239, 68, 68, 0.7));
+        }
+
+        /* Botão de Bússola Compacto no HUD */
+        .btn-compass-hud {
+            padding: 5px 9px !important;
+            font-size: 14px !important;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* Correção Definitiva do Quadrado Branco: Controle de Camadas */
+        .leaflet-control-layers {
+            border: 1px solid rgba(255, 255, 255, 0.15) !important;
+            border-radius: 8px !important;
+            background: rgba(18, 20, 26, 0.88) !important;
+            backdrop-filter: blur(12px) !important;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6) !important;
+            color: #ffffff !important;
+        }
+        .leaflet-control-layers-toggle {
+            background-color: transparent !important;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='%23e2e8f0' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolygon points='12 2 2 7 12 12 22 7 12 2'%3E%3C/polygon%3E%3Cpolyline points='2 17 12 22 22 17'%3E%3C/polyline%3E%3Cpolyline points='2 12 12 17 22 12'%3E%3C/polyline%3E%3C/svg%3E") !important;
+            background-size: 20px 20px !important;
+            background-repeat: no-repeat !important;
+            background-position: center !important;
+            width: 34px !important;
+            height: 34px !important;
+        }
+        .leaflet-control-layers-expanded {
+            padding: 10px 14px !important;
+            background: #141720 !important;
+            border-radius: 8px !important;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+            font-size: 12px !important;
+            font-weight: 600 !important;
+            line-height: 1.6 !important;
+        }
+        .leaflet-control-layers-expanded label {
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-bottom: 4px;
+            color: #e2e8f0;
+        }
+        .leaflet-control-layers-expanded input[type="radio"] {
+            accent-color: #0066cc;
         }
 
         /* Leaflet Dark Tooltips */
@@ -532,7 +652,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     🗺️ Padrão
                 </button>
             </div>
-            <button class="btn-action" onclick="centerSC()">📍 Centralizar SC</button>
+            <button class="btn-action btn-compass-hud" onclick="centerSC()" title="Centralizar SC (Bússola / Orientação Norte)">🧭</button>
             <button id="btnToggleIncidents" class="btn-action btn-incident" onclick="toggleIncidentTray()">
                 <span class="incident-icon">🚨</span> Incidentes <span id="incidentCountBadge" class="incident-badge-pill">0</span>
             </button>
@@ -611,6 +731,42 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             if (map) map.invalidateSize();
         });
 
+        // Controle de Bússola Estilo Google Maps
+        const CompassControl = L.Control.extend({
+            options: { position: 'topright' },
+            onAdd: function(map) {
+                const container = L.DomUtil.create('div', 'leaflet-bar compass-control-container');
+                const btn = L.DomUtil.create('a', 'compass-btn', container);
+                btn.href = '#';
+                btn.title = 'Centralizar em Santa Catarina (Bússola / Orientação Norte)';
+                btn.innerHTML = `
+                    <svg id="compassNeedle" width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <circle cx="12" cy="12" r="10.5" stroke="rgba(255,255,255,0.3)" stroke-width="1.2"/>
+                        <polygon points="12,3.5 15.5,12 8.5,12" fill="#ef4444"/>
+                        <polygon points="12,20.5 15.5,12 8.5,12" fill="#cbd5e1"/>
+                        <circle cx="12" cy="12" r="2" fill="#0f172a" stroke="#ffffff" stroke-width="0.8"/>
+                        <text x="12" y="2" font-size="4.5" font-weight="900" fill="#ef4444" text-anchor="middle" dominant-baseline="hanging">N</text>
+                    </svg>
+                `;
+                L.DomEvent.disableClickPropagation(container);
+                L.DomEvent.on(btn, 'click', function(e) {
+                    L.DomEvent.preventDefault(e);
+                    centerSC();
+                    const needle = document.getElementById('compassNeedle');
+                    if (needle) {
+                        needle.style.transition = 'transform 0.6s cubic-bezier(0.34, 1.56, 0.64, 1)';
+                        needle.style.transform = 'rotate(360deg)';
+                        setTimeout(() => {
+                            needle.style.transition = 'none';
+                            needle.style.transform = 'rotate(0deg)';
+                        }, 650);
+                    }
+                });
+                return container;
+            }
+        });
+        map.addControl(new CompassControl());
+
         // Controles de zoom no canto superior direito
         L.control.zoom({ position: 'topright' }).addTo(map);
 
@@ -656,12 +812,36 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             }
         });
 
-        // Cluster de Marcadores
+        // Cluster de Marcadores com Alerta Amarelo para falhas locais
         const clusterGroup = L.markerClusterGroup({
             spiderfyOnMaxZoom: true,
             showCoverageOnHover: false,
             zoomToBoundsOnClick: true,
-            maxClusterRadius: 35
+            maxClusterRadius: 35,
+            iconCreateFunction: function(cluster) {
+                const markers = cluster.getAllChildMarkers();
+                const count = cluster.getChildCount();
+                const hasOffline = markers.some(m => m.serverData && m.serverData.online === false);
+
+                let c = ' marker-cluster-';
+                if (count < 10) {
+                    c += 'small';
+                } else if (count < 100) {
+                    c += 'medium';
+                } else {
+                    c += 'large';
+                }
+
+                if (hasOffline) {
+                    c += ' marker-cluster-alert';
+                }
+
+                return new L.DivIcon({
+                    html: '<div><span>' + count + '</span></div>',
+                    className: 'marker-cluster' + c,
+                    iconSize: new L.Point(40, 40)
+                });
+            }
         });
         map.addLayer(clusterGroup);
 
@@ -736,6 +916,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
                 const icon = createCustomIcon(s.online);
                 const marker = L.marker([s.latitude, s.longitude], { icon: icon });
+                marker.serverData = s;
 
                 marker.bindTooltip(s.name, {
                     permanent: false,
