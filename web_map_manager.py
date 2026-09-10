@@ -12,6 +12,7 @@ import subprocess
 import threading
 import http.server
 import socketserver
+import urllib.parse
 from pathlib import Path
 from typing import Dict, Any, Optional, Callable
 
@@ -93,20 +94,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             display: flex;
             align-items: center;
             gap: 6px;
-        }
-        .map-search {
-            background: #181a22;
-            border: 1px solid #333748;
-            border-radius: 6px;
-            color: #fff;
-            padding: 6px 12px;
-            font-size: 12px;
-            outline: none;
-            width: 210px;
-            transition: border-color 0.2s;
-        }
-        .map-search:focus {
-            border-color: #0066cc;
         }
         .btn-action {
             background: #252834;
@@ -355,7 +342,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 🗺️ Padrão
             </button>
         </div>
-        <input type="text" id="searchInput" class="map-search" placeholder="🔍 Filtrar servidor ou cidade..." />
         <button class="btn-action" onclick="centerSC()">📍 Centralizar SC</button>
         <span id="serverCountBadge" style="font-size: 11px; color: #8e92a0; margin-left: 6px;">Carregando...</span>
     </div>
@@ -590,41 +576,28 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
         function connectCurrentServer() {
             if (currentSelectedServer) {
-                fetch('/api/connect?id=' + currentSelectedServer.id);
+                const btn = document.querySelector('.btn-connect');
+                if (btn) btn.innerText = '⏳ Conectando...';
+                fetch('/api/connect?id=' + encodeURIComponent(currentSelectedServer.id))
+                    .catch(err => console.error("Erro ao conectar:", err))
+                    .finally(() => {
+                        setTimeout(() => {
+                            if (btn) btn.innerText = '🚀 Conectar Agora (RDP)';
+                        }, 1200);
+                    });
             }
         }
 
         function editCurrentServer() {
             if (currentSelectedServer) {
-                fetch('/api/edit?id=' + currentSelectedServer.id);
+                fetch('/api/edit?id=' + encodeURIComponent(currentSelectedServer.id))
+                    .catch(err => console.error("Erro ao abrir edição:", err));
             }
         }
 
         function centerSC() {
             map.flyTo([-27.2423, -50.2189], 8, { duration: 1.2 });
         }
-
-        // Busca com flyTo inteligente
-        document.getElementById('searchInput').addEventListener('input', (e) => {
-            const query = e.target.value.trim().toLowerCase();
-            if (!query) {
-                renderMarkers(serversData);
-                return;
-            }
-
-            const filtered = serversData.filter(s =>
-                (s.name && s.name.toLowerCase().includes(query)) ||
-                (s.host && s.host.toLowerCase().includes(query)) ||
-                (s.group && s.group.toLowerCase().includes(query))
-            );
-
-            renderMarkers(filtered);
-
-            if (filtered.length === 1 && filtered[0].latitude && filtered[0].longitude) {
-                map.flyTo([filtered[0].latitude, filtered[0].longitude], 13, { duration: 1.2 });
-                showCard(filtered[0]);
-            }
-        });
 
         // Polling de Status Ping em segundo plano (a cada 2.5s)
         setInterval(async () => {
@@ -647,7 +620,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             } catch (err) {}
         }, 2500);
 
-        // Polling de sincronização da lista de servidores (a cada 4s)
+        // Sincronização em tempo real da lista de servidores / busca do topo (a cada 700ms)
         setInterval(async () => {
             try {
                 const res = await fetch('/api/servers');
@@ -656,9 +629,14 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     lastServersJson = text;
                     serversData = JSON.parse(text);
                     renderMarkers(serversData);
+
+                    if (serversData.length === 1 && serversData[0].latitude && serversData[0].longitude) {
+                        map.flyTo([serversData[0].latitude, serversData[0].longitude], 13, { duration: 1.2 });
+                        showCard(serversData[0]);
+                    }
                 }
             } catch (err) {}
-        }, 4000);
+        }, 700);
 
         loadServers();
     </script>
@@ -714,12 +692,24 @@ class WebMapServer:
             def log_message(self, format, *args):
                 pass  # Silencia logs no terminal
 
+            def _send_json(self, data_obj, status=200):
+                body = json.dumps(data_obj).encode("utf-8")
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Connection", "close")
+                self.end_headers()
+                self.wfile.write(body)
+
             def do_GET(self):
                 if self.path == "/" or self.path == "/index.html":
+                    html_bytes = HTML_TEMPLATE.encode("utf-8")
                     self.send_response(200)
                     self.send_header("Content-Type", "text/html; charset=utf-8")
+                    self.send_header("Content-Length", str(len(html_bytes)))
+                    self.send_header("Connection", "close")
                     self.end_headers()
-                    self.wfile.write(HTML_TEMPLATE.encode("utf-8"))
+                    self.wfile.write(html_bytes)
 
                 elif self.path.startswith("/static/"):
                     fname = self.path[len("/static/"):].split("?")[0]
@@ -731,6 +721,7 @@ class WebMapServer:
                         self.send_header("Content-Type", f"{mime}; charset=utf-8")
                         self.send_header("Content-Length", str(len(data)))
                         self.send_header("Cache-Control", "public, max-age=86400")
+                        self.send_header("Connection", "close")
                         self.end_headers()
                         self.wfile.write(data)
                     else:
@@ -757,10 +748,7 @@ class WebMapServer:
                             "longitude": coords[1] if coords else None,
                             "online": online_val
                         })
-                    self.send_response(200)
-                    self.send_header("Content-Type", "application/json")
-                    self.end_headers()
-                    self.wfile.write(json.dumps(output).encode("utf-8"))
+                    self._send_json(output)
 
                 elif self.path == "/api/status":
                     status_dict = server_self.get_status_func()
@@ -768,26 +756,23 @@ class WebMapServer:
                         s_id: {"online": val[0], "msg": val[1]}
                         for s_id, val in status_dict.items()
                     }
-                    self.send_response(200)
-                    self.send_header("Content-Type", "application/json")
-                    self.end_headers()
-                    self.wfile.write(json.dumps(payload).encode("utf-8"))
+                    self._send_json(payload)
 
                 elif self.path.startswith("/api/connect"):
-                    s_id = self.path.split("=")[-1]
-                    server_self.on_connect_func(s_id)
-                    self.send_response(200)
-                    self.send_header("Content-Type", "application/json")
-                    self.end_headers()
-                    self.wfile.write(b'{"status": "ok"}')
+                    parsed = urllib.parse.urlparse(self.path)
+                    params = urllib.parse.parse_qs(parsed.query)
+                    s_id = params.get("id", [None])[0]
+                    if s_id:
+                        server_self.on_connect_func(s_id)
+                    self._send_json({"status": "ok"})
 
                 elif self.path.startswith("/api/edit"):
-                    s_id = self.path.split("=")[-1]
-                    server_self.on_edit_func(s_id)
-                    self.send_response(200)
-                    self.send_header("Content-Type", "application/json")
-                    self.end_headers()
-                    self.wfile.write(b'{"status": "ok"}')
+                    parsed = urllib.parse.urlparse(self.path)
+                    params = urllib.parse.parse_qs(parsed.query)
+                    s_id = params.get("id", [None])[0]
+                    if s_id:
+                        server_self.on_edit_func(s_id)
+                    self._send_json({"status": "ok"})
 
                 else:
                     self.send_response(404)
@@ -919,15 +904,29 @@ class WebMapManager:
 
                 if found_hwnd:
                     self.edge_hwnd = found_hwnd
+                    # Oculta imediatamente enquanto estilizamos para nunca piscar como popup
+                    win32gui.ShowWindow(found_hwnd, win32con.SW_HIDE)
+
+                    # Remove completamente todos os estilos de popup, barra de título e botões _ [] X
                     old_style = win32gui.GetWindowLong(found_hwnd, win32con.GWL_STYLE)
-                    new_style = (old_style & ~win32con.WS_POPUP & ~win32con.WS_CAPTION & ~win32con.WS_THICKFRAME & ~win32con.WS_MINIMIZEBOX & ~win32con.WS_MAXIMIZEBOX & ~win32con.WS_SYSMENU) | win32con.WS_CHILD
+                    new_style = (old_style & ~win32con.WS_POPUP & ~win32con.WS_CAPTION & ~win32con.WS_THICKFRAME & ~win32con.WS_MINIMIZEBOX & ~win32con.WS_MAXIMIZEBOX & ~win32con.WS_SYSMENU) | win32con.WS_CHILD | win32con.WS_CLIPCHILDREN | win32con.WS_CLIPSIBLINGS
                     win32gui.SetWindowLong(found_hwnd, win32con.GWL_STYLE, new_style)
+
+                    # Remove estilos estendidos de aplicativo e bordas de diálogo
+                    old_ex = win32gui.GetWindowLong(found_hwnd, win32con.GWL_EXSTYLE)
+                    new_ex = (old_ex & ~win32con.WS_EX_APPWINDOW & ~win32con.WS_EX_WINDOWEDGE & ~win32con.WS_EX_DLGMODALFRAME) | win32con.WS_EX_CONTROLPARENT
+                    win32gui.SetWindowLong(found_hwnd, win32con.GWL_EXSTYLE, new_ex)
+
+                    # Acopla como janela filha inseparável do container Tkinter
                     win32gui.SetParent(found_hwnd, parent_hwnd)
 
-                    win32gui.MoveWindow(found_hwnd, 0, 0, initial_w, initial_h, True)
-                    win32gui.ShowWindow(found_hwnd, win32con.SW_SHOW if self._is_visible else win32con.SW_HIDE)
+                    # Aplica forçadamente SWP_FRAMECHANGED para o DWM destruir fisicamente a barra de título e botões
+                    win32gui.SetWindowPos(
+                        found_hwnd, 0, 0, 0, initial_w, initial_h,
+                        win32con.SWP_FRAMECHANGED | win32con.SWP_NOZORDER | (win32con.SWP_SHOWWINDOW if self._is_visible else 0)
+                    )
                     self._is_docked = True
-                    print(f"[WebMapManager] Edge acoplado com sucesso no HWND {parent_hwnd}!")
+                    print(f"[WebMapManager] Edge acoplado com sucesso sem bordas nem botoes no HWND {parent_hwnd}!")
                 else:
                     print(f"[WebMapManager] Edge window not found. proc.pid={self.edge_proc.pid if self.edge_proc else None}, poll={self.edge_proc.poll() if self.edge_proc else None}")
             except Exception as ex:

@@ -2,6 +2,7 @@ import os
 import sys
 import ctypes
 import subprocess
+import queue
 from pathlib import Path
 import customtkinter as ctk
 import tkinter as tk
@@ -251,6 +252,7 @@ class RemoteXPTIApp(ctk.CTk):
         # Cache persistente do status para NUNCA piscar 'Checando' desnecessariamente
         self.server_status: Dict[str, Tuple[bool, str]] = {}
         self.view_mode = "grade"
+        self.filtered_servers: List[Dict[str, Any]] = list(self.storage.servers)
         self.web_map: Optional[WebMapManager] = None
         
         self.last_cols = -1
@@ -259,16 +261,18 @@ class RemoteXPTIApp(ctk.CTk):
         self._search_debounce_timer = None
         self._is_checking_status = False
         self._status_executor = ThreadPoolExecutor(max_workers=10)
+        self._action_queue = queue.Queue()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
         self._build_header()
         self._build_main_view()
         self._build_statusbar()
+        self._process_action_queue()
 
         # Inicializa o mapa web Leaflet com aceleração de GPU
         self.web_map = WebMapManager(
             container_widget=self.map_container,
-            get_servers_func=lambda: self.storage.servers,
+            get_servers_func=lambda: self.filtered_servers if self.filtered_servers is not None else self.storage.servers,
             get_status_func=lambda: self.server_status,
             on_connect_func=self.connect_to_server_by_id,
             on_edit_func=self.open_edit_dialog_by_id,
@@ -632,8 +636,7 @@ class RemoteXPTIApp(ctk.CTk):
             self.view_mode = "mapa"
             self.scroll_frame.pack_forget()
             self.map_container.pack(fill="both", expand=True, padx=12, pady=10)
-            count = len(self.storage.servers)
-            self.lbl_server_count.configure(text=f"{count} {'servidor' if count == 1 else 'servidores'} no mapa")
+            self.filter_servers()
             if self.web_map:
                 self.web_map.show()
         else:
@@ -644,15 +647,34 @@ class RemoteXPTIApp(ctk.CTk):
             self.scroll_frame.pack(fill="both", expand=True, padx=12, pady=10)
             self.filter_servers()
 
+    def _process_action_queue(self):
+        """Processa com total segurança requisições vindas de threads secundárias (como o servidor web do mapa)."""
+        try:
+            while True:
+                action = self._action_queue.get_nowait()
+                try:
+                    action()
+                except Exception as e:
+                    print(f"[RemoteXPTI] Erro ao executar ação da fila: {e}")
+        except queue.Empty:
+            pass
+        self.after(50, self._process_action_queue)
+
     def connect_to_server_by_id(self, server_id: str):
         server = self.storage.get_server(server_id)
         if server:
-            self.after(0, lambda: self.connect_to_server(server))
+            print(f"[RemoteXPTI] Conectando ao servidor via Mapa: {server.get('name')} ({server.get('host')})")
+            self._action_queue.put(lambda: self.connect_to_server(server))
+        else:
+            print(f"[RemoteXPTI] Servidor ID '{server_id}' não encontrado no storage local.")
 
     def open_edit_dialog_by_id(self, server_id: str):
         server = self.storage.get_server(server_id)
         if server:
-            self.after(0, lambda: self.open_edit_dialog(server))
+            print(f"[RemoteXPTI] Abrindo edição para servidor: {server.get('name')}")
+            self._action_queue.put(lambda: self.open_edit_dialog(server))
+        else:
+            print(f"[RemoteXPTI] Servidor ID '{server_id}' não encontrado para edição.")
 
     def filter_servers(self):
         query = self.entry_search.get().strip().lower()
@@ -671,6 +693,8 @@ class RemoteXPTIApp(ctk.CTk):
                 continue
 
             filtered.append(s)
+
+        self.filtered_servers = filtered
 
         if self.view_mode == "grade":
             self._render_cards(filtered)
@@ -761,7 +785,7 @@ class RemoteXPTIApp(ctk.CTk):
                     self.storage.record_connection(server_id)
 
                     def on_captured(s_id):
-                        self.after(0, lambda: self._update_card_preview(s_id))
+                        self._action_queue.put(lambda: self._update_card_preview(s_id))
 
                     threading.Thread(
                         target=PreviewManager.auto_capture_after_launch,
@@ -770,7 +794,7 @@ class RemoteXPTIApp(ctk.CTk):
                     ).start()
                 else:
                     self.set_message(f"Erro ao conectar: {msg}", duration_sec=8)
-            self.after(0, on_done)
+            self._action_queue.put(on_done)
 
         threading.Thread(target=launch_thread, daemon=True).start()
 
