@@ -7,7 +7,10 @@ from tkinter import filedialog
 from rdp_manager import RDPManager
 from preview_manager import PreviewManager
 from uninstaller import Uninstaller
-from logger import open_logs_folder
+from logger import open_logs_folder, log
+from config_manager import ConfigManager
+from cloud_sync import CloudSyncManager
+from updater import SilentAutoUpdater
 
 class ServerDialog(ctk.CTkToplevel):
     """Janela modal para criação ou edição de perfil de servidor RDP."""
@@ -538,8 +541,190 @@ class ConfirmDialog(ctk.CTkToplevel):
         btn_yes.pack(side="right")
 
 
+class DevLoginDialog(ctk.CTkToplevel):
+    """Janela modal para autenticação do desenvolvedor / beta tester."""
+    def __init__(self, parent, on_success: Callable[[], None]):
+        super().__init__(parent)
+        self.title("Acesso do Desenvolvedor")
+        self.geometry("380x280")
+        self.resizable(False, False)
+        self.transient(parent)
+        self.grab_set()
+        self.focus_force()
+        self.on_success = on_success
+
+        frame = ctk.CTkFrame(self, corner_radius=12, fg_color=("gray92", "#18191f"))
+        frame.pack(fill="both", expand=True, padx=14, pady=14)
+
+        ctk.CTkLabel(
+            frame,
+            text="🔐 Acesso do Desenvolvedor",
+            font=ctk.CTkFont(size=16, weight="bold"),
+            text_color=("gray10", "#ffffff")
+        ).pack(anchor="w", padx=14, pady=(12, 2))
+
+        ctk.CTkLabel(
+            frame,
+            text="Digite a senha mestre para desbloquear os canais de teste, seletor de versões e sincronização.",
+            font=ctk.CTkFont(size=10.5),
+            text_color=("gray40", "#8e92a0"),
+            wraplength=320,
+            justify="left"
+        ).pack(anchor="w", padx=14, pady=(0, 14))
+
+        self.entry_pwd = ctk.CTkEntry(
+            frame,
+            placeholder_text="Senha de Desenvolvedor...",
+            show="*",
+            height=36
+        )
+        self.entry_pwd.pack(fill="x", padx=14, pady=(0, 8))
+        self.entry_pwd.bind("<Return>", lambda e: self._submit())
+        self.entry_pwd.focus()
+
+        self.lbl_error = ctk.CTkLabel(
+            frame,
+            text="",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color="#ff4d4d"
+        )
+        self.lbl_error.pack(anchor="w", padx=14, pady=(0, 8))
+
+        btn_box = ctk.CTkFrame(frame, fg_color="transparent")
+        btn_box.pack(fill="x", padx=14, side="bottom", pady=(0, 6))
+
+        btn_cancel = ctk.CTkButton(
+            btn_box,
+            text="Cancelar",
+            width=90,
+            height=32,
+            fg_color=("gray75", "#2e303b"),
+            command=self.destroy
+        )
+        btn_cancel.pack(side="left")
+
+        btn_ok = ctk.CTkButton(
+            btn_box,
+            text="Entrar",
+            width=110,
+            height=32,
+            fg_color="#0066cc",
+            hover_color="#0052a3",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            command=self._submit
+        )
+        btn_ok.pack(side="right")
+
+    def _submit(self):
+        pwd = self.entry_pwd.get().strip()
+        if not pwd:
+            self.lbl_error.configure(text="Digite a senha de desenvolvedor.")
+            return
+        if ConfigManager().authenticate_dev(pwd):
+            self.destroy()
+            self.on_success()
+        else:
+            self.lbl_error.configure(text="Senha incorreta. Tente novamente.")
+            self.entry_pwd.delete(0, "end")
+
+
+class SupabaseConfigDialog(ctk.CTkToplevel):
+    """Janela modal para configurar a sincronização em nuvem com Supabase."""
+    def __init__(self, parent, on_saved: Optional[Callable[[], None]] = None):
+        super().__init__(parent)
+        self.parent = parent
+        self.on_saved = on_saved
+        self.title("Sincronização em Nuvem (Supabase)")
+        self.geometry("490x420")
+        self.resizable(False, False)
+        self.transient(parent)
+        self.grab_set()
+        self.focus_force()
+
+        cfg = ConfigManager().get_supabase_config()
+
+        frame = ctk.CTkFrame(self, corner_radius=12, fg_color=("gray92", "#18191f"))
+        frame.pack(fill="both", expand=True, padx=14, pady=14)
+
+        ctk.CTkLabel(
+            frame,
+            text="☁️ Configuração do Supabase",
+            font=ctk.CTkFont(size=16, weight="bold"),
+            text_color=("gray10", "#ffffff")
+        ).pack(anchor="w", padx=14, pady=(12, 2))
+
+        ctk.CTkLabel(
+            frame,
+            text="Sincronize servidores e configurações automaticamente com os clientes.",
+            font=ctk.CTkFont(size=10.5),
+            text_color=("gray40", "#8e92a0"),
+            justify="left"
+        ).pack(anchor="w", padx=14, pady=(0, 12))
+
+        ctk.CTkLabel(frame, text="URL do Projeto Supabase:", font=ctk.CTkFont(size=11, weight="bold")).pack(anchor="w", padx=14, pady=(2, 2))
+        self.entry_url = ctk.CTkEntry(frame, placeholder_text="https://xyzcompany.supabase.co", height=34)
+        self.entry_url.insert(0, cfg.get("url", ""))
+        self.entry_url.pack(fill="x", padx=14, pady=(0, 8))
+
+        ctk.CTkLabel(frame, text="Chave de API (Anon Key):", font=ctk.CTkFont(size=11, weight="bold")).pack(anchor="w", padx=14, pady=(2, 2))
+        self.entry_key = ctk.CTkEntry(frame, placeholder_text="eyJhbGciOi...", show="*", height=34)
+        self.entry_key.insert(0, cfg.get("key", ""))
+        self.entry_key.pack(fill="x", padx=14, pady=(0, 10))
+
+        self.sw_enable = ctk.CTkSwitch(frame, text="Ativar Sincronização em Nuvem", font=ctk.CTkFont(size=11))
+        if cfg.get("enabled"):
+            self.sw_enable.select()
+        else:
+            self.sw_enable.deselect()
+        self.sw_enable.pack(anchor="w", padx=14, pady=(0, 10))
+
+        self.lbl_status = ctk.CTkLabel(frame, text="", font=ctk.CTkFont(size=10.5))
+        self.lbl_status.pack(anchor="w", padx=14, pady=(0, 8))
+
+        btn_box = ctk.CTkFrame(frame, fg_color="transparent")
+        btn_box.pack(fill="x", padx=14, side="bottom", pady=(0, 6))
+
+        btn_test = ctk.CTkButton(
+            btn_box,
+            text="🔌 Testar Conexão",
+            height=32,
+            fg_color=("#d6dae2", "#2e303b"),
+            command=self._test_conn
+        )
+        btn_test.pack(side="left")
+
+        btn_save = ctk.CTkButton(
+            btn_box,
+            text="Salvar Configuração",
+            height=32,
+            fg_color="#0066cc",
+            hover_color="#0052a3",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            command=self._save
+        )
+        btn_save.pack(side="right")
+
+    def _test_conn(self):
+        url = self.entry_url.get().strip()
+        key = self.entry_key.get().strip()
+        self.lbl_status.configure(text="Testando conexão com Supabase...", text_color="#0080ff")
+        self.update()
+        ok, msg = CloudSyncManager.test_connection(url, key)
+        color = "#00cc66" if ok else "#ff4d4d"
+        self.lbl_status.configure(text=msg, text_color=color)
+
+    def _save(self):
+        url = self.entry_url.get().strip()
+        key = self.entry_key.get().strip()
+        enabled = self.sw_enable.get() == 1
+        ConfigManager().set_supabase_config(url, key, enabled)
+        if self.on_saved:
+            self.on_saved()
+        self.destroy()
+
+
 class SettingsDialog(ctk.CTkToplevel):
-    """Janela modal de Configurações Gerais e Manutenção do RemoteXPTI."""
+    """Janela modal de Configurações Gerais, Manutenção e Painel do Desenvolvedor do RemoteXPTI."""
 
     def __init__(
         self,
@@ -551,19 +736,27 @@ class SettingsDialog(ctk.CTkToplevel):
         on_uninstall: Optional[Callable[[], None]] = None
     ):
         super().__init__(parent)
+        self.parent = parent
+        self.current_version = current_version
+        self.on_check_updates = on_check_updates
+        self.on_clean_thumbnails = on_clean_thumbnails
+        self.on_clean_credentials = on_clean_credentials
+        self.on_uninstall = on_uninstall
+        self._fetched_releases = []
+
         self.title("Configurações - RemoteXPTI")
-        self.geometry("450x520")
-        self.minsize(420, 480)
+        self.geometry("500x620")
+        self.minsize(460, 520)
         self.resizable(False, False)
         self.transient(parent)
         self.grab_set()
 
-        main_frame = ctk.CTkFrame(self, corner_radius=12, fg_color=("gray92", "#18191f"))
-        main_frame.pack(fill="both", expand=True, padx=14, pady=14)
+        self.main_frame = ctk.CTkFrame(self, corner_radius=12, fg_color=("gray92", "#18191f"))
+        self.main_frame.pack(fill="both", expand=True, padx=14, pady=14)
 
         # 1. Cabeçalho
         lbl_title = ctk.CTkLabel(
-            main_frame,
+            self.main_frame,
             text="⚙️ Configurações do Sistema",
             font=ctk.CTkFont(size=17, weight="bold"),
             text_color=("gray10", "#ffffff")
@@ -571,19 +764,48 @@ class SettingsDialog(ctk.CTkToplevel):
         lbl_title.pack(anchor="w", padx=16, pady=(14, 2))
 
         lbl_sub = ctk.CTkLabel(
-            main_frame,
-            text=f"RemoteXPTI v{current_version} • Gestão de Preferências e Manutenção",
+            self.main_frame,
+            text=f"RemoteXPTI v{current_version} • Gestão de Preferências, Canais e Manutenção",
             font=ctk.CTkFont(size=11),
             text_color=("gray40", "#8e92a0")
         )
         lbl_sub.pack(anchor="w", padx=16, pady=(0, 10))
 
-        # 2. Container de Seções
-        scroll = ctk.CTkScrollableFrame(main_frame, fg_color="transparent")
-        scroll.pack(fill="both", expand=True, padx=8, pady=(0, 10))
+        # 2. Container Scrollável de Seções
+        self.scroll = ctk.CTkScrollableFrame(self.main_frame, fg_color="transparent")
+        self.scroll.pack(fill="both", expand=True, padx=8, pady=(0, 10))
 
-        # --- SEÇÃO 1: Atualizações ---
-        card_update = ctk.CTkFrame(scroll, corner_radius=8, fg_color=("gray86", "#21232b"))
+        self._build_sections()
+
+        # 3. Rodapé
+        btn_close = ctk.CTkButton(
+            self.main_frame,
+            text="Fechar",
+            height=32,
+            fg_color=("gray75", "#282a33"),
+            hover_color=("gray65", "#353742"),
+            text_color=("gray10", "#ffffff"),
+            command=self.destroy
+        )
+        btn_close.pack(fill="x", padx=12, pady=(0, 6))
+
+    def _reload_sections(self):
+        for w in self.scroll.winfo_children():
+            w.destroy()
+        self._build_sections()
+        if hasattr(self.parent, "refresh_servers"):
+            try:
+                self.parent.refresh_servers()
+            except Exception:
+                pass
+
+    def _build_sections(self):
+        cfg = ConfigManager()
+        is_dev = cfg.is_dev_authenticated()
+        active_channel = cfg.get_update_channel()
+
+        # --- SEÇÃO 1: Atualizações de Software ---
+        card_update = ctk.CTkFrame(self.scroll, corner_radius=8, fg_color=("gray86", "#21232b"))
         card_update.pack(fill="x", padx=4, pady=6)
 
         ctk.CTkLabel(
@@ -593,9 +815,10 @@ class SettingsDialog(ctk.CTkToplevel):
             text_color=("gray15", "#e0e4ee")
         ).pack(anchor="w", padx=14, pady=(10, 2))
 
+        channel_text = "Canal Beta Tester (1.1.x)" if active_channel == "beta_tester" else "Canal Beta Público (1.x.0)"
         ctk.CTkLabel(
             card_update,
-            text=f"Versão atual instalada: v{current_version}\nO app checa e baixa novas versões automaticamente em segundo plano.",
+            text=f"Versão atual: v{self.current_version} • {channel_text}\nO app verifica e baixa novas versões automaticamente em segundo plano.",
             font=ctk.CTkFont(size=10),
             text_color=("gray40", "#8e92a0"),
             justify="left"
@@ -608,12 +831,160 @@ class SettingsDialog(ctk.CTkToplevel):
             fg_color="#0066cc",
             hover_color="#0052a3",
             font=ctk.CTkFont(size=11, weight="bold"),
-            command=lambda: (self.destroy(), on_check_updates())
+            command=lambda: (self.destroy(), self.on_check_updates())
         )
         btn_check.pack(fill="x", padx=14, pady=(0, 12))
 
-        # --- SEÇÃO 2: Manutenção e Limpeza ---
-        card_maint = ctk.CTkFrame(scroll, corner_radius=8, fg_color=("gray86", "#21232b"))
+        # --- SEÇÃO 2: Área do Desenvolvedor & Beta Tester ---
+        card_dev = ctk.CTkFrame(self.scroll, corner_radius=8, fg_color=("gray86", "#21232b"))
+        card_dev.pack(fill="x", padx=4, pady=6)
+
+        if not is_dev:
+            ctk.CTkLabel(
+                card_dev,
+                text="🔐 Área do Desenvolvedor",
+                font=ctk.CTkFont(size=12, weight="bold"),
+                text_color=("gray15", "#e0e4ee")
+            ).pack(anchor="w", padx=14, pady=(10, 2))
+
+            ctk.CTkLabel(
+                card_dev,
+                text="Acesso restrito para alternar canais de atualização, testar builds intermediários e gerenciar nuvem.",
+                font=ctk.CTkFont(size=10),
+                text_color=("gray40", "#8e92a0"),
+                justify="left"
+            ).pack(anchor="w", padx=14, pady=(0, 8))
+
+            btn_dev_login = ctk.CTkButton(
+                card_dev,
+                text="🔑 Acessar Modo Desenvolvedor...",
+                height=32,
+                fg_color=("#d6dae2", "#2e303b"),
+                hover_color=("#c4c8d2", "#3b3d4a"),
+                text_color=("gray10", "#ffffff"),
+                font=ctk.CTkFont(size=11, weight="bold"),
+                command=lambda: DevLoginDialog(self, on_success=self._reload_sections)
+            )
+            btn_dev_login.pack(fill="x", padx=14, pady=(0, 12))
+        else:
+            # Painel Ativo de Desenvolvedor
+            dev_header = ctk.CTkFrame(card_dev, fg_color="transparent")
+            dev_header.pack(fill="x", padx=14, pady=(10, 4))
+
+            ctk.CTkLabel(
+                dev_header,
+                text="🟢 Painel do Desenvolvedor Ativo",
+                font=ctk.CTkFont(size=12, weight="bold"),
+                text_color="#00cc66"
+            ).pack(side="left")
+
+            btn_logout = ctk.CTkButton(
+                dev_header,
+                text="🚪 Sair",
+                width=65,
+                height=24,
+                font=ctk.CTkFont(size=10),
+                fg_color=("#ffdddd", "#381a1e"),
+                hover_color=("#ffc2c2", "#522228"),
+                text_color=("#cc0000", "#ff6b6b"),
+                command=lambda: (cfg.logout_dev(), self._reload_sections())
+            )
+            btn_logout.pack(side="right")
+
+            # 1. Alternador de Canal
+            ctk.CTkLabel(
+                card_dev,
+                text="Canal de Distribuição Selecionado:",
+                font=ctk.CTkFont(size=10.5, weight="bold"),
+                text_color=("gray20", "#d0d4e0")
+            ).pack(anchor="w", padx=14, pady=(4, 2))
+
+            def on_channel_changed(val):
+                new_ch = "public" if "Público" in val else "beta_tester"
+                cfg.set_update_channel(new_ch)
+                self._reload_sections()
+
+            seg_channel = ctk.CTkSegmentedButton(
+                card_dev,
+                values=["Canal Beta Público (1.x.0)", "Canal Beta Tester (1.1.x)"],
+                command=on_channel_changed
+            )
+            seg_channel.set("Canal Beta Tester (1.1.x)" if active_channel == "beta_tester" else "Canal Beta Público (1.x.0)")
+            seg_channel.pack(fill="x", padx=14, pady=(0, 8))
+
+            # 2. Seletor de Versões do GitHub
+            ctk.CTkLabel(
+                card_dev,
+                text="Seletor de Versões do GitHub (Instalação / Rollback):",
+                font=ctk.CTkFont(size=10.5, weight="bold"),
+                text_color=("gray20", "#d0d4e0")
+            ).pack(anchor="w", padx=14, pady=(4, 2))
+
+            row_sel = ctk.CTkFrame(card_dev, fg_color="transparent")
+            row_sel.pack(fill="x", padx=14, pady=(0, 6))
+
+            self.combo_versions = ctk.CTkComboBox(
+                row_sel,
+                values=["Clique em 'Listar Versões'..."],
+                height=30
+            )
+            self.combo_versions.pack(side="left", fill="x", expand=True, padx=(0, 6))
+
+            btn_fetch = ctk.CTkButton(
+                row_sel,
+                text="🔄 Listar",
+                width=65,
+                height=30,
+                fg_color=("#d6dae2", "#2e303b"),
+                command=self._fetch_releases_list
+            )
+            btn_fetch.pack(side="right")
+
+            self.btn_install_custom = ctk.CTkButton(
+                card_dev,
+                text="⬇️ Instalar Versão Selecionada",
+                height=30,
+                fg_color="#0066cc",
+                hover_color="#0052a3",
+                font=ctk.CTkFont(size=11, weight="bold"),
+                command=self._install_selected_version
+            )
+            self.btn_install_custom.pack(fill="x", padx=14, pady=(0, 8))
+
+            self.lbl_custom_status = ctk.CTkLabel(card_dev, text="", font=ctk.CTkFont(size=10))
+            self.lbl_custom_status.pack(anchor="w", padx=14, pady=(0, 6))
+
+            # 3. Sincronização em Nuvem (Supabase)
+            ctk.CTkLabel(
+                card_dev,
+                text="Sincronização em Nuvem (Supabase):",
+                font=ctk.CTkFont(size=10.5, weight="bold"),
+                text_color=("gray20", "#d0d4e0")
+            ).pack(anchor="w", padx=14, pady=(6, 2))
+
+            row_cloud = ctk.CTkFrame(card_dev, fg_color="transparent")
+            row_cloud.pack(fill="x", padx=14, pady=(0, 10))
+
+            btn_cfg_cloud = ctk.CTkButton(
+                row_cloud,
+                text="☁️ Configurar Supabase",
+                height=28,
+                fg_color=("#d6dae2", "#2e303b"),
+                command=lambda: SupabaseConfigDialog(self, on_saved=self._reload_sections)
+            )
+            btn_cfg_cloud.pack(side="left", fill="x", expand=True, padx=(0, 4))
+
+            btn_push_cloud = ctk.CTkButton(
+                row_cloud,
+                text="📤 Enviar p/ Nuvem",
+                height=28,
+                fg_color=("#d6dae2", "#2e303b"),
+                command=self._push_servers_to_cloud
+            )
+            btn_push_cloud.pack(side="right", fill="x", expand=True, padx=(4, 0))
+
+        # --- SEÇÃO 3: Manutenção e Diagnóstico ---
+        card_maint = ctk.CTkFrame(self.scroll, corner_radius=8, fg_color=("gray86", "#21232b"))
         card_maint.pack(fill="x", padx=4, pady=6)
 
         ctk.CTkLabel(
@@ -623,15 +994,7 @@ class SettingsDialog(ctk.CTkToplevel):
             text_color=("gray15", "#e0e4ee")
         ).pack(anchor="w", padx=14, pady=(10, 2))
 
-        ctk.CTkLabel(
-            card_maint,
-            text="Ferramentas para limpar cache de imagens e redefinir credenciais salvas.",
-            font=ctk.CTkFont(size=10),
-            text_color=("gray40", "#8e92a0"),
-            justify="left"
-        ).pack(anchor="w", padx=14, pady=(0, 8))
-
-        if on_clean_thumbnails:
+        if self.on_clean_thumbnails:
             btn_clean_thumbs = ctk.CTkButton(
                 card_maint,
                 text="🖼️ Limpar Cache de Miniaturas",
@@ -640,11 +1003,11 @@ class SettingsDialog(ctk.CTkToplevel):
                 hover_color=("#c4c8d2", "#3b3d4a"),
                 text_color=("gray10", "#ffffff"),
                 font=ctk.CTkFont(size=11),
-                command=lambda: (self.destroy(), on_clean_thumbnails())
+                command=lambda: (self.destroy(), self.on_clean_thumbnails())
             )
             btn_clean_thumbs.pack(fill="x", padx=14, pady=(0, 6))
 
-        if on_clean_credentials:
+        if self.on_clean_credentials:
             btn_clean_creds = ctk.CTkButton(
                 card_maint,
                 text="🔐 Limpar Credenciais do Windows (TERMSRV)",
@@ -653,11 +1016,10 @@ class SettingsDialog(ctk.CTkToplevel):
                 hover_color=("#c4c8d2", "#3b3d4a"),
                 text_color=("gray10", "#ffffff"),
                 font=ctk.CTkFont(size=11),
-                command=lambda: (self.destroy(), on_clean_credentials())
+                command=lambda: (self.destroy(), self.on_clean_credentials())
             )
             btn_clean_creds.pack(fill="x", padx=14, pady=(0, 6))
 
-        # Botão para abrir os logs de diagnóstico em máquinas de clientes
         btn_logs = ctk.CTkButton(
             card_maint,
             text="📁 Abrir Pasta de Logs de Diagnóstico",
@@ -670,9 +1032,9 @@ class SettingsDialog(ctk.CTkToplevel):
         )
         btn_logs.pack(fill="x", padx=14, pady=(0, 12))
 
-        # --- SEÇÃO 3: Desinstalação ---
-        if on_uninstall:
-            card_uninst = ctk.CTkFrame(scroll, corner_radius=8, fg_color=("gray86", "#21232b"))
+        # --- SEÇÃO 4: Desinstalação ---
+        if self.on_uninstall:
+            card_uninst = ctk.CTkFrame(self.scroll, corner_radius=8, fg_color=("gray86", "#21232b"))
             card_uninst.pack(fill="x", padx=4, pady=6)
 
             ctk.CTkLabel(
@@ -682,14 +1044,6 @@ class SettingsDialog(ctk.CTkToplevel):
                 text_color=("gray15", "#e0e4ee")
             ).pack(anchor="w", padx=14, pady=(10, 2))
 
-            ctk.CTkLabel(
-                card_uninst,
-                text="Remove integralmente o RemoteXPTI, arquivos, atalhos e credenciais salvas.",
-                font=ctk.CTkFont(size=10),
-                text_color=("gray40", "#8e92a0"),
-                justify="left"
-            ).pack(anchor="w", padx=14, pady=(0, 8))
-
             btn_uninst = ctk.CTkButton(
                 card_uninst,
                 text="Desinstalar RemoteXPTI por Completo...",
@@ -698,21 +1052,56 @@ class SettingsDialog(ctk.CTkToplevel):
                 hover_color=("#ffc2c2", "#522228"),
                 text_color=("#cc0000", "#ff6b6b"),
                 font=ctk.CTkFont(size=11, weight="bold"),
-                command=lambda: (self.destroy(), on_uninstall())
+                command=lambda: (self.destroy(), self.on_uninstall())
             )
             btn_uninst.pack(fill="x", padx=14, pady=(0, 12))
 
-        # 3. Rodapé
-        btn_close = ctk.CTkButton(
-            main_frame,
-            text="Fechar",
-            height=32,
-            fg_color=("gray75", "#282a33"),
-            hover_color=("gray65", "#353742"),
-            text_color=("gray10", "#ffffff"),
-            command=self.destroy
-        )
-        btn_close.pack(fill="x", padx=12, pady=(0, 6))
+    def _fetch_releases_list(self):
+        self.combo_versions.set("Carregando versões do GitHub...")
+        def worker():
+            releases = SilentAutoUpdater.fetch_all_releases()
+            self._fetched_releases = releases
+            options = []
+            for r in releases:
+                options.append(f"{r['tag']} • [{r['channel_label']}] {r['name']}")
+            def update():
+                if options:
+                    self.combo_versions.configure(values=options)
+                    self.combo_versions.set(options[0])
+                    self.lbl_custom_status.configure(text=f"{len(options)} versões disponíveis encontradas.", text_color="#00cc66")
+                else:
+                    self.combo_versions.set("Nenhuma versão encontrada.")
+                    self.lbl_custom_status.configure(text="Não foi possível obter versões no momento.", text_color="#ff4d4d")
+            self.after(0, update)
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _install_selected_version(self):
+        selected_text = self.combo_versions.get()
+        if not selected_text or not self._fetched_releases:
+            return
+        tag = selected_text.split(" • ")[0].strip()
+        matched = next((r for r in self._fetched_releases if r["tag"] == tag), None)
+        if not matched or not matched["download_url"]:
+            self.lbl_custom_status.configure(text="Executável não disponível para esta versão.", text_color="#ff4d4d")
+            return
+
+        def on_status(msg):
+            self.after(0, lambda: self.lbl_custom_status.configure(text=msg, text_color="#0080ff"))
+
+        updater = getattr(self.parent, "updater", None) or SilentAutoUpdater()
+        updater.download_and_install_specific(matched["tag"], matched["download_url"], on_status=on_status)
+
+    def _push_servers_to_cloud(self):
+        if not CloudSyncManager.is_configured():
+            SupabaseConfigDialog(self, on_saved=self._reload_sections)
+            return
+
+        servers = getattr(self.parent, "storage", None)
+        if servers and hasattr(servers, "servers"):
+            ok, msg = CloudSyncManager.push_servers(servers.servers)
+            color = "#00cc66" if ok else "#ff4d4d"
+            self.lbl_custom_status.configure(text=msg, text_color=color)
+
 
 
 # Alias de compatibilidade

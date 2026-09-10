@@ -21,6 +21,8 @@ from updater import SilentAutoUpdater
 from uninstaller import Uninstaller
 from web_map_manager import WebMapManager
 from logger import log
+from config_manager import ConfigManager
+from cloud_sync import CloudSyncManager
 
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
@@ -291,6 +293,10 @@ class RemoteXPTIApp(ctk.CTk):
         self.after(150, self._check_column_recalculation)
         self.after(350, self._check_column_recalculation)
 
+        # Sincronização em nuvem automática com Supabase se configurado
+        if CloudSyncManager.is_configured():
+            threading.Thread(target=self._sync_servers_from_cloud, daemon=True).start()
+
     def _build_header(self):
         header_frame = ctk.CTkFrame(self, height=64, corner_radius=0, fg_color=("#f0f2f5", "#16171d"))
         header_frame.pack(fill="x", side="top")
@@ -495,6 +501,43 @@ class RemoteXPTIApp(ctk.CTk):
             command=self.open_settings_dialog
         )
         self.lbl_version_btn.pack(side="right", padx=(0, 12))
+        self._update_version_badge()
+
+    def _update_version_badge(self):
+        cfg = ConfigManager()
+        if cfg.is_dev_authenticated():
+            ch = "TESTER" if cfg.get_update_channel() == "beta_tester" else "BETA"
+            badge = f"v{CURRENT_VERSION} [{ch}]"
+            color = "#00cc66"
+        else:
+            badge = f"v{CURRENT_VERSION}"
+            color = ("gray35", "#8e92a0")
+        if hasattr(self, "lbl_version_btn"):
+            self.lbl_version_btn.configure(text=badge, text_color=color)
+
+    def _sync_servers_from_cloud(self):
+        try:
+            remote = CloudSyncManager.fetch_servers()
+            if remote:
+                log.info(f"[RemoteXPTI] Recebidos {len(remote)} servidores do Supabase. Sincronizando com storage...")
+                local_map = {s["id"]: s for s in self.storage.servers}
+                changed = False
+                for r in remote:
+                    r_id = r.get("id")
+                    if r_id not in local_map:
+                        self.storage.servers.append(r)
+                        changed = True
+                    else:
+                        local = local_map[r_id]
+                        for fld in ("name", "host", "port", "username", "group", "latitude", "longitude"):
+                            if r.get(fld) is not None and r.get(fld) != local.get(fld):
+                                local[fld] = r[fld]
+                                changed = True
+                if changed:
+                    self.storage.save()
+                    self._action_queue.put(self.refresh_servers)
+        except Exception as e:
+            log.warning(f"[RemoteXPTI] Erro na sincronização com Supabase: {e}")
 
     def open_settings_dialog(self):
         """Abre a janela modal de configurações e preferências do sistema."""
@@ -624,6 +667,7 @@ class RemoteXPTIApp(ctk.CTk):
         log.info("[RemoteXPTI] Aplicação finalizada.")
 
     def refresh_servers(self):
+        self._update_version_badge()
         self.storage.load()
         groups = ["Todos os Grupos"] + self.storage.get_groups()
         self.combo_filter_group.configure(values=groups)

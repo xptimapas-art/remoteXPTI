@@ -7,7 +7,7 @@ import threading
 import subprocess
 import shutil
 from pathlib import Path
-from typing import Optional, Dict, Any, Tuple, Callable
+from typing import Optional, Dict, Any, Tuple, Callable, List
 import customtkinter as ctk
 from version import APP_NAME, CURRENT_VERSION, GITHUB_REPO
 from logger import log
@@ -24,13 +24,28 @@ def parse_version(v_str: str) -> Tuple[int, ...]:
     return tuple(parts)
 
 
+def is_public_version(v_str: str) -> bool:
+    """Retorna True se for uma versão do canal Público/Beta Geral (1.x.0).
+    A segunda casa muda e a terceira casa é estritamente 0.
+    """
+    parts = parse_version(v_str)
+    return len(parts) >= 3 and parts[2] == 0
+
+
+def is_beta_tester_version(v_str: str) -> bool:
+    """Retorna True se for uma versão do canal Beta Tester / Desenvolvimento (1.1.x ou 1.x.y com y > 0)."""
+    parts = parse_version(v_str)
+    return len(parts) >= 3 and parts[2] > 0
+
+
 class SilentAutoUpdater:
     """
     Sistema de atualização em segundo plano estilo Antigravity/Chrome/VS Code:
-    1. Checa a versão silenciosamente no GitHub Releases.
+    1. Checa a versão silenciosamente no GitHub Releases conforme o canal (Público vs Beta Tester).
     2. Se houver versão nova, inicia o download em segundo plano sem travar nada.
     3. Quando o download termina, avisa o usuário e oferece o botão para Reiniciar.
     4. Ao reiniciar, substitui o executável e abre o novo aplicativo.
+    5. Permite ao desenvolvedor selecionar qualquer versão histórica para instalação/rollback.
     """
 
     def __init__(
@@ -51,8 +66,12 @@ class SilentAutoUpdater:
             self.on_status_callback(msg)
 
     def start_background_check(self, is_manual: bool = False):
-        """Inicia a verificação e download automático em background."""
-        log.info(f"[SilentUpdater] Iniciando verificação de atualizações (manual={is_manual}). Versão instalada: v{CURRENT_VERSION}")
+        """Inicia a verificação e download automático em background conforme o canal configurado."""
+        from config_manager import ConfigManager
+        channel = ConfigManager().get_update_channel()
+        channel_desc = "Beta Tester (1.1.x)" if channel == "beta_tester" else "Público (1.x.0)"
+        log.info(f"[SilentUpdater] Iniciando verificação (manual={is_manual}, canal={channel_desc}). Versão atual: v{CURRENT_VERSION}")
+
         if self.update_ready:
             log.info(f"[SilentUpdater] Nova versão v{self.new_version} já está baixada e pronta para reiniciar.")
             if is_manual:
@@ -73,62 +92,114 @@ class SilentAutoUpdater:
 
         threading.Thread(target=self._worker, args=(is_manual,), daemon=True).start()
 
-    def _get_latest_release_info(self) -> Tuple[str, str]:
-        """
-        Retorna (tag_name, download_url) da versao mais recente.
-        Prioriza o redirecionamento web oficial do GitHub para NAO consumir a cota de 60 req/h da API.
-        Se falhar, faz fallback para a API JSON.
-        """
-        tag_name = ""
-        download_url = ""
-
-        # Metodo 1: Redirecionamento Web (Sem limite de taxa de 60 req/h da API)
+    @staticmethod
+    def fetch_all_releases() -> List[Dict[str, Any]]:
+        """Consulta o GitHub Releases e retorna lista completa para o seletor de versões."""
+        api_url = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=40"
+        releases = []
         try:
-            web_url = f"https://github.com/{GITHUB_REPO}/releases/latest"
-            log.info(f"[SilentUpdater] Consultando versão mais recente via Web redirect: {web_url}")
-            req = urllib.request.Request(
-                web_url,
-                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-            )
-            with urllib.request.urlopen(req, timeout=8.0) as resp:
-                final_url = resp.geturl()
-                log.info(f"[SilentUpdater] Resposta do redirect Web: {final_url}")
-                if "/releases/tag/" in final_url:
-                    tag_name = final_url.split("/releases/tag/")[-1].split("/")[0].strip()
-                    download_url = f"https://github.com/{GITHUB_REPO}/releases/download/{tag_name}/{APP_NAME}.exe"
-                    log.info(f"[SilentUpdater] Web redirect detectou versão: {tag_name}, URL: {download_url}")
-                    return tag_name, download_url
-        except Exception as e:
-            log.warning(f"[SilentUpdater] Metodo web redirect indisponivel ({e}), tentando API REST...")
-
-        # Metodo 2: Fallback para API REST do GitHub
-        try:
-            api_url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
-            log.info(f"[SilentUpdater] Consultando API REST: {api_url}")
             req = urllib.request.Request(
                 api_url,
                 headers={
-                    "User-Agent": f"{APP_NAME}-SilentUpdater",
+                    "User-Agent": f"{APP_NAME}-VersionSelector",
                     "Accept": "application/vnd.github.v3+json"
                 }
             )
-            with urllib.request.urlopen(req, timeout=8.0) as resp:
+            with urllib.request.urlopen(req, timeout=10.0) as resp:
                 if resp.status == 200:
                     data = json.loads(resp.read().decode("utf-8"))
-                    tag_name = data.get("tag_name", "").strip()
-                    for asset in data.get("assets", []):
-                        name = asset.get("name", "")
-                        if name.lower().endswith(".exe") and "setup" not in name.lower():
-                            download_url = asset.get("browser_download_url", "")
-                            break
-                    if not download_url and data.get("assets"):
-                        download_url = data["assets"][0].get("browser_download_url", "")
-                    log.info(f"[SilentUpdater] API REST detectou versão: {tag_name}, URL: {download_url}")
-                    return tag_name, download_url
-        except Exception as e:
-            log.error(f"[SilentUpdater] Fallback API GitHub indisponivel: {e}")
+                    for item in data:
+                        tag = item.get("tag_name", "").strip()
+                        name = item.get("name", tag) or tag
+                        published = (item.get("published_at") or "")[:10]
+                        is_prerelease = bool(item.get("prerelease", False))
 
-        return tag_name, download_url
+                        download_url = ""
+                        for asset in item.get("assets", []):
+                            aname = asset.get("name", "")
+                            if aname.lower().endswith(".exe") and "setup" not in aname.lower():
+                                download_url = asset.get("browser_download_url", "")
+                                break
+
+                        is_pub = is_public_version(tag)
+                        channel_label = "Público (Beta)" if is_pub else "Beta Tester"
+
+                        releases.append({
+                            "tag": tag,
+                            "name": name,
+                            "published": published,
+                            "is_public": is_pub,
+                            "is_prerelease": is_prerelease,
+                            "channel_label": channel_label,
+                            "download_url": download_url
+                        })
+        except Exception as e:
+            log.error(f"[SilentUpdater] Erro ao buscar lista de releases no GitHub: {e}")
+        return releases
+
+    def _get_latest_release_info(self) -> Tuple[str, str]:
+        """
+        Retorna (tag_name, download_url) da versão mais recente conforme o canal do cliente.
+        - Clientes no canal 'public' recebem apenas versões 1.x.0.
+        - Desenvolvedores no canal 'beta_tester' recebem todas as versões (1.1.x ou 1.x.0).
+        """
+        from config_manager import ConfigManager
+        channel = ConfigManager().get_update_channel()
+
+        # 1. Se estiver no canal público, tenta primeiro o redirecionamento web oficial do GitHub
+        if channel == "public":
+            try:
+                web_url = f"https://github.com/{GITHUB_REPO}/releases/latest"
+                log.info(f"[SilentUpdater] [Canal Público] Consultando release oficial: {web_url}")
+                req = urllib.request.Request(
+                    web_url,
+                    headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+                )
+                with urllib.request.urlopen(req, timeout=8.0) as resp:
+                    final_url = resp.geturl()
+                    if "/releases/tag/" in final_url:
+                        tag_name = final_url.split("/releases/tag/")[-1].split("/")[0].strip()
+                        if is_public_version(tag_name):
+                            download_url = f"https://github.com/{GITHUB_REPO}/releases/download/{tag_name}/{APP_NAME}.exe"
+                            log.info(f"[SilentUpdater] Release pública oficial detectada: {tag_name}")
+                            return tag_name, download_url
+            except Exception as e:
+                log.warning(f"[SilentUpdater] Falha no redirect web público: {e}")
+
+            # Fallback: pesquisa na lista de releases a primeira versão pública (1.x.0)
+            log.info("[SilentUpdater] [Canal Público] Filtrando histórico de releases por versão 1.x.0...")
+            all_releases = self.fetch_all_releases()
+            for r in all_releases:
+                if r["is_public"] and r["download_url"]:
+                    log.info(f"[SilentUpdater] Versão pública encontrada na lista: {r['tag']}")
+                    return r["tag"], r["download_url"]
+            return "", ""
+
+        else:
+            # 2. Canal Beta Tester: pega a release mais recente absoluta (seja 1.1.x ou 1.x.0)
+            log.info("[SilentUpdater] [Canal Beta Tester] Buscando versão mais recente absoluta...")
+            all_releases = self.fetch_all_releases()
+            if all_releases and all_releases[0]["download_url"]:
+                log.info(f"[SilentUpdater] Mais nova versão beta tester encontrada: {all_releases[0]['tag']}")
+                return all_releases[0]["tag"], all_releases[0]["download_url"]
+            return "", ""
+
+    def download_and_install_specific(self, tag_name: str, download_url: str, on_status=None):
+        """Baixa e aplica uma versão específica escolhida pelo desenvolvedor no seletor de versões."""
+        def worker():
+            self.new_version = tag_name.lstrip("v").lstrip("V")
+            if on_status:
+                on_status(f"⬇️ Baixando {tag_name}...")
+            self._download_update_silent(download_url)
+            if self.update_ready:
+                if on_status:
+                    on_status(f"✅ Versão {tag_name} baixada com sucesso! Reiniciando...")
+                self.apply_update_and_restart()
+            else:
+                if on_status:
+                    on_status("⚠️ Falha ao baixar o arquivo da versão selecionada.")
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def _worker(self, is_manual: bool = False):
         self.is_checking = True
