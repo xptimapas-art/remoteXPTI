@@ -983,6 +983,9 @@ class SettingsDialog(ctk.CTkToplevel):
             )
             btn_push_cloud.pack(side="right", fill="x", expand=True, padx=(4, 0))
 
+            # Carrega automaticamente a lista de versões disponíveis do GitHub
+            self.after(60, self._fetch_releases_list)
+
         # --- SEÇÃO 3: Manutenção e Diagnóstico ---
         card_maint = ctk.CTkFrame(self.scroll, corner_radius=8, fg_color=("gray86", "#21232b"))
         card_maint.pack(fill="x", padx=4, pady=6)
@@ -1057,39 +1060,93 @@ class SettingsDialog(ctk.CTkToplevel):
             btn_uninst.pack(fill="x", padx=14, pady=(0, 12))
 
     def _fetch_releases_list(self):
-        self.combo_versions.set("Carregando versões do GitHub...")
+        if not hasattr(self, "combo_versions") or not self.combo_versions.winfo_exists():
+            return
+        self.combo_versions.set("Buscando versões disponíveis...")
+        self.lbl_custom_status.configure(text="Consultando lançamentos no GitHub...", text_color="#0080ff")
+
+        result_holder = []
+
         def worker():
-            releases = SilentAutoUpdater.fetch_all_releases()
-            self._fetched_releases = releases
-            options = []
-            for r in releases:
-                options.append(f"{r['tag']} • [{r['channel_label']}] {r['name']}")
-            def update():
+            try:
+                releases = SilentAutoUpdater.fetch_all_releases()
+                result_holder.append(releases)
+            except Exception as e:
+                log.error(f"[SettingsDialog] Erro na busca de releases: {e}")
+                result_holder.append([])
+
+        threading.Thread(target=worker, daemon=True).start()
+
+        def poll():
+            if not self.winfo_exists():
+                return
+            if result_holder:
+                releases = result_holder[0]
+                self._fetched_releases = releases
+                options = []
+                for r in releases:
+                    options.append(f"{r['tag']} • [{r['channel_label']}] {r['name']}")
+
                 if options:
                     self.combo_versions.configure(values=options)
                     self.combo_versions.set(options[0])
-                    self.lbl_custom_status.configure(text=f"{len(options)} versões disponíveis encontradas.", text_color="#00cc66")
+                    self.lbl_custom_status.configure(
+                        text=f"✅ {len(options)} versões disponíveis encontradas.",
+                        text_color="#00cc66"
+                    )
                 else:
                     self.combo_versions.set("Nenhuma versão encontrada.")
-                    self.lbl_custom_status.configure(text="Não foi possível obter versões no momento.", text_color="#ff4d4d")
-            self.after(0, update)
-        threading.Thread(target=worker, daemon=True).start()
+                    self.lbl_custom_status.configure(
+                        text="⚠️ Nenhuma versão localizada no momento.",
+                        text_color="#ff4d4d"
+                    )
+            else:
+                self.after(100, poll)
+
+        self.after(100, poll)
 
     def _install_selected_version(self):
         selected_text = self.combo_versions.get()
-        if not selected_text or not self._fetched_releases:
+        if not selected_text or not hasattr(self, "_fetched_releases") or not self._fetched_releases:
+            self.lbl_custom_status.configure(text="Aguarde o carregamento das versões ou clique em 🔄 Listar.", text_color="#ff4d4d")
             return
         tag = selected_text.split(" • ")[0].strip()
         matched = next((r for r in self._fetched_releases if r["tag"] == tag), None)
-        if not matched or not matched["download_url"]:
-            self.lbl_custom_status.configure(text="Executável não disponível para esta versão.", text_color="#ff4d4d")
+        if not matched or not matched.get("download_url"):
+            self.lbl_custom_status.configure(text=f"Link de download não localizado para {tag}.", text_color="#ff4d4d")
             return
 
-        def on_status(msg):
-            self.after(0, lambda: self.lbl_custom_status.configure(text=msg, text_color="#0080ff"))
+        def do_install():
+            self.lbl_custom_status.configure(text=f"⬇️ Baixando {tag}... Aguarde a conclusão.", text_color="#0080ff")
+            if hasattr(self, "btn_install_custom"):
+                self.btn_install_custom.configure(state="disabled")
 
-        updater = getattr(self.parent, "updater", None) or SilentAutoUpdater()
-        updater.download_and_install_specific(matched["tag"], matched["download_url"], on_status=on_status)
+            status_queue = []
+
+            def on_status_bg(msg):
+                status_queue.append(msg)
+
+            def poll_status():
+                if not self.winfo_exists():
+                    return
+                while status_queue:
+                    msg = status_queue.pop(0)
+                    self.lbl_custom_status.configure(text=msg, text_color="#0080ff")
+                self.after(150, poll_status)
+
+            self.after(150, poll_status)
+
+            updater = getattr(self.parent, "updater", None) or SilentAutoUpdater()
+            updater.download_and_install_specific(matched["tag"], matched["download_url"], on_status=on_status_bg)
+
+        ConfirmDialog(
+            parent=self,
+            title=f"Instalar Versão {tag}",
+            message=f"Deseja baixar e instalar a versão {tag}?\n\nO RemoteXPTI será reiniciado automaticamente após a conclusão do download.",
+            confirm_text="Sim, Instalar Agora",
+            confirm_color="#0066cc",
+            on_confirm=do_install
+        )
 
     def _push_servers_to_cloud(self):
         if not CloudSyncManager.is_configured():

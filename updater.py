@@ -3,6 +3,7 @@ import sys
 import json
 import urllib.request
 import urllib.error
+import xml.etree.ElementTree as ET
 import threading
 import subprocess
 import shutil
@@ -94,10 +95,16 @@ class SilentAutoUpdater:
 
     @staticmethod
     def fetch_all_releases() -> List[Dict[str, Any]]:
-        """Consulta o GitHub Releases e retorna lista completa para o seletor de versões."""
-        api_url = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=40"
-        releases = []
+        """
+        Consulta o GitHub Releases e retorna lista completa para o seletor de versões.
+        Tenta primeiro a API JSON do GitHub. Em caso de Rate Limit (HTTP 403) ou falha de rede,
+        aciona automaticamente o Feed Atom oficial de releases (sem limites de requisição).
+        """
+        releases: List[Dict[str, Any]] = []
+
+        # 1. Tentativa via API JSON do GitHub
         try:
+            api_url = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=40"
             req = urllib.request.Request(
                 api_url,
                 headers={
@@ -105,7 +112,7 @@ class SilentAutoUpdater:
                     "Accept": "application/vnd.github.v3+json"
                 }
             )
-            with urllib.request.urlopen(req, timeout=10.0) as resp:
+            with urllib.request.urlopen(req, timeout=5.0) as resp:
                 if resp.status == 200:
                     data = json.loads(resp.read().decode("utf-8"))
                     for item in data:
@@ -120,6 +127,8 @@ class SilentAutoUpdater:
                             if aname.lower().endswith(".exe") and "setup" not in aname.lower():
                                 download_url = asset.get("browser_download_url", "")
                                 break
+                        if not download_url:
+                            download_url = f"https://github.com/{GITHUB_REPO}/releases/download/{tag}/{APP_NAME}.exe"
 
                         is_pub = is_public_version(tag)
                         channel_label = "Público (Beta)" if is_pub else "Beta Tester"
@@ -133,8 +142,50 @@ class SilentAutoUpdater:
                             "channel_label": channel_label,
                             "download_url": download_url
                         })
+                    if releases:
+                        log.info(f"[SilentUpdater] {len(releases)} versões carregadas com sucesso via API GitHub.")
+                        return releases
         except Exception as e:
-            log.error(f"[SilentUpdater] Erro ao buscar lista de releases no GitHub: {e}")
+            log.warning(f"[SilentUpdater] API do GitHub retornou aviso ({e}). Acionando fallback instantâneo por Feed Atom...")
+
+        # 2. Fallback Imediato: Feed Atom de Releases do GitHub (Sem Rate Limit)
+        try:
+            feed_url = f"https://github.com/{GITHUB_REPO}/releases.atom"
+            req_feed = urllib.request.Request(
+                feed_url,
+                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+            )
+            with urllib.request.urlopen(req_feed, timeout=8.0) as resp:
+                if resp.status == 200:
+                    root = ET.fromstring(resp.read())
+                    ns = {"atom": "http://www.w3.org/2005/Atom"}
+                    for entry in root.findall("atom:entry", ns):
+                        title = (entry.find("atom:title", ns).text or "").strip()
+                        updated = (entry.find("atom:updated", ns).text or "")[:10]
+                        link_elem = entry.find("atom:link", ns)
+                        link = link_elem.attrib.get("href", "") if link_elem is not None else ""
+                        if "/releases/tag/" in link:
+                            tag = link.split("/releases/tag/")[-1].strip()
+                        else:
+                            tag = title.split()[0].strip()
+
+                        is_pub = is_public_version(tag)
+                        channel_label = "Público (Beta)" if is_pub else "Beta Tester"
+                        dl_url = f"https://github.com/{GITHUB_REPO}/releases/download/{tag}/{APP_NAME}.exe"
+
+                        releases.append({
+                            "tag": tag,
+                            "name": title,
+                            "published": updated,
+                            "is_public": is_pub,
+                            "is_prerelease": not is_pub,
+                            "channel_label": channel_label,
+                            "download_url": dl_url
+                        })
+                    log.info(f"[SilentUpdater] {len(releases)} versões carregadas com sucesso via Feed Atom do GitHub.")
+        except Exception as e:
+            log.error(f"[SilentUpdater] Falha também no fallback do feed de releases: {e}")
+
         return releases
 
     def _get_latest_release_info(self) -> Tuple[str, str]:
