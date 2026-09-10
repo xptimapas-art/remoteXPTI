@@ -17,6 +17,7 @@ from storage import StorageManager
 from rdp_manager import RDPManager
 from preview_manager import PreviewManager
 from dialogs import ServerDialog, ConfirmDialog, SettingsDialog, UninstallProgressDialog
+from settings_drawer import SettingsDrawer
 from version import CURRENT_VERSION
 from updater import SilentAutoUpdater
 from uninstaller import Uninstaller
@@ -297,6 +298,9 @@ class RemoteXPTIApp(ctk.CTk):
         self._is_checking_status = False
         self._status_executor = ThreadPoolExecutor(max_workers=10)
         self._action_queue = queue.Queue()
+        self._is_drawer_open = False
+        self._drawer_anim_id = None
+        self.settings_drawer = None
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
         self._build_header()
@@ -305,6 +309,7 @@ class RemoteXPTIApp(ctk.CTk):
         self._process_action_queue()
 
         self.bind("<Configure>", self._on_window_configure, add="+")
+        self.bind("<Escape>", lambda e: self.close_settings_drawer() if getattr(self, "_is_drawer_open", False) else None)
 
         # Inicia o warmup em estágios progressivos
         self.after(30, self._start_staged_warmup)
@@ -570,6 +575,17 @@ class RemoteXPTIApp(ctk.CTk):
         else:
             self.scroll_frame.tkraise()
 
+        # Menu lateral deslizante e flutuante de configurações (Drawer)
+        self.settings_drawer = SettingsDrawer(
+            parent=self,
+            current_version=CURRENT_VERSION,
+            on_close=self.close_settings_drawer,
+            on_check_updates=self.check_for_updates_manual,
+            on_clean_thumbnails=self._clean_thumbnails_cache,
+            on_clean_credentials=self._clean_credentials_manual,
+            on_uninstall=self.confirm_uninstall_app
+        )
+
     def _build_statusbar(self):
         self.status_bar = ctk.CTkFrame(self, height=28, corner_radius=0, fg_color=("#eaecef", "#121318"))
         self.status_bar.pack(fill="x", side="bottom")
@@ -641,19 +657,125 @@ class RemoteXPTIApp(ctk.CTk):
         except Exception as e:
             log.warning(f"[RemoteXPTI] Erro na sincronização com Supabase: {e}")
 
-    def open_settings_dialog(self):
-        """Abre a janela modal de configurações e preferências do sistema."""
-        SettingsDialog(
-            parent=self,
-            current_version=CURRENT_VERSION,
-            on_check_updates=self.check_for_updates_manual,
-            on_clean_thumbnails=self._clean_thumbnails_cache,
-            on_clean_credentials=self._clean_credentials_manual,
-            on_uninstall=self.confirm_uninstall_app
+    def toggle_settings_drawer(self):
+        """Alterna a abertura/fechamento do menu lateral flutuante de configurações."""
+        if getattr(self, "_is_drawer_open", False):
+            self.close_settings_drawer()
+        else:
+            self.open_settings_drawer()
+
+    def open_settings_drawer(self):
+        """Abre o menu lateral flutuante sobre a janela sem desalinhar os cards da grade."""
+        if getattr(self, "_is_drawer_open", False):
+            return
+        self._is_drawer_open = True
+
+        # Destaca o botão de engrenagem na barra superior
+        self.btn_settings.configure(
+            fg_color="#0066cc",
+            hover_color="#0052a3",
+            text_color="#ffffff"
         )
 
+        # Se estiver no modo mapa, ajusta margem para não sobrepor o Edge
+        if self.view_mode == "mapa" and hasattr(self, "web_map") and self.web_map:
+            self.web_map.set_margin_right(420)
+
+        win_w = self.winfo_width()
+        win_h = self.winfo_height()
+        drawer_w = 420
+        drawer_h = max(200, win_h - 64 - 28)
+
+        if getattr(self, "_drawer_anim_id", None):
+            self.after_cancel(self._drawer_anim_id)
+            self._drawer_anim_id = None
+
+        start_x = win_w
+        target_x = win_w - drawer_w
+
+        self.settings_drawer.configure(width=drawer_w, height=drawer_h)
+        self.settings_drawer.place(x=start_x, y=64)
+        self.settings_drawer.tkraise()
+
+        steps = 8
+        current_step = [0]
+
+        def anim_step():
+            if not self._is_drawer_open:
+                return
+            current_step[0] += 1
+            progress = current_step[0] / steps
+            cur_x = int(start_x + (target_x - start_x) * (1 - (1 - progress) ** 2))
+            cur_w = self.winfo_width()
+            cur_h = self.winfo_height()
+            self.settings_drawer.configure(width=drawer_w, height=max(200, cur_h - 64 - 28))
+            self.settings_drawer.place(x=cur_x, y=64)
+            self.settings_drawer.tkraise()
+            if current_step[0] < steps:
+                self._drawer_anim_id = self.after(12, anim_step)
+            else:
+                self.settings_drawer.configure(width=drawer_w, height=max(200, cur_h - 64 - 28))
+                self.settings_drawer.place(x=cur_w - drawer_w, y=64)
+                self.settings_drawer.tkraise()
+                self._drawer_anim_id = None
+
+        anim_step()
+
+    def close_settings_drawer(self):
+        """Fecha com animação de deslizamento para a direita."""
+        if not getattr(self, "_is_drawer_open", False):
+            return
+        self._is_drawer_open = False
+
+        self.btn_settings.configure(
+            fg_color=("#dce0e8", "#262832"),
+            hover_color=("#ccd2dc", "#343644"),
+            text_color=("gray10", "#ffffff")
+        )
+
+        if hasattr(self, "web_map") and self.web_map:
+            self.web_map.set_margin_right(0)
+
+        win_w = self.winfo_width()
+        win_h = self.winfo_height()
+        drawer_w = 420
+        drawer_h = max(200, win_h - 64 - 28)
+
+        if getattr(self, "_drawer_anim_id", None):
+            self.after_cancel(self._drawer_anim_id)
+            self._drawer_anim_id = None
+
+        start_x = self.settings_drawer.winfo_x() if (self.settings_drawer and self.settings_drawer.winfo_ismapped()) else (win_w - drawer_w)
+        target_x = win_w
+
+        steps = 6
+        current_step = [0]
+
+        def anim_step():
+            if self._is_drawer_open:
+                return
+            current_step[0] += 1
+            progress = current_step[0] / steps
+            cur_x = int(start_x + (target_x - start_x) * (progress ** 2))
+            cur_h = self.winfo_height()
+            if self.settings_drawer:
+                self.settings_drawer.configure(width=drawer_w, height=max(200, cur_h - 64 - 28))
+                self.settings_drawer.place(x=cur_x, y=64)
+            if current_step[0] < steps:
+                self._drawer_anim_id = self.after(12, anim_step)
+            else:
+                if self.settings_drawer:
+                    self.settings_drawer.place_forget()
+                self._drawer_anim_id = None
+
+        anim_step()
+
+    def open_settings_dialog(self):
+        """Abre/fecha o menu lateral deslizante de configurações."""
+        self.toggle_settings_drawer()
+
     def open_version_menu(self):
-        self.open_settings_dialog()
+        self.toggle_settings_drawer()
 
     def _clean_thumbnails_cache(self):
         PreviewManager.invalidate_cache()
@@ -697,6 +819,14 @@ class RemoteXPTIApp(ctk.CTk):
     def _on_window_configure(self, event):
         if event.widget != self:
             return
+        if getattr(self, "_is_drawer_open", False) and getattr(self, "settings_drawer", None):
+            win_w = self.winfo_width()
+            win_h = self.winfo_height()
+            drawer_w = 420
+            drawer_h = max(200, win_h - 64 - 28)
+            self.settings_drawer.configure(width=drawer_w, height=drawer_h)
+            self.settings_drawer.place(x=win_w - drawer_w, y=64)
+            self.settings_drawer.tkraise()
         if getattr(self, "_resize_timer", None):
             self.after_cancel(self._resize_timer)
         self._resize_timer = self.after(20, self._check_column_recalculation)
@@ -809,7 +939,13 @@ class RemoteXPTIApp(ctk.CTk):
             self.map_container.tkraise()
             self.filter_servers()
             if self.web_map:
+                if getattr(self, "_is_drawer_open", False):
+                    self.web_map.set_margin_right(420)
+                else:
+                    self.web_map.set_margin_right(0)
                 self.web_map.show()
+            if getattr(self, "_is_drawer_open", False) and getattr(self, "settings_drawer", None):
+                self.settings_drawer.tkraise()
         else:
             self.view_mode = "grade"
             if self.web_map:
@@ -819,6 +955,8 @@ class RemoteXPTIApp(ctk.CTk):
                 self.scroll_frame._parent_frame.tkraise()
             else:
                 self.scroll_frame.tkraise()
+            if getattr(self, "_is_drawer_open", False) and getattr(self, "settings_drawer", None):
+                self.settings_drawer.tkraise()
             self.filter_servers()
 
     def _process_action_queue(self):
@@ -1239,5 +1377,7 @@ class RemoteXPTIApp(ctk.CTk):
 
 
 if __name__ == "__main__":
+    import multiprocessing
+    multiprocessing.freeze_support()
     app = RemoteXPTIApp()
     app.mainloop()
