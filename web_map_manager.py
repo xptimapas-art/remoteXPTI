@@ -782,14 +782,19 @@ class WebMapServer:
 
 
 def cleanup_orphaned_edge_processes(cache_dir: Path):
-    """Encerra qualquer processo msedge.exe anterior que ainda esteja utilizando o diretório de cache do mapa."""
+    """Encerra de forma nativa e 100% silenciosa processos msedge.exe antigos atrelados ao cache do mapa."""
     cache_str = str(cache_dir).lower()
     try:
-        ps_cmd = f"""
-        $cache = '{cache_str}';
-        Get-CimInstance Win32_Process -Filter "name = 'msedge.exe'" | Where-Object {{ $_.CommandLine -and $_.CommandLine.ToLower().Contains($cache) }} | ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force }}
-        """
-        subprocess.run(["powershell", "-NoProfile", "-Command", ps_cmd], capture_output=True, timeout=5)
+        import win32com.client
+        wmi = win32com.client.GetObject("winmgmts:")
+        procs = wmi.ExecQuery("SELECT ProcessId, CommandLine FROM Win32_Process WHERE Name = 'msedge.exe'")
+        for p in procs:
+            cmd = (p.CommandLine or "").lower()
+            if cache_str in cmd:
+                try:
+                    p.Terminate()
+                except Exception:
+                    pass
     except Exception:
         pass
 
@@ -849,10 +854,12 @@ class WebMapManager:
         if not self._is_docked:
             if not self.edge_proc or self.edge_proc.poll() is not None:
                 self._launch_and_dock()
-        elif self.edge_hwnd:
+        if self.edge_hwnd and self._is_docked:
             try:
+                w = max(400, self.container.winfo_width())
+                h = max(300, self.container.winfo_height())
+                win32gui.SetWindowPos(self.edge_hwnd, win32con.HWND_TOP, 0, 0, w, h, win32con.SWP_SHOWWINDOW)
                 win32gui.ShowWindow(self.edge_hwnd, win32con.SW_SHOW)
-                self.resize()
                 win32gui.InvalidateRect(self.edge_hwnd, None, True)
                 win32gui.UpdateWindow(self.edge_hwnd)
             except Exception:
@@ -869,14 +876,13 @@ class WebMapManager:
 
     def resize(self):
         """Ajusta o tamanho do Edge para corresponder perfeitamente ao container."""
-        if not self.edge_hwnd or not self._is_docked or not self.container_hwnd:
+        if not self.edge_hwnd or not self._is_docked or not self.container:
             return
         try:
-            rect = win32gui.GetClientRect(self.container_hwnd)
-            w = rect[2]
-            h = rect[3]
+            w = self.container.winfo_width()
+            h = self.container.winfo_height()
             if w > 50 and h > 50:
-                win32gui.MoveWindow(self.edge_hwnd, 0, 0, w, h, True)
+                win32gui.SetWindowPos(self.edge_hwnd, win32con.HWND_TOP, 0, 0, w, h, win32con.SWP_SHOWWINDOW | win32con.SWP_NOACTIVATE)
         except Exception:
             pass
 
@@ -888,8 +894,6 @@ class WebMapManager:
 
         cache_dir = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "RemoteXPTI" / "map_cache"
         cache_dir.mkdir(parents=True, exist_ok=True)
-        cleanup_orphaned_edge_processes(cache_dir)
-        time.sleep(0.15)
 
         if not self.container_hwnd:
             try:
@@ -985,22 +989,14 @@ class WebMapManager:
 
                     # Aplica forçadamente SWP_FRAMECHANGED para o DWM destruir fisicamente a barra de título e botões
                     win32gui.SetWindowPos(
-                        found_hwnd, 0, 0, 0, final_w, final_h,
-                        win32con.SWP_FRAMECHANGED | win32con.SWP_NOZORDER | (win32con.SWP_SHOWWINDOW if self._is_visible else win32con.SWP_HIDEWINDOW)
+                        found_hwnd, win32con.HWND_TOP, 0, 0, final_w, final_h,
+                        win32con.SWP_FRAMECHANGED | (win32con.SWP_SHOWWINDOW if self._is_visible else win32con.SWP_HIDEWINDOW)
                     )
+                    self._is_docked = True
+                    print(f"[WebMapManager] Edge acoplado com sucesso sem bordas nem botoes no HWND {parent_hwnd}!")
 
-                    # Verificação de segurança: confirma se o pai no Windows é de fato o container
-                    if win32gui.GetParent(found_hwnd) == parent_hwnd:
-                        self._is_docked = True
-                        print(f"[WebMapManager] Edge acoplado com sucesso sem bordas nem botoes no HWND {parent_hwnd}!")
-                    else:
-                        print(f"[WebMapManager] Tentando re-acoplar no HWND {parent_hwnd}...")
-                        win32gui.SetParent(found_hwnd, parent_hwnd)
-                        win32gui.SetWindowPos(
-                            found_hwnd, 0, 0, 0, final_w, final_h,
-                            win32con.SWP_FRAMECHANGED | win32con.SWP_NOZORDER | (win32con.SWP_SHOWWINDOW if self._is_visible else win32con.SWP_HIDEWINDOW)
-                        )
-                        self._is_docked = True
+                    if self._is_visible:
+                        self.show()
                 else:
                     print(f"[WebMapManager] Edge window not found. proc.pid={self.edge_proc.pid if self.edge_proc else None}, poll={self.edge_proc.poll() if self.edge_proc else None}")
             except Exception as ex:
@@ -1018,7 +1014,8 @@ class WebMapManager:
                 pass
         if self.edge_proc:
             try:
-                subprocess.run(["taskkill", "/F", "/T", "/PID", str(self.edge_proc.pid)], capture_output=True)
+                creation_flags = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
+                subprocess.run(["taskkill", "/F", "/T", "/PID", str(self.edge_proc.pid)], capture_output=True, creationflags=creation_flags)
             except Exception:
                 try:
                     self.edge_proc.terminate()

@@ -190,29 +190,20 @@ def sync_windows_shortcuts_icon():
             appdata / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "RemoteXPTI.lnk"
         ]
 
-        found_any = False
-        ps_lines = ["$w = New-Object -ComObject WScript.Shell"]
+        import win32com.client
+        w = win32com.client.Dispatch("WScript.Shell")
         for sc in candidates:
             if sc.exists():
-                found_any = True
-                ps_lines.append(f"""
-                $s = $w.CreateShortcut('{str(sc)}')
-                $s.TargetPath = '{str(current_exe)}'
-                $s.WorkingDirectory = '{str(app_dir)}'
-                $s.IconLocation = '{str(icon_file)},0'
-                $s.Save()
-                """)
-
-        if found_any:
-            ps_script = "\n".join(ps_lines)
-            creation_flags = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
-            subprocess.run(
-                ["powershell.exe", "-NoProfile", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass", "-Command", ps_script],
-                capture_output=True,
-                creationflags=creation_flags
-            )
-            # Notifica o Explorer para recarregar o cache de ícones
-            ctypes.windll.shell32.SHChangeNotify(0x08000000, 0x0000, None, None)
+                try:
+                    s = w.CreateShortcut(str(sc))
+                    s.TargetPath = str(current_exe)
+                    s.WorkingDirectory = str(app_dir)
+                    s.IconLocation = f"{str(icon_file)},0"
+                    s.Save()
+                except Exception:
+                    pass
+        # Notifica o Explorer para recarregar o cache de ícones
+        ctypes.windll.shell32.SHChangeNotify(0x08000000, 0x0000, None, None)
     except Exception:
         pass
 
@@ -456,8 +447,8 @@ class RemoteXPTIApp(ctk.CTk):
             justify="center"
         )
 
-        # 2. Modo Mapa Interativo (Container GPU do Edge / Leaflet)
-        self.map_container = ctk.CTkFrame(self.content_area, fg_color="#121318", corner_radius=0)
+        # 2. Modo Mapa Interativo (Container GPU do Edge / Leaflet nativo)
+        self.map_container = tk.Frame(self.content_area, bg="#121318")
         self.map_container.grid(row=0, column=0, sticky="nsew")
         self.map_container.bind("<Configure>", self._on_map_container_configure, add="+")
 
