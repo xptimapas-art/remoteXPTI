@@ -566,7 +566,7 @@ class DevLoginDialog(ctk.CTkToplevel):
         ctk.CTkLabel(
             frame,
             text="Digite a senha mestre para desbloquear os canais de teste, seletor de versões e sincronização.",
-            font=ctk.CTkFont(size=10.5),
+            font=ctk.CTkFont(size=11),
             text_color=("gray40", "#8e92a0"),
             wraplength=320,
             justify="left"
@@ -656,7 +656,7 @@ class SupabaseConfigDialog(ctk.CTkToplevel):
         ctk.CTkLabel(
             frame,
             text="Sincronize servidores e configurações automaticamente com os clientes.",
-            font=ctk.CTkFont(size=10.5),
+            font=ctk.CTkFont(size=11),
             text_color=("gray40", "#8e92a0"),
             justify="left"
         ).pack(anchor="w", padx=14, pady=(0, 12))
@@ -678,7 +678,7 @@ class SupabaseConfigDialog(ctk.CTkToplevel):
             self.sw_enable.deselect()
         self.sw_enable.pack(anchor="w", padx=14, pady=(0, 10))
 
-        self.lbl_status = ctk.CTkLabel(frame, text="", font=ctk.CTkFont(size=10.5))
+        self.lbl_status = ctk.CTkLabel(frame, text="", font=ctk.CTkFont(size=11))
         self.lbl_status.pack(anchor="w", padx=14, pady=(0, 8))
 
         btn_box = ctk.CTkFrame(frame, fg_color="transparent")
@@ -895,7 +895,7 @@ class SettingsDialog(ctk.CTkToplevel):
             ctk.CTkLabel(
                 card_dev,
                 text="Canal de Distribuição Selecionado:",
-                font=ctk.CTkFont(size=10.5, weight="bold"),
+                font=ctk.CTkFont(size=11, weight="bold"),
                 text_color=("gray20", "#d0d4e0")
             ).pack(anchor="w", padx=14, pady=(4, 2))
 
@@ -916,7 +916,7 @@ class SettingsDialog(ctk.CTkToplevel):
             ctk.CTkLabel(
                 card_dev,
                 text="Seletor de Versões do GitHub (Instalação / Rollback):",
-                font=ctk.CTkFont(size=10.5, weight="bold"),
+                font=ctk.CTkFont(size=11, weight="bold"),
                 text_color=("gray20", "#d0d4e0")
             ).pack(anchor="w", padx=14, pady=(4, 2))
 
@@ -958,7 +958,7 @@ class SettingsDialog(ctk.CTkToplevel):
             ctk.CTkLabel(
                 card_dev,
                 text="Sincronização em Nuvem (Supabase):",
-                font=ctk.CTkFont(size=10.5, weight="bold"),
+                font=ctk.CTkFont(size=11, weight="bold"),
                 text_color=("gray20", "#d0d4e0")
             ).pack(anchor="w", padx=14, pady=(6, 2))
 
