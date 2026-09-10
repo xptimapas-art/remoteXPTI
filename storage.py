@@ -101,7 +101,25 @@ class StorageManager:
             self.servers = []
 
         self._sync_official_groups_and_users()
+        self._sync_coordinates()
         return self.servers
+
+    def _sync_coordinates(self):
+        """Sincroniza automaticamente as coordenadas geográficas dos servidores que não possuem."""
+        try:
+            from map_manager import resolve_server_coordinates
+            changed = False
+            for s in self.servers:
+                if s.get("latitude") is None or s.get("longitude") is None:
+                    coords = resolve_server_coordinates(s)
+                    if coords:
+                        s["latitude"] = coords[0]
+                        s["longitude"] = coords[1]
+                        changed = True
+            if changed:
+                self.save()
+        except Exception as e:
+            print(f"[StorageManager] Erro ao sincronizar coordenadas: {e}")
 
     def _sync_official_groups_and_users(self):
         """Sincroniza automaticamente as tags oficiais (SEJURI e BEMTEVI) e o usuário padrão bemtevi.net\\xpti."""

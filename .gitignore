@@ -1,4 +1,4 @@
-﻿# Python
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
@@ -22,3 +22,6 @@ thumbnails/*.png
 # IDE
 .vscode/
 .idea/
+
+# Cache de mapas offline
+cache/

@@ -207,6 +207,50 @@ class ServerDialog(ctk.CTkToplevel):
         self.selected_custom_image = None
         self.should_reset_thumb = False
 
+        # 9. Geolocalização para o Mapa Interativo
+        geo_box = ctk.CTkFrame(form_frame, corner_radius=8, fg_color=("gray85", "#25252e"))
+        geo_box.pack(fill="x", padx=10, pady=(5, 10), ipady=6)
+
+        ctk.CTkLabel(
+            geo_box,
+            text="📍 Localização no Mapa Interativo",
+            font=ctk.CTkFont(size=13, weight="bold")
+        ).pack(anchor="w", padx=14, pady=(4, 2))
+
+        ctk.CTkLabel(
+            geo_box,
+            text="Coordenadas para exibir o marcador deste servidor no mapa.",
+            font=ctk.CTkFont(size=11),
+            text_color=("gray40", "#a0a0a0")
+        ).pack(anchor="w", padx=14, pady=(0, 6))
+
+        geo_row = ctk.CTkFrame(geo_box, fg_color="transparent")
+        geo_row.pack(fill="x", padx=14, pady=(0, 4))
+
+        col_lat = ctk.CTkFrame(geo_row, fg_color="transparent")
+        col_lat.pack(side="left", fill="x", expand=True, padx=(0, 6))
+        ctk.CTkLabel(col_lat, text="Latitude", font=ctk.CTkFont(size=11)).pack(anchor="w")
+        self.entry_lat = ctk.CTkEntry(col_lat, placeholder_text="-27.2000", height=32)
+        self.entry_lat.pack(fill="x")
+
+        col_lon = ctk.CTkFrame(geo_row, fg_color="transparent")
+        col_lon.pack(side="left", fill="x", expand=True, padx=(6, 6))
+        ctk.CTkLabel(col_lon, text="Longitude", font=ctk.CTkFont(size=11)).pack(anchor="w")
+        self.entry_lon = ctk.CTkEntry(col_lon, placeholder_text="-50.2000", height=32)
+        self.entry_lon.pack(fill="x")
+
+        self.btn_auto_geo = ctk.CTkButton(
+            geo_row,
+            text="📍 Auto-detectar",
+            width=110,
+            height=32,
+            fg_color=("#d0d4dc", "#343644"),
+            hover_color=("#c0c5d0", "#424556"),
+            text_color=("gray10", "#ffffff"),
+            command=self._auto_detect_coordinates
+        )
+        self.btn_auto_geo.pack(side="right", padx=(6, 0), pady=(18, 0))
+
         # Rodapé com Botões de Ação
         footer_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
         footer_frame.pack(fill="x", padx=10, pady=(10, 5))
@@ -298,6 +342,27 @@ class ServerDialog(ctk.CTkToplevel):
         if self.server_data.get("multimon", False):
             self.chk_multimon.select()
 
+        if self.server_data.get("latitude") is not None:
+            self.entry_lat.delete(0, "end")
+            self.entry_lat.insert(0, str(self.server_data.get("latitude")))
+        if self.server_data.get("longitude") is not None:
+            self.entry_lon.delete(0, "end")
+            self.entry_lon.insert(0, str(self.server_data.get("longitude")))
+
+    def _auto_detect_coordinates(self):
+        from map_manager import resolve_server_coordinates
+        name = self.entry_name.get().strip()
+        group = self.combo_group.get().strip()
+        coords = resolve_server_coordinates({"name": name, "group": group})
+        if coords:
+            self.entry_lat.delete(0, "end")
+            self.entry_lat.insert(0, str(coords[0]))
+            self.entry_lon.delete(0, "end")
+            self.entry_lon.insert(0, str(coords[1]))
+            self.lbl_error.configure(text=f"✅ Localização detectada: {coords[0]}, {coords[1]}", text_color="#00cc66")
+        else:
+            self.lbl_error.configure(text="⚠️ Não foi possível identificar a cidade automaticamente.", text_color="#ffaa00")
+
     def _test_connection(self):
         host = self.entry_host.get().strip()
         port_str = self.entry_port.get().strip() or "3389"
@@ -381,6 +446,23 @@ class ServerDialog(ctk.CTkToplevel):
             self.entry_port.focus()
             return
 
+        lat_str = self.entry_lat.get().strip()
+        lon_str = self.entry_lon.get().strip()
+        lat_val = None
+        lon_val = None
+        if lat_str and lon_str:
+            try:
+                lat_val = float(lat_str)
+                lon_val = float(lon_str)
+            except ValueError:
+                pass
+
+        if lat_val is None or lon_val is None:
+            from map_manager import resolve_server_coordinates
+            auto_coords = resolve_server_coordinates({"name": name, "group": group})
+            if auto_coords:
+                lat_val, lon_val = auto_coords
+
         payload = {
             "name": name,
             "host": host,
@@ -392,7 +474,9 @@ class ServerDialog(ctk.CTkToplevel):
             "admin_mode": bool(self.chk_admin.get()),
             "multimon": bool(self.chk_multimon.get()),
             "custom_image": self.selected_custom_image,
-            "reset_thumb": self.should_reset_thumb
+            "reset_thumb": self.should_reset_thumb,
+            "latitude": lat_val,
+            "longitude": lon_val
         }
 
         if self.on_save:

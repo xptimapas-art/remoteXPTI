@@ -102,6 +102,7 @@ def main():
         "--version-file", str(v_app),
         "--add-data", "imagens;imagens",
         "--collect-all", "customtkinter",
+        "--collect-all", "tkintermapview",
         "--name", "RemoteXPTI",
         "main.py"
     ])
