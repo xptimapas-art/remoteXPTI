@@ -6,6 +6,7 @@ import ctypes
 from ctypes import wintypes
 from pathlib import Path
 import math
+from functools import lru_cache
 from typing import Optional, Tuple
 from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageEnhance
 import customtkinter as ctk
@@ -58,6 +59,7 @@ class PreviewManager:
         return THUMBNAILS_DIR / f"{server_id}.png"
 
     @staticmethod
+    @lru_cache(maxsize=16)
     def _render_status_badge(is_online: Optional[bool], size: int = 18) -> Image.Image:
         """
         Renderiza indicador de status em altíssima definição com 4x supersampling (SSAA)
@@ -103,6 +105,7 @@ class PreviewManager:
         return img.resize((size, size), Image.Resampling.LANCZOS)
 
     @staticmethod
+    @lru_cache(maxsize=8)
     def _render_star_icon(is_fav: bool, size: int = 20) -> Image.Image:
         """Renderiza estrela em alta definição com 4x supersampling."""
         scale = 4

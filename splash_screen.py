@@ -39,7 +39,7 @@ class SplashScreen:
     def __init__(
         self,
         parent: tk.Tk,
-        current_version: str = "1.1.2",
+        current_version: str = "1.1.3",
         title: str = "RemoteXPTI",
         subtitle: Optional[str] = None,
         initial_status: str = "Iniciando..."
@@ -68,7 +68,7 @@ class SplashScreen:
         # Configura atributos da janela
         try:
             self.window.attributes("-topmost", True)
-            self.window.attributes("-alpha", 0.0)  # Inicia transparente para fade-in
+            self.window.attributes("-alpha", 1.0)  # Exibe 100% visível e nítida imediatamente (0ms de atraso)
         except Exception:
             pass
 
@@ -91,7 +91,11 @@ class SplashScreen:
         self.canvas.pack(fill="both", expand=True)
 
         self._build_ui()
-        self._fade_in()
+        self.tick_motion()
+        try:
+            self.window.update()
+        except Exception:
+            pass
         self._start_animation()
 
     def _build_ui(self):
@@ -204,66 +208,65 @@ class SplashScreen:
         self.anim_angle = 0
         self.pulse_phase = 0.0
 
-    def _fade_in(self):
-        """Suave transição de fade-in da opacidade da janela."""
-        current_alpha = 0.0
+    def show_immediately(self):
+        """Força a exibição imediata e elevação da janela na tela com pintura do quadro inicial."""
+        try:
+            self.window.attributes("-alpha", 1.0)
+            self.window.deiconify()
+            self.window.lift()
+            self.window.focus_force()
+            self.tick_motion()
+            self.window.update()
+        except Exception:
+            pass
 
-        def step():
-            nonlocal current_alpha
-            current_alpha += 0.14
-            if current_alpha >= 1.0:
-                try:
-                    self.window.attributes("-alpha", 1.0)
-                except Exception:
-                    pass
-                return
-            try:
-                self.window.attributes("-alpha", current_alpha)
-                self.window.after(16, step)
-            except Exception:
-                pass
-
-        step()
-
-    def _start_animation(self):
-        """Loop de animação a ~50 FPS."""
-        if self._is_finishing or not self.window.winfo_exists():
+    def tick_motion(self):
+        """Avança 1 quadro da animação orbital neon, pulso e barra de progresso."""
+        if self._is_finishing or not hasattr(self, "canvas") or not self.window.winfo_exists():
             return
 
-        # 1. Rotação dos arcos de neon
-        self.anim_angle = (self.anim_angle + 4.8) % 360
-        angle2 = (self.anim_angle * 1.35 + 160) % 360
-        angle3 = (self.anim_angle * 0.85 + 280) % 360
+        try:
+            # 1. Rotação dos arcos de neon
+            self.anim_angle = (self.anim_angle + 4.8) % 360
+            angle2 = (self.anim_angle * 1.35 + 160) % 360
+            angle3 = (self.anim_angle * 0.85 + 280) % 360
 
-        self.canvas.itemconfigure(self.arc_primary, start=self.anim_angle)
-        self.canvas.itemconfigure(self.arc_secondary, start=angle2)
-        self.canvas.itemconfigure(self.arc_spark, start=angle3)
+            self.canvas.itemconfigure(self.arc_primary, start=self.anim_angle)
+            self.canvas.itemconfigure(self.arc_secondary, start=angle2)
+            self.canvas.itemconfigure(self.arc_spark, start=angle3)
 
-        # 2. Pulso de respiração do halo externo
-        self.pulse_phase += 0.08
-        pulse_delta = math.sin(self.pulse_phase) * 3.5
-        pr = 62 + pulse_delta
-        self.canvas.coords(
-            self.pulse_halo,
-            self.cx - pr, self.cy - pr,
-            self.cx + pr, self.cy + pr
-        )
+            # 2. Pulso de respiração do halo externo
+            self.pulse_phase += 0.08
+            pulse_delta = math.sin(self.pulse_phase) * 3.5
+            pr = 62 + pulse_delta
+            self.canvas.coords(
+                self.pulse_halo,
+                self.cx - pr, self.cy - pr,
+                self.cx + pr, self.cy + pr
+            )
 
-        # 3. Movimento do slider da barra de progresso
-        self.slider_pos += self.slider_dir
-        if self.slider_pos + self.slider_w >= self.bar_x2:
-            self.slider_pos = self.bar_x2 - self.slider_w
-            self.slider_dir = -abs(self.slider_dir)
-        elif self.slider_pos <= self.bar_x1:
-            self.slider_pos = self.bar_x1
-            self.slider_dir = abs(self.slider_dir)
+            # 3. Movimento do slider da barra de progresso
+            self.slider_pos += self.slider_dir
+            if self.slider_pos + self.slider_w >= self.bar_x2:
+                self.slider_pos = self.bar_x2 - self.slider_w
+                self.slider_dir = -abs(self.slider_dir)
+            elif self.slider_pos <= self.bar_x1:
+                self.slider_pos = self.bar_x1
+                self.slider_dir = abs(self.slider_dir)
 
-        self.canvas.coords(
-            self.slider_id,
-            self.slider_pos, self.bar_y1,
-            self.slider_pos + self.slider_w, self.bar_y2
-        )
+            self.canvas.coords(
+                self.slider_id,
+                self.slider_pos, self.bar_y1,
+                self.slider_pos + self.slider_w, self.bar_y2
+            )
+        except Exception:
+            pass
 
+    def _start_animation(self):
+        """Loop contínuo de animação a ~50 FPS."""
+        if self._is_finishing or not self.window.winfo_exists():
+            return
+        self.tick_motion()
         self._anim_timer = self.window.after(20, self._start_animation)
 
     def set_status(self, text: str):

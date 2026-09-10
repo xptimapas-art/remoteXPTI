@@ -253,17 +253,15 @@ class RemoteXPTIApp(ctk.CTk):
             except Exception:
                 pass
 
-        # Inicia a Splash Screen com o motion do X da XPti (mínimo de 3 segundos solicitado pelo usuário)
+        # Inicia a Splash Screen com o motion do X da XPti com exibição IMEDIATA (0ms de atraso visual)
         self.splash = SplashScreen(parent=self, current_version=CURRENT_VERSION)
-        self.splash_min_duration = 3.0  # Duração de pelo menos 3 segundos para apreciar a animação
+        self.splash.show_immediately()
+        self.splash_min_duration = 3.5  # Duração garantida de 3.5 segundos reais de animação visível
         self.splash_start_time = time.time()
         self._splash_closed = False
-
-        # Sincroniza atalhos da Área de Trabalho e Menu Iniciar com o novo ícone oficial
-        threading.Thread(target=sync_windows_shortcuts_icon, daemon=True).start()
+        self._warmup_done = False
 
         log.info(f"[RemoteXPTI] Inicializando RemoteXPTIApp v{CURRENT_VERSION}...")
-        self.splash.set_status("Carregando credenciais e dados locais...")
 
         self.storage = StorageManager()
         log.info(f"[RemoteXPTI] Servidores carregados do storage local: {len(self.storage.servers)}")
@@ -289,17 +287,55 @@ class RemoteXPTIApp(ctk.CTk):
         self._build_statusbar()
         self._process_action_queue()
 
-        # Inicializa o mapa web Leaflet com aceleração de GPU
-        self.web_map = WebMapManager(
-            container_widget=self.map_container,
-            get_servers_func=lambda: self.filtered_servers if self.filtered_servers is not None else self.storage.servers,
-            get_status_func=lambda: self.server_status,
-            on_connect_func=self.connect_to_server_by_id,
-            on_edit_func=self.open_edit_dialog_by_id,
-        )
-        self.web_map.start()
+        self.bind("<Configure>", self._on_window_configure, add="+")
 
+        # Inicia o warmup em estágios progressivos (o Tkinter mainloop já roda a 50 FPS sem engasgos)
+        self.after(30, self._start_staged_warmup)
+
+    def _start_staged_warmup(self):
+        """Executa a inicialização em estágios para manter a animação orbital a 50 FPS sem nenhum travamento."""
+        self.splash.set_status("Carregando credenciais e dados locais...")
+        threading.Thread(target=sync_windows_shortcuts_icon, daemon=True).start()
+        
+        # Etapa 2: Subsistema gráfico e mapa Edge
+        self.after(150, self._warmup_step2_map)
+
+    def _warmup_step2_map(self):
+        if self._splash_closed:
+            return
+        self.splash.set_status("Inicializando acelerador gráfico...")
+        
+        # Inicializa o mapa web Leaflet com aceleração de GPU
+        try:
+            self.web_map = WebMapManager(
+                container_widget=self.map_container,
+                get_servers_func=lambda: self.filtered_servers if self.filtered_servers is not None else self.storage.servers,
+                get_status_func=lambda: self.server_status,
+                on_connect_func=self.connect_to_server_by_id,
+                on_edit_func=self.open_edit_dialog_by_id,
+            )
+            self.web_map.start()
+        except Exception as e:
+            log.warning(f"[RemoteXPTI] Falha ao iniciar WebMapManager: {e}")
+
+        # Etapa 3: Organização de servidores e layout
+        self.after(200, self._warmup_step3_layout)
+
+    def _warmup_step3_layout(self):
+        if self._splash_closed:
+            return
+        self.splash.set_status("Organizando servidores e layout...")
         self.refresh_servers()
+        self.update_idletasks()
+        self._check_column_recalculation()
+
+        # Etapa 4: Conexões de rede e checagem de atualizações
+        self.after(150, self._warmup_step4_network)
+
+    def _warmup_step4_network(self):
+        if self._splash_closed:
+            return
+        self.splash.set_status("Otimizando conexões de rede...")
         
         # Inicia a checagem inicial de status
         self.start_status_checker(is_manual=False)
@@ -312,31 +348,20 @@ class RemoteXPTIApp(ctk.CTk):
         )
         self.after(3500, self.updater.start_background_check)
 
-        self.bind("<Configure>", self._on_window_configure, add="+")
-        
-        # Pré-calcula e assenta colunas nos bastidores enquanto oculta
-        self.update_idletasks()
-        self._check_column_recalculation()
-
-        # Transições graduais e elegantes nos textos da splash ao longo dos 3 segundos
-        self.after(700, lambda: self.splash.set_status("Inicializando acelerador gráfico...") if not self._splash_closed else None)
-        self.after(1500, lambda: self.splash.set_status("Organizando servidores e layout...") if not self._splash_closed else None)
-        self.after(2300, lambda: self.splash.set_status("Otimizando conexões de rede...") if not self._splash_closed else None)
-
         # Sincronização em nuvem automática com Supabase se configurado
         if CloudSyncManager.is_configured():
             threading.Thread(target=self._sync_servers_from_cloud, daemon=True).start()
 
-        # Agenda a transição suave para a janela principal (após 3.0s)
-        self.after(300, self._check_splash_ready)
+        self._warmup_done = True
+        self.after(50, self._check_splash_ready)
 
     def _check_splash_ready(self):
         """Verifica se a aplicação concluiu seu warmup e se o tempo mínimo da animação decorreu."""
         if self._splash_closed:
             return
         elapsed = time.time() - self.splash_start_time
-        if elapsed < self.splash_min_duration:
-            remaining_ms = max(40, int((self.splash_min_duration - elapsed) * 1000))
+        if elapsed < self.splash_min_duration or not getattr(self, "_warmup_done", False):
+            remaining_ms = max(40, int((self.splash_min_duration - elapsed) * 1000)) if elapsed < self.splash_min_duration else 50
             self.after(remaining_ms, self._check_splash_ready)
             return
 
@@ -877,6 +902,14 @@ class RemoteXPTIApp(ctk.CTk):
                 self.card_widgets[s_id] = card
 
             card.grid(row=row, column=col, padx=5, pady=5)
+
+            # Mantém a animação orbital do 'X' 100% suave enquanto renderiza os cards
+            if (index + 1) % 5 == 0 and hasattr(self, "splash") and not getattr(self, "_splash_closed", True):
+                try:
+                    self.splash.tick_motion()
+                    self.update_idletasks()
+                except Exception:
+                    pass
 
     def connect_to_server(self, server: Dict[str, Any]):
         server_id = server["id"]
