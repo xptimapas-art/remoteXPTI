@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any, Tuple, Callable
 import customtkinter as ctk
 from version import APP_NAME, CURRENT_VERSION, GITHUB_REPO
+from logger import log
 
 def parse_version(v_str: str) -> Tuple[int, ...]:
     """Converte 'v1.2.3' ou '1.2.3' em tupla comparável (1, 2, 3)."""
@@ -291,6 +292,17 @@ $stepLabel.Location = New-Object System.Drawing.Point(24, 110)
 $stepLabel.Size = New-Object System.Drawing.Size(380, 20)
 $form.Controls.Add($stepLabel)
 
+$logDir = Join-Path $env:LOCALAPPDATA "RemoteXPTI\\logs"
+if (-not (Test-Path $logDir)) {{ New-Item -ItemType Directory -Path $logDir -Force | Out-Null }}
+$logFile = Join-Path $logDir "remotexpti.log"
+
+function Write-Log($msg) {{
+    $line = "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] [AutoUpdater] $msg"
+    try {{ Add-Content -Path $logFile -Value $line -ErrorAction SilentlyContinue }} catch {{}}
+}}
+
+Write-Log "Iniciando processo de atualização para v{self.new_version}..."
+
 $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = 250
 $script:ticks = 0
@@ -298,24 +310,55 @@ $script:ticks = 0
 $timer.Add_Tick({{
     $script:ticks++
     if ($script:ticks -eq 2) {{
+        Write-Log "Encerrando processos RemoteXPTI e Edge auxiliares..."
         try {{
-            $p = Get-Process -Id {current_pid} -ErrorAction SilentlyContinue
-            if ($p) {{ $p | Stop-Process -Force -ErrorAction SilentlyContinue }}
+            Stop-Process -Id {current_pid} -Force -ErrorAction SilentlyContinue
+        }} catch {{}}
+        try {{
+            Get-Process -Name "RemoteXPTI" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+        }} catch {{}}
+        try {{
+            $cache = (Join-Path $env:LOCALAPPDATA "RemoteXPTI\\map_cache").ToLower()
+            Get-CimInstance Win32_Process -Filter "name = 'msedge.exe'" | Where-Object {{ $_.CommandLine -and $_.CommandLine.ToLower().Contains($cache) }} | ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force }}
         }} catch {{}}
     }}
     if ($script:ticks -ge 4) {{
         $copied = $false
-        for ($i = 0; $i -lt 20; $i++) {{
+        $destPath = '{str(current_exe)}'
+        $sourcePath = '{str(self.downloaded_file)}'
+        $oldPath = "$destPath.old"
+
+        for ($i = 0; $i -lt 30; $i++) {{
             try {{
-                Copy-Item -Path '{str(self.downloaded_file)}' -Destination '{str(current_exe)}' -Force -ErrorAction Stop
-                Remove-Item -Path '{str(self.downloaded_file)}' -Force -ErrorAction SilentlyContinue
+                # Garante que nenhum processo RemoteXPTI está ativo segurando o executável
+                Get-Process -Name "RemoteXPTI" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+
+                if (Test-Path $oldPath) {{
+                    Remove-Item -Path $oldPath -Force -ErrorAction SilentlyContinue
+                }}
+                if (Test-Path $destPath) {{
+                    try {{
+                        Remove-Item -Path $destPath -Force -ErrorAction Stop
+                    }} catch {{
+                        Move-Item -Path $destPath -Destination $oldPath -Force -ErrorAction SilentlyContinue
+                    }}
+                }}
+                Copy-Item -Path $sourcePath -Destination $destPath -Force -ErrorAction Stop
+                Remove-Item -Path $sourcePath -Force -ErrorAction SilentlyContinue
+                if (Test-Path $oldPath) {{
+                    Remove-Item -Path $oldPath -Force -ErrorAction SilentlyContinue
+                }}
                 $copied = $true
+                Write-Log "Executável substituído com sucesso na tentativa $i!"
                 break
             }} catch {{
-                Start-Sleep -Milliseconds 300
+                $err = $_.Exception.Message
+                Write-Log "Tentativa $i falhou ao substituir executável: $err"
+                Start-Sleep -Milliseconds 350
             }}
         }}
         if ($copied) {{
+            Write-Log "Iniciando nova versão v{self.new_version}..."
             $statusLabel.Text = "Versão v{self.new_version} instalada com sucesso!"
             $stepLabel.Text = "Iniciando RemoteXPTI..."
             $stepLabel.ForeColor = [System.Drawing.Color]::FromArgb(0, 204, 102)
@@ -337,9 +380,10 @@ $timer.Add_Tick({{
             [System.Windows.Forms.Application]::Exit()
             Remove-Item -Path '{str(ps1_path)}' -Force -ErrorAction SilentlyContinue
             Stop-Process -Id $PID -Force
-        }} elseif ($script:ticks -gt 25) {{
+        }} elseif ($script:ticks -gt 35) {{
             $timer.Stop()
-            [System.Windows.Forms.MessageBox]::Show("Não foi possível substituir o executável. Feche o programa e tente novamente.", "Erro na Atualização", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+            Write-Log "ERRO CRÍTICO: Não foi possível substituir o executável após 30 tentativas."
+            [System.Windows.Forms.MessageBox]::Show("Não foi possível substituir o executável. Verifique os logs de diagnóstico em %LOCALAPPDATA%\\RemoteXPTI\\logs ou execute o instalador Setup_RemoteXPTI.", "Erro na Atualização", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
             $form.Hide()
             $form.Close()
             $form.Dispose()

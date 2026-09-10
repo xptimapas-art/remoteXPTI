@@ -21,6 +21,9 @@ def enable_high_dpi_awareness():
 
 def main():
     enable_high_dpi_awareness()
+    from logger import log
+    from version import CURRENT_VERSION
+    log.info(f"=== Iniciando RemoteXPTI v{CURRENT_VERSION} ===")
     from app import RemoteXPTIApp
     app = RemoteXPTIApp()
     app.mainloop()

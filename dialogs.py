@@ -7,6 +7,7 @@ from tkinter import filedialog
 from rdp_manager import RDPManager
 from preview_manager import PreviewManager
 from uninstaller import Uninstaller
+from logger import open_logs_folder
 
 class ServerDialog(ctk.CTkToplevel):
     """Janela modal para criação ou edição de perfil de servidor RDP."""
@@ -654,7 +655,20 @@ class SettingsDialog(ctk.CTkToplevel):
                 font=ctk.CTkFont(size=11),
                 command=lambda: (self.destroy(), on_clean_credentials())
             )
-            btn_clean_creds.pack(fill="x", padx=14, pady=(0, 12))
+            btn_clean_creds.pack(fill="x", padx=14, pady=(0, 6))
+
+        # Botão para abrir os logs de diagnóstico em máquinas de clientes
+        btn_logs = ctk.CTkButton(
+            card_maint,
+            text="📁 Abrir Pasta de Logs de Diagnóstico",
+            height=30,
+            fg_color=("#d6dae2", "#2e303b"),
+            hover_color=("#c4c8d2", "#3b3d4a"),
+            text_color=("gray10", "#ffffff"),
+            font=ctk.CTkFont(size=11),
+            command=open_logs_folder
+        )
+        btn_logs.pack(fill="x", padx=14, pady=(0, 12))
 
         # --- SEÇÃO 3: Desinstalação ---
         if on_uninstall:
