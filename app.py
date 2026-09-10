@@ -18,15 +18,7 @@ from dialogs import ServerDialog, ConfirmDialog, SettingsDialog, UninstallProgre
 from version import CURRENT_VERSION
 from updater import SilentAutoUpdater
 from uninstaller import Uninstaller
-import math
-from tkintermapview import TkinterMapView
-from map_manager import (
-    resolve_server_coordinates,
-    DEFAULT_MAP_CENTER,
-    DEFAULT_MAP_ZOOM,
-    TILE_SERVERS,
-    get_map_cache_path
-)
+from web_map_manager import WebMapManager
 
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
@@ -259,8 +251,7 @@ class RemoteXPTIApp(ctk.CTk):
         # Cache persistente do status para NUNCA piscar 'Checando' desnecessariamente
         self.server_status: Dict[str, Tuple[bool, str]] = {}
         self.view_mode = "grade"
-        self.map_markers: Dict[str, Any] = {}
-        self.current_selected_marker_server: Optional[Dict[str, Any]] = None
+        self.web_map: Optional[WebMapManager] = None
         
         self.last_cols = -1
         self._resize_timer = None
@@ -273,6 +264,16 @@ class RemoteXPTIApp(ctk.CTk):
         self._build_header()
         self._build_main_view()
         self._build_statusbar()
+
+        # Inicializa o mapa web Leaflet com aceleração de GPU
+        self.web_map = WebMapManager(
+            container_widget=self.map_container,
+            get_servers_func=lambda: self.storage.servers,
+            get_status_func=lambda: self.server_status,
+            on_connect_func=self.connect_to_server_by_id,
+            on_edit_func=self.open_edit_dialog_by_id,
+        )
+        self.web_map.start()
 
         self.refresh_servers()
         
@@ -445,150 +446,9 @@ class RemoteXPTIApp(ctk.CTk):
             justify="center"
         )
 
-        # 2. Modo Mapa Interativo
-        self.map_container = ctk.CTkFrame(self, fg_color="#181a20", corner_radius=8)
-
-        # Mini toolbar superior do mapa
-        self.map_toolbar = ctk.CTkFrame(self.map_container, height=44, fg_color="#20222a", corner_radius=6)
-        self.map_toolbar.pack(fill="x", padx=8, pady=(8, 4))
-        self.map_toolbar.pack_propagate(False)
-
-        self.lbl_map_title = ctk.CTkLabel(
-            self.map_toolbar,
-            text="🗺️ Mapa de Acessos",
-            font=ctk.CTkFont(size=13, weight="bold"),
-            text_color="#ffffff"
-        )
-        self.lbl_map_title.pack(side="left", padx=12)
-
-        self.lbl_map_info = ctk.CTkLabel(
-            self.map_toolbar,
-            text="Clique em um marcador para ver detalhes e conectar",
-            font=ctk.CTkFont(size=11),
-            text_color="#8e92a0"
-        )
-        self.lbl_map_info.pack(side="left", padx=6)
-
-        # Botão Centralizar SC
-        self.btn_center_sc = ctk.CTkButton(
-            self.map_toolbar,
-            text="📍 Centralizar SC",
-            width=115,
-            height=28,
-            fg_color="#2c303c",
-            hover_color="#3a3f4e",
-            font=ctk.CTkFont(size=11),
-            command=self._center_map_sc
-        )
-        self.btn_center_sc.pack(side="right", padx=(4, 10))
-
-        # Seletor de Camadas (Tiles)
-        self.combo_map_layer = ctk.CTkComboBox(
-            self.map_toolbar,
-            values=list(TILE_SERVERS.keys()),
-            width=175,
-            height=28,
-            font=ctk.CTkFont(size=11),
-            dropdown_font=ctk.CTkFont(size=11),
-            command=self._on_tile_server_changed
-        )
-        self.combo_map_layer.set("CartoDB Dark (Padrão)")
-        self.combo_map_layer.pack(side="right", padx=(4, 6))
-
-        ctk.CTkLabel(
-            self.map_toolbar,
-            text="Camada:",
-            font=ctk.CTkFont(size=11),
-            text_color="#8e92a0"
-        ).pack(side="right", padx=(6, 2))
-
-        # Widget TkinterMapView
-        self.map_widget = TkinterMapView(
-            self.map_container,
-            corner_radius=8,
-            database_path=str(get_map_cache_path())
-        )
-        self.map_widget.pack(fill="both", expand=True, padx=8, pady=(0, 8))
-        self.map_widget.set_tile_server(TILE_SERVERS["CartoDB Dark (Padrão)"], max_zoom=19)
-        self.map_widget.set_position(DEFAULT_MAP_CENTER[0], DEFAULT_MAP_CENTER[1])
-        self.map_widget.set_zoom(DEFAULT_MAP_ZOOM)
-
-        # Card Flutuante de Detalhes do Servidor selecionado no mapa
-        self.map_card = ctk.CTkFrame(
-            self.map_container,
-            height=90,
-            fg_color="#1a1d24",
-            border_color="#303542",
-            border_width=1,
-            corner_radius=10
-        )
-        self.map_card.pack_propagate(False)
-
-        card_top = ctk.CTkFrame(self.map_card, fg_color="transparent")
-        card_top.pack(fill="x", padx=14, pady=(8, 2))
-
-        self.map_card_name = ctk.CTkLabel(
-            card_top,
-            text="Nome do Servidor",
-            font=ctk.CTkFont(size=14, weight="bold"),
-            text_color="#ffffff"
-        )
-        self.map_card_name.pack(side="left")
-
-        self.map_card_status = ctk.CTkLabel(
-            card_top,
-            text="🟢 Online",
-            font=ctk.CTkFont(size=11, weight="bold"),
-            text_color="#2ebd59"
-        )
-        self.map_card_status.pack(side="left", padx=10)
-
-        btn_close_card = ctk.CTkButton(
-            card_top,
-            text="✕",
-            width=24,
-            height=24,
-            fg_color="transparent",
-            hover_color="#343846",
-            font=ctk.CTkFont(size=12, weight="bold"),
-            text_color="#8e92a0",
-            command=self._hide_map_card
-        )
-        btn_close_card.pack(side="right")
-
-        card_bottom = ctk.CTkFrame(self.map_card, fg_color="transparent")
-        card_bottom.pack(fill="x", padx=14, pady=(2, 8))
-
-        self.map_card_details = ctk.CTkLabel(
-            card_bottom,
-            text="🌐 10.0.0.1:3389   |   📁 Geral   |   👤 Padrão",
-            font=ctk.CTkFont(size=12),
-            text_color="#a0a5b5"
-        )
-        self.map_card_details.pack(side="left", pady=4)
-
-        self.map_card_btn_connect = ctk.CTkButton(
-            card_bottom,
-            text="🚀 Conectar Agora (RDP)",
-            height=32,
-            fg_color="#0066cc",
-            hover_color="#0052a3",
-            font=ctk.CTkFont(size=12, weight="bold"),
-            command=self._connect_selected_map_server
-        )
-        self.map_card_btn_connect.pack(side="right", padx=(8, 0))
-
-        self.map_card_btn_edit = ctk.CTkButton(
-            card_bottom,
-            text="⚙️ Editar",
-            width=80,
-            height=32,
-            fg_color="#2c303c",
-            hover_color="#3a3f4e",
-            font=ctk.CTkFont(size=12),
-            command=self._edit_selected_map_server
-        )
-        self.map_card_btn_edit.pack(side="right")
+        # 2. Modo Mapa Interativo (Container GPU do Edge / Leaflet)
+        self.map_container = ctk.CTkFrame(self, fg_color="#121318", corner_radius=0)
+        self.map_container.bind("<Configure>", self._on_map_container_configure, add="+")
 
     def _build_statusbar(self):
         self.status_bar = ctk.CTkFrame(self, height=28, corner_radius=0, fg_color=("#eaecef", "#121318"))
@@ -736,7 +596,12 @@ class RemoteXPTIApp(ctk.CTk):
         self._search_debounce_timer = self.after(90, self.filter_servers)
 
     def _on_close(self):
-        """Encerra a aplicação de forma limpa, finalizando o pool de threads em segundo plano."""
+        """Encerra a aplicação de forma limpa, finalizando o Edge e o pool de threads em segundo plano."""
+        try:
+            if hasattr(self, "web_map") and self.web_map:
+                self.web_map.shutdown()
+        except Exception:
+            pass
         try:
             if hasattr(self, "_status_executor"):
                 self._status_executor.shutdown(wait=False)
@@ -758,122 +623,36 @@ class RemoteXPTIApp(ctk.CTk):
 
         self.filter_servers()
 
+    def _on_map_container_configure(self, event=None):
+        if self.view_mode == "mapa" and self.web_map:
+            self.web_map.resize()
+
     def _on_view_mode_changed(self, mode: str):
         if "Mapa" in mode:
             self.view_mode = "mapa"
             self.scroll_frame.pack_forget()
             self.map_container.pack(fill="both", expand=True, padx=12, pady=10)
-            self.filter_servers()
+            count = len(self.storage.servers)
+            self.lbl_server_count.configure(text=f"{count} {'servidor' if count == 1 else 'servidores'} no mapa")
+            if self.web_map:
+                self.web_map.show()
         else:
             self.view_mode = "grade"
+            if self.web_map:
+                self.web_map.hide()
             self.map_container.pack_forget()
             self.scroll_frame.pack(fill="both", expand=True, padx=12, pady=10)
             self.filter_servers()
 
-    def _center_map_sc(self):
-        self.map_widget.set_position(DEFAULT_MAP_CENTER[0], DEFAULT_MAP_CENTER[1])
-        self.map_widget.set_zoom(DEFAULT_MAP_ZOOM)
+    def connect_to_server_by_id(self, server_id: str):
+        server = self.storage.get_server(server_id)
+        if server:
+            self.after(0, lambda: self.connect_to_server(server))
 
-    def _on_tile_server_changed(self, choice: str):
-        url = TILE_SERVERS.get(choice)
-        if url:
-            self.map_widget.set_tile_server(url, max_zoom=19)
-
-    def _hide_map_card(self):
-        self.current_selected_marker_server = None
-        self.map_card.place_forget()
-
-    def _on_marker_clicked(self, marker):
-        server = getattr(marker, "data", None)
-        if not server:
-            return
-        self.current_selected_marker_server = server
-        self.map_card_name.configure(text=server.get("name", "Servidor"))
-
-        host = server.get("host", "")
-        port = server.get("port", 3389)
-        group = server.get("group", "Geral")
-        user = server.get("username", "") or "Padrão"
-
-        self.map_card_details.configure(
-            text=f"🌐 {host}:{port}   |   📁 {group}   |   👤 {user}"
-        )
-
-        status_info = self.server_status.get(server["id"])
-        if status_info:
-            is_online, _ = status_info
-            if is_online:
-                self.map_card_status.configure(text="🟢 Online", text_color="#2ebd59")
-            else:
-                self.map_card_status.configure(text="🔴 Offline", text_color="#f04438")
-        else:
-            self.map_card_status.configure(text="⚪ Verificando...", text_color="#94a3b8")
-
-        self.map_card.place(relx=0.5, rely=0.96, anchor="s", relwidth=0.88)
-
-    def _connect_selected_map_server(self):
-        if self.current_selected_marker_server:
-            self.connect_to_server(self.current_selected_marker_server)
-
-    def _edit_selected_map_server(self):
-        if self.current_selected_marker_server:
-            self.open_edit_dialog(self.current_selected_marker_server)
-
-    def _render_map_markers(self, servers: List[Dict[str, Any]]):
-        # Limpa marcadores anteriores
-        for marker in list(self.map_markers.values()):
-            try:
-                marker.delete()
-            except Exception:
-                pass
-        self.map_markers.clear()
-        self._hide_map_card()
-
-        # Agrupa servidores com coordenadas idênticas para distribuir em pequeno raio
-        coord_groups: Dict[Tuple[float, float], List[Dict[str, Any]]] = {}
-        for s in servers:
-            coords = resolve_server_coordinates(s)
-            if coords:
-                key = (round(coords[0], 4), round(coords[1], 4))
-                coord_groups.setdefault(key, []).append(s)
-
-        mapped_count = 0
-        for (base_lat, base_lon), s_list in coord_groups.items():
-            count = len(s_list)
-            for i, server in enumerate(s_list):
-                if count == 1:
-                    lat, lon = base_lat, base_lon
-                else:
-                    angle = i * (2 * math.pi / count)
-                    radius = 0.006  # Leve espaçamento (~600m) para não sobrepor marcadores
-                    lat = base_lat + radius * math.cos(angle)
-                    lon = base_lon + radius * math.sin(angle)
-
-                status_info = self.server_status.get(server["id"])
-                if status_info is not None:
-                    circle_color = "#2ebd59" if status_info[0] else "#f04438"
-                else:
-                    circle_color = "#94a3b8"
-
-                marker = self.map_widget.set_marker(
-                    lat,
-                    lon,
-                    text=server.get("name", ""),
-                    command=self._on_marker_clicked,
-                    marker_color_circle=circle_color,
-                    marker_color_outside="#181a20",
-                    text_color="#ffffff",
-                    data=server
-                )
-                self.map_markers[server["id"]] = marker
-                mapped_count += 1
-
-        self.lbl_server_count.configure(
-            text=f"{mapped_count} {'servidor' if mapped_count == 1 else 'servidores'} no mapa"
-        )
-        self.lbl_map_info.configure(
-            text=f"{mapped_count} servidores posicionados no mapa"
-        )
+    def open_edit_dialog_by_id(self, server_id: str):
+        server = self.storage.get_server(server_id)
+        if server:
+            self.after(0, lambda: self.open_edit_dialog(server))
 
     def filter_servers(self):
         query = self.entry_search.get().strip().lower()
@@ -896,7 +675,8 @@ class RemoteXPTIApp(ctk.CTk):
         if self.view_mode == "grade":
             self._render_cards(filtered)
         else:
-            self._render_map_markers(filtered)
+            count = len(filtered)
+            self.lbl_server_count.configure(text=f"{count} {'servidor' if count == 1 else 'servidores'} no mapa")
 
     def _render_cards(self, servers: List[Dict[str, Any]]):
         count = len(servers)
@@ -1020,22 +800,10 @@ class RemoteXPTIApp(ctk.CTk):
                 # Salva no cache
                 self.server_status[server_id] = (is_online, msg)
                 
-                # Atualiza o card, marcador do mapa e card flutuante suavemente apenas quando o resultado chegar
+                # Atualiza o card da grade suavemente apenas quando o resultado chegar
                 def update_ui():
                     if server_id in self.card_widgets:
                         self.card_widgets[server_id].update_status(is_online, msg)
-                    if server_id in self.map_markers:
-                        m = self.map_markers[server_id]
-                        m.marker_color_circle = "#2ebd59" if is_online else "#f04438"
-                        try:
-                            m.draw()
-                        except Exception:
-                            pass
-                    if self.current_selected_marker_server and self.current_selected_marker_server.get("id") == server_id:
-                        if is_online:
-                            self.map_card_status.configure(text="🟢 Online", text_color="#2ebd59")
-                        else:
-                            self.map_card_status.configure(text="🔴 Offline", text_color="#f04438")
                 self.after(0, update_ui)
             finally:
                 pending[0] -= 1

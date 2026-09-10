@@ -101,8 +101,8 @@ def main():
         "--icon", "imagens/icon.ico",
         "--version-file", str(v_app),
         "--add-data", "imagens;imagens",
+        "--add-data", "web;web",
         "--collect-all", "customtkinter",
-        "--collect-all", "tkintermapview",
         "--name", "RemoteXPTI",
         "main.py"
     ])
