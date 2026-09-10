@@ -106,13 +106,19 @@ class ServerCard(ctk.CTkFrame):
         x = event.x
         y = event.y
 
-        # Canto Superior Direito: Estrela de favoritos (área de 44x44px)
-        if x >= CARD_WIDTH - 44 and y <= 44:
+        w = self.lbl_card.winfo_width()
+        h = self.lbl_card.winfo_height()
+        scale = ctk.ScalingTracker.get_widget_scaling(self)
+        hit_w = int(48 * scale)
+        hit_h = int(48 * scale)
+
+        # Canto Superior Direito: Estrela de favoritos (área adaptativa ao DPI)
+        if x >= w - hit_w and y <= hit_h:
             self._toggle_favorite()
             return
 
-        # Canto Inferior Direito: 3 pontos de edição/opções (área de 42x46px)
-        if x >= CARD_WIDTH - 42 and y >= CARD_HEIGHT - 46:
+        # Canto Inferior Direito: 3 pontos de edição/opções (área adaptativa ao DPI)
+        if x >= w - hit_w and y >= h - hit_h:
             self.on_edit(self.server)
             return
 
@@ -481,15 +487,31 @@ class RemoteXPTIApp(ctk.CTk):
             self.after_cancel(self._resize_timer)
         self._resize_timer = self.after(35, self._check_column_recalculation)
 
+    def _calculate_columns(self) -> int:
+        """
+        Calcula o número de colunas ideal considerando o DPI Scaling do Windows.
+        Evita que cards sejam esmagados ou percam a estrela e os 3 pontos na borda direita.
+        """
+        scale = ctk.ScalingTracker.get_widget_scaling(self)
+        slot_w_phys = (CARD_WIDTH + 10) * scale
+
+        scroll_w = self.scroll_frame.winfo_width()
+        if scroll_w > 200:
+            avail_w = scroll_w - 24
+        else:
+            w = self.winfo_width()
+            if w <= 200:
+                w = 1100
+            avail_w = max(slot_w_phys, (w - 44) * scale)
+
+        return max(1, int(avail_w // slot_w_phys))
+
     def _check_column_recalculation(self):
         w = self.winfo_width()
         if w <= 200:
             return
 
-        slot_w = CARD_WIDTH + 10
-        avail_w = max(CARD_WIDTH, w - 34)
-        new_cols = max(1, avail_w // slot_w)
-
+        new_cols = self._calculate_columns()
         # Reorganiza os cards apenas se o número de colunas mudou de fato
         if new_cols != self.last_cols:
             self.last_cols = new_cols
@@ -561,13 +583,7 @@ class RemoteXPTIApp(ctk.CTk):
         else:
             self.empty_label.pack_forget()
 
-        w = self.winfo_width()
-        if w <= 200:
-            w = 1100
-
-        slot_w = CARD_WIDTH + 10
-        avail_w = max(CARD_WIDTH, w - 34)
-        cols = max(1, avail_w // slot_w)
+        cols = self._calculate_columns()
         self.last_cols = cols
 
         # Limpa configurações de colunas anteriores
@@ -576,7 +592,7 @@ class RemoteXPTIApp(ctk.CTk):
 
         # Configura colunas ativas para expandir proporcionalmente e preencher toda a largura
         for i in range(cols):
-            self.scroll_frame.grid_columnconfigure(i, weight=1, minsize=slot_w)
+            self.scroll_frame.grid_columnconfigure(i, weight=1, minsize=int(CARD_WIDTH + 10))
 
         visible_ids = {s["id"] for s in servers}
 

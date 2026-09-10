@@ -244,7 +244,7 @@ class PreviewManager:
         draw.text((tx, my + 16), host, fill=(215, 225, 240, 245) if is_hover else (195, 205, 220, 240), font=font_host)
 
         # 8. Três Pontos Verticais ⋮ (Canto Inferior Direito)
-        cx = width - 18
+        cx = width - 20
         for dy in [my + 2, my + 8, my + 14]:
             draw.ellipse([(cx - 1, dy - 1), (cx + 2, dy + 2)], fill=(255, 255, 255, 245))
 

@@ -321,6 +321,8 @@ $timer.Add_Tick({{
             $stepLabel.ForeColor = [System.Drawing.Color]::FromArgb(0, 204, 102)
             $pbar.Style = [System.Windows.Forms.ProgressBarStyle]::Continuous
             $pbar.Value = 100
+            $form.Refresh()
+            [System.Windows.Forms.Application]::DoEvents()
             $timer.Stop()
             
             $env:PYINSTALLER_RESET_ENVIRONMENT = "1"
@@ -328,12 +330,22 @@ $timer.Add_Tick({{
             $env:_MEIPASS = $null
             Start-Process -FilePath '{str(current_exe)}' -WorkingDirectory '{str(app_dir)}'
             
-            Start-Sleep -Milliseconds 700
+            Start-Sleep -Milliseconds 400
+            $form.Hide()
             $form.Close()
+            $form.Dispose()
+            [System.Windows.Forms.Application]::Exit()
+            Remove-Item -Path '{str(ps1_path)}' -Force -ErrorAction SilentlyContinue
+            Stop-Process -Id $PID -Force
         }} elseif ($script:ticks -gt 25) {{
             $timer.Stop()
             [System.Windows.Forms.MessageBox]::Show("Não foi possível substituir o executável. Feche o programa e tente novamente.", "Erro na Atualização", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+            $form.Hide()
             $form.Close()
+            $form.Dispose()
+            [System.Windows.Forms.Application]::Exit()
+            Remove-Item -Path '{str(ps1_path)}' -Force -ErrorAction SilentlyContinue
+            Stop-Process -Id $PID -Force
         }}
     }}
 }})
@@ -341,8 +353,9 @@ $timer.Add_Tick({{
 $form.Add_Shown({{ $timer.Start() }})
 [System.Windows.Forms.Application]::Run($form)
 Remove-Item -Path '{str(ps1_path)}' -Force -ErrorAction SilentlyContinue
+Stop-Process -Id $PID -Force
 """
-        ps1_path.write_text(ps_script, encoding="utf-8")
+        ps1_path.write_text(ps_script, encoding="utf-8-sig")
 
         creation_flags = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
         try:
