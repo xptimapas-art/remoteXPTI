@@ -178,8 +178,18 @@ def sync_windows_shortcuts_icon():
         return
 
     try:
-        current_exe = Path(sys.executable).resolve()
-        app_dir = current_exe.parent
+        if getattr(sys, "frozen", False):
+            current_exe = Path(sys.executable).resolve()
+            app_dir = current_exe.parent
+        else:
+            # Em modo de desenvolvimento/testes, nunca aponte atalhos para python.exe
+            local_installed = Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "RemoteXPTI" / "RemoteXPTI.exe"
+            if local_installed.exists():
+                current_exe = local_installed
+                app_dir = local_installed.parent
+            else:
+                return  # Não altera atalhos em modo dev sem app instalado
+
         icon_file = app_dir / "imagens" / "app_icon.ico"
         if not icon_file.exists():
             icon_file = app_dir / "imagens" / "icon.ico"
