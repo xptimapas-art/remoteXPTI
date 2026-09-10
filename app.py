@@ -262,6 +262,7 @@ class RemoteXPTIApp(ctk.CTk):
         self.splash_start_time = time.time()
         self._splash_closed = False
         self._warmup_done = False
+        self._main_window_revealed = False
 
         log.info(f"[RemoteXPTI] Inicializando RemoteXPTIApp v{CURRENT_VERSION}...")
 
@@ -359,7 +360,7 @@ class RemoteXPTIApp(ctk.CTk):
 
     def _check_splash_ready(self):
         """Verifica se a aplicação concluiu seu warmup e se o tempo mínimo da animação decorreu."""
-        if self._splash_closed:
+        if getattr(self, "_main_window_revealed", False):
             return
         elapsed = time.time() - self.splash_start_time
         if elapsed < self.splash_min_duration or not getattr(self, "_warmup_done", False):
@@ -367,19 +368,20 @@ class RemoteXPTIApp(ctk.CTk):
             self.after(remaining_ms, self._check_splash_ready)
             return
 
-        # Animação e carregamento completos: dispara transição suave
-        self._splash_closed = True
-        self.splash_manager.finish(on_finished=self._reveal_main_window)
+        # Animação e carregamento completos: revela a janela principal e fecha a splash
+        self._reveal_main_window()
 
     def _reveal_main_window(self):
         """Revela a janela principal perfeitamente montada, calculada e sem nenhum flickering."""
-        if self._splash_closed:
+        if getattr(self, "_main_window_revealed", False):
             return
-        self._splash_closed = True
+        self._main_window_revealed = True
         self.deiconify()
         self.lift()
         self.focus_force()
         self._check_column_recalculation()
+        if hasattr(self, "splash_manager") and self.splash_manager:
+            self.splash_manager.finish()
         log.info("[RemoteXPTI] Splash finalizada com sucesso. Janela principal revelada.")
 
     def _build_header(self):
