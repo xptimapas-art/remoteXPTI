@@ -356,17 +356,40 @@ class RemoteXPTIApp(ctk.CTk):
         self.combo_filter_group.pack(side="left", padx=(0, 8))
 
         # Alternador de Modo de Exibição (Grade AnyDesk / Mapa Interativo)
+        icon_grid_path = get_resource_path("imagens/icon_grid.png")
+        icon_map_path = get_resource_path("imagens/icon_map.png")
+        self.img_seg_grid = None
+        self.img_seg_map = None
+        if icon_grid_path.exists():
+            try:
+                pil_g = Image.open(icon_grid_path)
+                self.img_seg_grid = ctk.CTkImage(light_image=pil_g, dark_image=pil_g, size=(16, 16))
+            except Exception:
+                pass
+        if icon_map_path.exists():
+            try:
+                pil_m = Image.open(icon_map_path)
+                self.img_seg_map = ctk.CTkImage(light_image=pil_m, dark_image=pil_m, size=(16, 16))
+            except Exception:
+                pass
+
         self.seg_view = ctk.CTkSegmentedButton(
             actions_box,
-            values=["⊞ Grade", "🗺️ Mapa"],
+            values=["Grade", "Mapa"],
+            width=165,
             height=34,
             selected_color="#0066cc",
             selected_hover_color="#0052a3",
             font=ctk.CTkFont(size=12, weight="bold"),
             command=self._on_view_mode_changed
         )
-        self.seg_view.set("⊞ Grade")
+        self.seg_view.set("Grade")
         self.seg_view.pack(side="left", padx=(0, 8))
+
+        if self.img_seg_grid and "Grade" in getattr(self.seg_view, "_buttons_dict", {}):
+            self.seg_view._buttons_dict["Grade"].configure(image=self.img_seg_grid, compound="left")
+        if self.img_seg_map and "Mapa" in getattr(self.seg_view, "_buttons_dict", {}):
+            self.seg_view._buttons_dict["Mapa"].configure(image=self.img_seg_map, compound="left")
 
         # Botão Atualizar Status Manual
         self.btn_refresh = ctk.CTkButton(
