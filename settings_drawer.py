@@ -10,13 +10,13 @@ from cloud_sync import CloudSyncManager
 from updater import SilentAutoUpdater
 from dialogs import SupabaseConfigDialog, ConfirmDialog
 
-class SettingsDrawer(ctk.CTkFrame):
+class SettingsDrawer(ctk.CTkToplevel):
     """
-    Menu lateral deslizante e flutuante (Drawer) para Configurações Gerais,
+    Menu lateral flutuante em formato de Popup Card para Configurações Gerais,
     Área do Desenvolvedor, Troca de Canais e Diagnóstico.
     
-    Abre diretamente sobre a interface principal sem desalinhar os cards e
-    sem bugs de janelas secundárias (CTkToplevel).
+    Aparece diretamente no canto superior direito sobre qualquer visualização
+    (Grade, Mapa, etc.) sem reorganizar, redimensionar ou empurrar nenhum elemento de trás.
     """
 
     def __init__(
@@ -30,18 +30,10 @@ class SettingsDrawer(ctk.CTkFrame):
         on_uninstall: Optional[Callable[[], None]] = None,
         **kwargs
     ):
-        super().__init__(
-            parent,
-            width=420,
-            corner_radius=0,
-            fg_color=("#f8f9fb", "#16171e"),
-            border_width=1,
-            border_color=("#d0d4dc", "#272a38"),
-            **kwargs
-        )
+        super().__init__(parent, **kwargs)
         self.parent = parent
         self.current_version = current_version
-        self.on_close = on_close
+        self.on_close_callback = on_close
         self.on_check_updates = on_check_updates
         self.on_clean_thumbnails = on_clean_thumbnails
         self.on_clean_credentials = on_clean_credentials
@@ -49,19 +41,35 @@ class SettingsDrawer(ctk.CTkFrame):
 
         self._fetched_releases = []
         self._is_fetching_releases = False
+        self._is_closing = False
 
-        # 1. Header do Menu Lateral
-        header_frame = ctk.CTkFrame(self, height=52, corner_radius=0, fg_color=("#eef1f6", "#1a1b24"))
-        header_frame.pack(fill="x", side="top")
+        # Configurações de popup flutuante sobreposto
+        self.overrideredirect(True)
+        self.attributes("-topmost", True)
+        self.transient(parent)
+
+        # Container principal com cantos arredondados e borda sutil AnyDesk
+        self.main_container = ctk.CTkFrame(
+            self,
+            corner_radius=12,
+            fg_color=("#f8f9fb", "#171922"),
+            border_width=1,
+            border_color=("#cfd4de", "#2e3142")
+        )
+        self.main_container.pack(fill="both", expand=True, padx=2, pady=2)
+
+        # 1. Header do Menu
+        header_frame = ctk.CTkFrame(self.main_container, height=50, corner_radius=10, fg_color=("#eef1f6", "#1f212c"))
+        header_frame.pack(fill="x", side="top", padx=8, pady=(8, 4))
         header_frame.pack_propagate(False)
 
         title_box = ctk.CTkFrame(header_frame, fg_color="transparent")
-        title_box.pack(side="left", padx=14, pady=8)
+        title_box.pack(side="left", padx=12, pady=6)
 
         lbl_title = ctk.CTkLabel(
             title_box,
             text="⚙️ Configurações",
-            font=ctk.CTkFont(size=15, weight="bold"),
+            font=ctk.CTkFont(size=14, weight="bold"),
             text_color=("gray10", "#ffffff")
         )
         lbl_title.pack(anchor="w")
@@ -77,38 +85,86 @@ class SettingsDrawer(ctk.CTkFrame):
         btn_close = ctk.CTkButton(
             header_frame,
             text="✕",
-            width=30,
-            height=30,
+            width=28,
+            height=28,
             fg_color="transparent",
             hover_color=("#dfe3ea", "#2c2f3e"),
             text_color=("gray20", "#a0a4b8"),
             font=ctk.CTkFont(size=14, weight="bold"),
-            command=self.on_close
+            command=self.close
         )
-        btn_close.pack(side="right", padx=10, pady=10)
+        btn_close.pack(side="right", padx=8, pady=8)
 
         # 2. Rodapé com botão de fechar rápido
-        footer_frame = ctk.CTkFrame(self, height=46, corner_radius=0, fg_color=("#eef1f6", "#1a1b24"))
-        footer_frame.pack(fill="x", side="bottom")
+        footer_frame = ctk.CTkFrame(self.main_container, height=44, corner_radius=10, fg_color=("#eef1f6", "#1f212c"))
+        footer_frame.pack(fill="x", side="bottom", padx=8, pady=(4, 8))
         footer_frame.pack_propagate(False)
 
         btn_footer_close = ctk.CTkButton(
             footer_frame,
             text="Fechar Menu",
-            height=32,
+            height=30,
             fg_color=("gray75", "#282a34"),
             hover_color=("gray65", "#353846"),
             text_color=("gray10", "#ffffff"),
             font=ctk.CTkFont(size=11, weight="bold"),
-            command=self.on_close
+            command=self.close
         )
-        btn_footer_close.pack(fill="x", padx=12, pady=7)
+        btn_footer_close.pack(fill="x", padx=10, pady=7)
 
         # 3. Área Scrollável de Opções
-        self.scroll = ctk.CTkScrollableFrame(self, fg_color="transparent")
-        self.scroll.pack(fill="both", expand=True, padx=6, pady=6)
+        self.scroll = ctk.CTkScrollableFrame(self.main_container, fg_color="transparent")
+        self.scroll.pack(fill="both", expand=True, padx=6, pady=4)
 
         self._build_sections()
+        self.reposition()
+
+        # Tecla Escape para fechar
+        self.bind("<Escape>", lambda e: self.close())
+
+    def reposition(self):
+        """Posiciona o popup perfeitamente alinhado ao canto superior direito da janela principal."""
+        try:
+            if not self.winfo_exists() or not self.parent.winfo_exists():
+                return
+            self.parent.update_idletasks()
+            scale = ctk.ScalingTracker.get_window_scaling(self.parent)
+
+            rx = self.parent.winfo_rootx()
+            ry = self.parent.winfo_rooty()
+            rw = self.parent.winfo_width()
+            rh = self.parent.winfo_height()
+
+            popup_logical_w = 400
+            popup_phys_w = int(popup_logical_w * scale)
+            header_phys_h = int(64 * scale)
+            footer_phys_h = int(28 * scale)
+            margin = int(10 * scale)
+
+            pos_x = int(rx + rw - popup_phys_w - margin)
+            pos_y = int(ry + header_phys_h + margin)
+            avail_phys_h = rh - header_phys_h - footer_phys_h - (margin * 2)
+            popup_logical_h = max(340, int(avail_phys_h / scale))
+
+            self.geometry(f"{popup_logical_w}x{popup_logical_h}+{pos_x}+{pos_y}")
+            self.lift()
+            self.attributes("-topmost", True)
+        except Exception:
+            pass
+
+    def close(self):
+        if self._is_closing:
+            return
+        self._is_closing = True
+        if self.on_close_callback:
+            try:
+                self.on_close_callback()
+            except Exception:
+                pass
+        try:
+            self.destroy()
+        except Exception:
+            pass
 
     def reload(self):
         """Recarrega os componentes internos preservando o estado da interface."""
@@ -184,7 +240,7 @@ class SettingsDrawer(ctk.CTkFrame):
                 font=ctk.CTkFont(size=10),
                 text_color=("gray40", "#8e92a0"),
                 justify="left",
-                wraplength=350
+                wraplength=340
             ).pack(anchor="w", padx=12, pady=(0, 8))
 
             row_pwd = ctk.CTkFrame(card_dev, fg_color="transparent")
@@ -319,7 +375,7 @@ class SettingsDrawer(ctk.CTkFrame):
                 card_dev,
                 text="",
                 font=ctk.CTkFont(size=10),
-                wraplength=350,
+                wraplength=340,
                 justify="left"
             )
             self.lbl_custom_status.pack(anchor="w", padx=12, pady=(0, 6))
@@ -340,7 +396,7 @@ class SettingsDrawer(ctk.CTkFrame):
                 text="☁️ Configurar Supabase",
                 height=28,
                 fg_color=("#d6dae2", "#2e303b"),
-                command=lambda: SupabaseConfigDialog(self.winfo_toplevel(), on_saved=self.reload)
+                command=lambda: SupabaseConfigDialog(self.parent, on_saved=self.reload)
             )
             btn_cfg_cloud.pack(side="left", fill="x", expand=True, padx=(0, 4))
 
@@ -496,9 +552,9 @@ class SettingsDrawer(ctk.CTkFrame):
 
         def do_install():
             from splash_screen import SplashScreen
-            self.on_close()
+            self.close()
 
-            parent_window = self.winfo_toplevel()
+            parent_window = self.parent
             update_splash = SplashScreen(
                 parent=parent_window,
                 title="Atualizando RemoteXPTI",
@@ -527,7 +583,7 @@ class SettingsDrawer(ctk.CTkFrame):
             updater.download_and_install_specific(matched["tag"], matched["download_url"], on_status=on_status_bg)
 
         ConfirmDialog(
-            parent=self.winfo_toplevel(),
+            parent=self.parent,
             title=f"Instalar Versão {tag}",
             message=f"Deseja baixar e instalar a versão {tag}?\n\nO RemoteXPTI exibirá o progresso com a animação de atualização e será reiniciado automaticamente.",
             confirm_text="Sim, Instalar Agora",
@@ -537,7 +593,7 @@ class SettingsDrawer(ctk.CTkFrame):
 
     def _push_servers_to_cloud(self):
         if not CloudSyncManager.is_configured():
-            SupabaseConfigDialog(self.winfo_toplevel(), on_saved=self.reload)
+            SupabaseConfigDialog(self.parent, on_saved=self.reload)
             return
 
         servers = getattr(self.parent, "storage", None)

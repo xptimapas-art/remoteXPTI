@@ -1371,13 +1371,6 @@ class WebMapManager:
         self.edge_hwnd: Optional[int] = None
         self._is_docked = False
         self._is_visible = False
-        self._margin_right = 0
-
-    def set_margin_right(self, margin: int):
-        """Define margem lateral direita para acomodar o drawer sem sobreposição do Edge."""
-        self._margin_right = max(0, int(margin))
-        if self._is_visible and self.edge_hwnd:
-            self.resize()
 
     def start(self):
         """Inicia o servidor HTTP embutido, limpa processos orfãos e pré-carrega o mapa em segundo plano."""
@@ -1399,8 +1392,8 @@ class WebMapManager:
                 self._launch_and_dock()
         if self.edge_hwnd and self._is_docked:
             try:
-                w = max(200, self.container.winfo_width() - self._margin_right)
-                h = max(200, self.container.winfo_height())
+                w = max(400, self.container.winfo_width())
+                h = max(300, self.container.winfo_height())
                 log.info(f"[WebMapManager] Posicionando Edge no HWND_TOP com tamanho {w}x{h}...")
                 win32gui.SetWindowPos(self.edge_hwnd, win32con.HWND_TOP, 0, 0, w, h, win32con.SWP_SHOWWINDOW)
                 win32gui.ShowWindow(self.edge_hwnd, win32con.SW_SHOW)
@@ -1424,7 +1417,7 @@ class WebMapManager:
         if not self.edge_hwnd or not self._is_docked or not self.container:
             return
         try:
-            w = max(50, self.container.winfo_width() - self._margin_right)
+            w = self.container.winfo_width()
             h = self.container.winfo_height()
             if w > 50 and h > 50:
                 win32gui.SetWindowPos(self.edge_hwnd, win32con.HWND_TOP, 0, 0, w, h, win32con.SWP_SHOWWINDOW | win32con.SWP_NOACTIVATE)
