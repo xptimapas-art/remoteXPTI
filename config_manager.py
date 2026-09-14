@@ -19,6 +19,11 @@ DEV_SALT = "RemoteXPTI_Salt_2026"
 DEV_PASSWORD_HASH = "d1a5398d82dbca928e51e31b09bd91707750ba9037888529b8f892721086b1cb"
 
 
+# Credenciais oficiais padrão da nuvem corporativa (Supabase da XPti)
+DEFAULT_SUPABASE_URL = "https://rdxrxkoivbzfzncjfrkn.supabase.co"
+DEFAULT_SUPABASE_KEY = "sb_publishable_11nb3dWkWx2N8fY-bGK4Jw_YjVBJ3L1"
+
+
 def get_config_dir() -> Path:
     local_appdata = os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))
     c_dir = Path(local_appdata) / "RemoteXPTI"
@@ -47,9 +52,9 @@ class ConfigManager:
             "update_channel": "public",      # "public" (1.x.0) ou "beta_tester" (1.1.x)
             "dev_authenticated": False,       # Se a sessão dev está ativa
             "dev_session_token": "",          # Token de sessão persistente
-            "supabase_url": "",               # URL do projeto Supabase (opcional)
-            "supabase_key": "",               # Anon key do Supabase (opcional)
-            "cloud_sync_enabled": False,      # Se sincronização em nuvem está ativa
+            "supabase_url": DEFAULT_SUPABASE_URL,
+            "supabase_key": DEFAULT_SUPABASE_KEY,
+            "cloud_sync_enabled": True,
         }
         self.load()
 
@@ -131,10 +136,13 @@ class ConfigManager:
             log.info(f"[ConfigManager] Canal de atualização definido para: {channel}")
 
     def get_supabase_config(self) -> Dict[str, str]:
+        url = self.data.get("supabase_url", "").strip() or DEFAULT_SUPABASE_URL
+        key = self.data.get("supabase_key", "").strip() or DEFAULT_SUPABASE_KEY
+        enabled = self.data.get("cloud_sync_enabled", True)
         return {
-            "url": self.data.get("supabase_url", "").strip(),
-            "key": self.data.get("supabase_key", "").strip(),
-            "enabled": bool(self.data.get("cloud_sync_enabled", False))
+            "url": url,
+            "key": key,
+            "enabled": bool(enabled and url and key)
         }
 
     def set_supabase_config(self, url: str, key: str, enabled: bool = True):

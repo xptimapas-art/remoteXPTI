@@ -30,24 +30,36 @@ class CloudSyncManager:
             "User-Agent": "RemoteXPTI-CloudSync/1.1"
         }
 
+    @staticmethod
+    def _clean_base_url(url: str) -> str:
+        u = (url or "").strip().rstrip("/")
+        if u.endswith("/rest/v1"):
+            u = u[:-8].rstrip("/")
+        return u
+
     @classmethod
     def test_connection(cls, url: str, key: str) -> Tuple[bool, str]:
         """Testa se as credenciais do Supabase estão ativas e alcançáveis."""
         if not url or not key:
             return False, "URL e Chave da API são obrigatórios."
 
-        clean_url = url.rstrip("/")
-        endpoint = f"{clean_url}/rest/v1/"
+        clean_url = cls._clean_base_url(url)
+        headers = cls._get_headers(key)
+
+        # Testa consulta na tabela servers
+        endpoint = f"{clean_url}/rest/v1/servers?select=id&limit=1"
         try:
-            req = urllib.request.Request(endpoint, headers=cls._get_headers(key))
+            req = urllib.request.Request(endpoint, headers=headers)
             with urllib.request.urlopen(req, timeout=6.0) as resp:
-                if resp.status in (200, 404):  # 200 ou 404 na raiz REST indica que a API respondeu
-                    return True, "Conexão com Supabase estabelecida com sucesso!"
+                if resp.status == 200:
+                    return True, "Conexão com Supabase e tabela 'servers' estabelecida com sucesso!"
                 return False, f"Resposta inesperada do servidor: {resp.status}"
         except urllib.error.HTTPError as e:
-            # Erro 401 ou 403 indica chave inválida
+            err_body = e.read().decode("utf-8", errors="ignore")
             if e.code in (401, 403):
                 return False, "Chave de API inválida ou sem permissão."
+            elif e.code == 404 and "PGRST205" in err_body:
+                return True, "Conectado ao Supabase com sucesso! (Aguardando criação da tabela 'servers' no SQL Editor)."
             return True, f"API do Supabase respondeu (HTTP {e.code})."
         except Exception as ex:
             return False, f"Falha ao conectar: {str(ex)}"
@@ -59,7 +71,8 @@ class CloudSyncManager:
         if not cfg.get("enabled") or not cfg.get("url") or not cfg.get("key"):
             return None
 
-        url = cfg["url"].rstrip("/") + "/rest/v1/servers?select=*"
+        clean_url = cls._clean_base_url(cfg["url"])
+        url = f"{clean_url}/rest/v1/servers?select=*"
         headers = cls._get_headers(cfg["key"])
 
         try:
@@ -83,7 +96,8 @@ class CloudSyncManager:
             log.info("[CloudSync] Supabase não configurado ou desabilitado. Operação mantida apenas localmente.")
             return False, "Supabase não configurado ou desabilitado."
 
-        url = cfg["url"].rstrip("/") + "/rest/v1/servers"
+        clean_url = cls._clean_base_url(cfg["url"])
+        url = f"{clean_url}/rest/v1/servers"
         headers = cls._get_headers(cfg["key"])
         headers["Prefer"] = "resolution=merge-duplicates"
 
@@ -140,7 +154,8 @@ class CloudSyncManager:
         if not cfg.get("enabled") or not cfg.get("url") or not cfg.get("key"):
             return False, "Supabase não configurado."
 
-        url = f"{cfg['url'].rstrip('/')}/rest/v1/servers?id=eq.{server_id}"
+        clean_url = cls._clean_base_url(cfg["url"])
+        url = f"{clean_url}/rest/v1/servers?id=eq.{server_id}"
         headers = cls._get_headers(cfg["key"])
 
         try:
