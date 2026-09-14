@@ -68,6 +68,7 @@ class ServerCard(ctk.CTkFrame):
 
     def _load_images(self):
         """Carrega a imagem normal imediatamente e deixa a imagem hover para sob demanda (0ms no startup)."""
+        scope = self.server.get("scope", "corporate")
         self.img_normal = PreviewManager.get_card_ctk(
             server_id=self.server["id"],
             name=self.server.get("name", "Servidor"),
@@ -76,7 +77,8 @@ class ServerCard(ctk.CTkFrame):
             width=CARD_WIDTH,
             height=CARD_HEIGHT,
             is_fav=self.is_fav,
-            is_hover=False
+            is_hover=False,
+            scope=scope
         )
         self.img_hover = None  # Carregamento sob demanda (lazy) ao passar o mouse
 
@@ -127,6 +129,7 @@ class ServerCard(ctk.CTkFrame):
     def _set_hover(self, is_hover: bool):
         self._is_hovering = is_hover
         if is_hover and self.img_hover is None:
+            scope = self.server.get("scope", "corporate")
             self.img_hover = PreviewManager.get_card_ctk(
                 server_id=self.server["id"],
                 name=self.server.get("name", "Servidor"),
@@ -135,7 +138,8 @@ class ServerCard(ctk.CTkFrame):
                 width=CARD_WIDTH,
                 height=CARD_HEIGHT,
                 is_fav=self.is_fav,
-                is_hover=True
+                is_hover=True,
+                scope=scope
             )
         self.lbl_card.configure(image=self.img_hover if is_hover else self.img_normal)
 
@@ -627,23 +631,11 @@ class RemoteXPTIApp(ctk.CTk):
         try:
             remote = CloudSyncManager.fetch_servers()
             if remote:
-                log.info(f"[RemoteXPTI] Recebidos {len(remote)} servidores do Supabase. Sincronizando com storage...")
-                local_map = {s["id"]: s for s in self.storage.servers}
-                changed = False
-                for r in remote:
-                    r_id = r.get("id")
-                    if r_id not in local_map:
-                        self.storage.servers.append(r)
-                        changed = True
-                    else:
-                        local = local_map[r_id]
-                        for fld in ("name", "host", "port", "username", "group", "latitude", "longitude"):
-                            if r.get(fld) is not None and r.get(fld) != local.get(fld):
-                                local[fld] = r[fld]
-                                changed = True
+                log.info(f"[RemoteXPTI] Recebidos {len(remote)} servidores do Supabase. Mesclando com storage corporativo...")
+                changed, added, updated = self.storage.merge_cloud_servers(remote)
                 if changed:
-                    self.storage.save()
                     self._action_queue.put(self.refresh_servers)
+                    log.info(f"[RemoteXPTI] Nuvem sincronizada com sucesso: {added} adicionados, {updated} atualizados.")
         except Exception as e:
             log.warning(f"[RemoteXPTI] Erro na sincronização com Supabase: {e}")
 
@@ -1223,10 +1215,12 @@ class RemoteXPTIApp(ctk.CTk):
         self._auto_ping_timer = self.after(45000, self._schedule_periodic_ping)
 
     def open_add_dialog(self):
+        is_admin = ConfigManager().is_dev_authenticated()
+
         def on_save(data):
             new_s = self.storage.add_server(data)
             server_id = new_s["id"]
-            log.info(f"[RemoteXPTI] Servidor adicionado com sucesso: '{new_s['name']}' (ID={server_id}, Host={new_s.get('host')}:{new_s.get('port')})")
+            log.info(f"[RemoteXPTI] Servidor adicionado com sucesso: '{new_s['name']}' (ID={server_id}, Scope={new_s.get('scope')}, Host={new_s.get('host')}:{new_s.get('port')})")
             if data.get("custom_image"):
                 try:
                     img = Image.open(data["custom_image"])
@@ -1239,8 +1233,19 @@ class RemoteXPTIApp(ctk.CTk):
                     tpath.unlink()
 
             self.refresh_servers()
-            self.set_message(f"Servidor '{new_s['name']}' adicionado com sucesso!")
             self.start_status_checker(is_manual=False)
+
+            # Se for servidor corporativo criado por admin, publica automaticamente na nuvem
+            if new_s.get("scope") == "corporate" and is_admin:
+                def do_auto_push():
+                    ok, msg = CloudSyncManager.push_single_server(new_s)
+                    if ok:
+                        self.set_message(f"Servidor '{new_s['name']}' salvo e publicado para toda a empresa!")
+                    else:
+                        self.set_message(f"Servidor '{new_s['name']}' salvo localmente ({msg}).")
+                threading.Thread(target=do_auto_push, daemon=True).start()
+            else:
+                self.set_message(f"Servidor '{new_s['name']}' adicionado com sucesso!")
 
         ServerDialog(
             parent=self,
@@ -1253,10 +1258,23 @@ class RemoteXPTIApp(ctk.CTk):
         if not full_server:
             full_server = server
 
+        is_admin = ConfigManager().is_dev_authenticated()
+        is_corporate = (full_server.get("scope", "corporate") == "corporate")
+
+        # Se for corporativo e o usuário NÃO for administrador, abre exclusivamente em modo leitura
+        if is_corporate and not is_admin:
+            ServerDialog(
+                parent=self,
+                server_data=full_server,
+                existing_groups=self.storage.get_groups(),
+                read_only=True
+            )
+            return
+
         def on_save(data):
             self.storage.update_server(server["id"], data)
             server_id = server["id"]
-            log.info(f"[RemoteXPTI] Servidor editado e salvo: '{data['name']}' (ID={server_id}, Host={data.get('host')}:{data.get('port')})")
+            log.info(f"[RemoteXPTI] Servidor editado e salvo: '{data['name']}' (ID={server_id}, Scope={data.get('scope')}, Host={data.get('host')}:{data.get('port')})")
             PreviewManager.invalidate_cache(server_id)
             if data.get("custom_image"):
                 try:
@@ -1275,8 +1293,21 @@ class RemoteXPTIApp(ctk.CTk):
                 del self.card_widgets[server_id]
 
             self.refresh_servers()
-            self.set_message(f"Servidor '{data['name']}' atualizado com sucesso!")
             self.start_status_checker(is_manual=False)
+
+            # Se for servidor corporativo e admin, publica automaticamente na nuvem
+            if data.get("scope") == "corporate" and is_admin:
+                updated_s = self.storage.get_server(server_id)
+                if updated_s:
+                    def do_auto_push():
+                        ok, msg = CloudSyncManager.push_single_server(updated_s)
+                        if ok:
+                            self.set_message(f"Servidor '{data['name']}' atualizado e publicado na nuvem para toda a empresa!")
+                        else:
+                            self.set_message(f"Servidor '{data['name']}' atualizado localmente ({msg}).")
+                    threading.Thread(target=do_auto_push, daemon=True).start()
+            else:
+                self.set_message(f"Servidor '{data['name']}' atualizado com sucesso!")
 
         def on_delete():
             self.confirm_delete_server(server)
@@ -1286,10 +1317,18 @@ class RemoteXPTIApp(ctk.CTk):
             server_data=full_server,
             existing_groups=self.storage.get_groups(),
             on_save=on_save,
-            on_delete=on_delete
+            on_delete=on_delete,
+            read_only=False
         )
 
     def confirm_delete_server(self, server: Dict[str, Any]):
+        is_admin = ConfigManager().is_dev_authenticated()
+        is_corporate = (server.get("scope", "corporate") == "corporate")
+
+        if is_corporate and not is_admin:
+            self.set_message("Aviso: Servidores corporativos só podem ser excluídos pelo Administrador.")
+            return
+
         name = server.get("name", "este servidor")
         def do_delete():
             server_id = server["id"]
@@ -1314,7 +1353,13 @@ class RemoteXPTIApp(ctk.CTk):
                 del self.card_widgets[server_id]
                 
             self.refresh_servers()
-            self.set_message(f"Servidor '{name}' excluído com sucesso.")
+
+            # Se for corporativo e admin, remove do Supabase
+            if is_corporate and is_admin:
+                threading.Thread(target=lambda: CloudSyncManager.delete_remote_server(server_id), daemon=True).start()
+                self.set_message(f"Servidor '{name}' excluído e removido da nuvem da empresa.")
+            else:
+                self.set_message(f"Servidor '{name}' excluído com sucesso.")
 
         ConfirmDialog(
             parent=self,

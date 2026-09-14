@@ -200,7 +200,8 @@ class PreviewManager:
         width: int = 276,
         height: int = 180,
         is_fav: bool = False,
-        is_hover: bool = False
+        is_hover: bool = False,
+        scope: str = "corporate"
     ) -> Image.Image:
         """
         Gera o card completo no padrão exato do AnyDesk:
@@ -247,6 +248,23 @@ class PreviewManager:
         # 5. Estrela de Favoritos em Alta Resolução (Canto Superior Direito)
         star = cls._render_star_icon(is_fav, size=20)
         img.paste(star, (width - 33, 11), star)
+
+        # Badge de Escopo (Empresa Toda vs Local)
+        scope_str = (scope or "corporate").lower()
+        badge_text = "EMPRESA" if scope_str == "corporate" else "LOCAL"
+        font_scope = get_card_font("bold", 9)
+        
+        pill_img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        pdraw = ImageDraw.Draw(pill_img)
+        bx, by = 37, 14
+        bw, bh = 56 if scope_str == "corporate" else 44, 16
+        if scope_str == "corporate":
+            pdraw.rounded_rectangle([(bx, by), (bx + bw, by + bh)], radius=3, fill=(15, 40, 80, 210), outline=(0, 130, 240, 180), width=1)
+            pdraw.text((bx + 6, by + 1), badge_text, fill=(130, 190, 255, 255), font=font_scope)
+        else:
+            pdraw.rounded_rectangle([(bx, by), (bx + bw, by + bh)], radius=3, fill=(35, 40, 50, 210), outline=(90, 100, 120, 160), width=1)
+            pdraw.text((bx + 6, by + 1), badge_text, fill=(200, 205, 215, 240), font=font_scope)
+        img = Image.alpha_composite(img, pill_img)
 
         draw = ImageDraw.Draw(img)
 
@@ -296,14 +314,15 @@ class PreviewManager:
         width: int = 276,
         height: int = 180,
         is_fav: bool = False,
-        is_hover: bool = False
+        is_hover: bool = False,
+        scope: str = "corporate"
     ) -> ctk.CTkImage:
         """Retorna o CTkImage completo do card no estilo AnyDesk com cache inteligente."""
-        cache_key = f"{server_id}_{width}_{height}_{is_online}_{is_fav}_{is_hover}"
+        cache_key = f"{server_id}_{width}_{height}_{is_online}_{is_fav}_{is_hover}_{scope}"
         if cache_key in cls._cache:
             return cls._cache[cache_key]
 
-        pil_img = cls.generate_anydesk_card(server_id, name, host, is_online, width, height, is_fav, is_hover)
+        pil_img = cls.generate_anydesk_card(server_id, name, host, is_online, width, height, is_fav, is_hover, scope)
         ctk_img = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=(width, height))
         cls._cache[cache_key] = ctk_img
         return ctk_img

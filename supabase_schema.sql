@@ -1,4 +1,4 @@
-﻿-- ====================================================================
+-- ====================================================================
 -- Script SQL para Criação das Tabelas do RemoteXPTI no Supabase
 -- Copie e cole este script no SQL Editor do seu projeto Supabase
 -- ====================================================================
@@ -10,7 +10,9 @@ CREATE TABLE IF NOT EXISTS public.servers (
     host TEXT NOT NULL,
     port INTEGER DEFAULT 3389,
     username TEXT,
+    password TEXT,
     "group" TEXT DEFAULT 'Geral',
+    scope TEXT DEFAULT 'corporate',
     latitude DOUBLE PRECISION,
     longitude DOUBLE PRECISION,
     favorite BOOLEAN DEFAULT FALSE,

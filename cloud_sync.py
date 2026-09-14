@@ -1,4 +1,4 @@
-﻿"""
+"""
 Módulo de Sincronização em Nuvem (Supabase) do RemoteXPTI.
 Permite sincronizar servidores e configurações entre a central e os clientes.
 Funciona via HTTPS REST padrão com urllib.request (zero dependências pesadas).
@@ -77,25 +77,30 @@ class CloudSyncManager:
 
     @classmethod
     def push_servers(cls, servers: List[Dict[str, Any]]) -> Tuple[bool, str]:
-        """Envia / atualiza a lista de servidores locais para o Supabase (Upsert)."""
+        """Envia / atualiza a lista de servidores corporativos para o Supabase (Upsert)."""
         cfg = ConfigManager().get_supabase_config()
         if not cfg.get("enabled") or not cfg.get("url") or not cfg.get("key"):
+            log.info("[CloudSync] Supabase não configurado ou desabilitado. Operação mantida apenas localmente.")
             return False, "Supabase não configurado ou desabilitado."
 
         url = cfg["url"].rstrip("/") + "/rest/v1/servers"
         headers = cls._get_headers(cfg["key"])
         headers["Prefer"] = "resolution=merge-duplicates"
 
-        # Prepara payload removendo chaves voláteis locais se houver
+        # Prepara payload filtrando apenas corporativos e incluindo credenciais protegidas
         payload = []
         for s in servers:
+            if s.get("scope", "corporate") != "corporate":
+                continue
             entry = {
                 "id": str(s.get("id")),
                 "name": s.get("name", "Servidor"),
                 "host": s.get("host", ""),
                 "port": int(s.get("port", 3389)),
                 "username": s.get("username", ""),
-                "group": s.get("group", "Geral"),
+                "password": s.get("password", ""),  # Criptografado com MASTER_KEY
+                "group": s.get("group", "BEMTEVI"),
+                "scope": "corporate",
                 "latitude": s.get("latitude"),
                 "longitude": s.get("longitude"),
                 "favorite": bool(s.get("favorite", False)),
@@ -106,14 +111,45 @@ class CloudSyncManager:
             }
             payload.append(entry)
 
+        if not payload:
+            return True, "Nenhum servidor corporativo para sincronizar."
+
         try:
             json_data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
             req = urllib.request.Request(url, data=json_data, headers=headers, method="POST")
             with urllib.request.urlopen(req, timeout=10.0) as resp:
                 if resp.status in (200, 201):
-                    log.info(f"[CloudSync] {len(payload)} servidores enviados com sucesso para o Supabase.")
+                    log.info(f"[CloudSync] {len(payload)} servidores corporativos enviados com sucesso para o Supabase.")
                     return True, f"{len(payload)} servidores sincronizados na nuvem!"
                 return False, f"Servidor retornou status {resp.status}."
         except Exception as e:
             log.error(f"[CloudSync] Erro ao enviar servidores para o Supabase: {e}")
+            return False, str(e)
+
+    @classmethod
+    def push_single_server(cls, server: Dict[str, Any]) -> Tuple[bool, str]:
+        """Publica ou atualiza um único servidor corporativo no Supabase automaticamente."""
+        if server.get("scope", "corporate") != "corporate":
+            return True, "Servidor local: não enviado para a nuvem."
+        return cls.push_servers([server])
+
+    @classmethod
+    def delete_remote_server(cls, server_id: str) -> Tuple[bool, str]:
+        """Remove um servidor corporativo do banco Supabase ao ser excluído pelo admin."""
+        cfg = ConfigManager().get_supabase_config()
+        if not cfg.get("enabled") or not cfg.get("url") or not cfg.get("key"):
+            return False, "Supabase não configurado."
+
+        url = f"{cfg['url'].rstrip('/')}/rest/v1/servers?id=eq.{server_id}"
+        headers = cls._get_headers(cfg["key"])
+
+        try:
+            req = urllib.request.Request(url, headers=headers, method="DELETE")
+            with urllib.request.urlopen(req, timeout=8.0) as resp:
+                if resp.status in (200, 204):
+                    log.info(f"[CloudSync] Servidor {server_id} excluído com sucesso do Supabase.")
+                    return True, "Servidor excluído da nuvem com sucesso."
+                return False, f"Falha ao excluir na nuvem: HTTP {resp.status}"
+        except Exception as e:
+            log.error(f"[CloudSync] Erro ao excluir servidor {server_id} do Supabase: {e}")
             return False, str(e)

@@ -4,7 +4,7 @@ import json
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any, Tuple
 
 try:
     from cryptography.fernet import Fernet
@@ -100,6 +100,14 @@ class StorageManager:
             print(f"Erro ao carregar {self.data_file}: {e}")
             self.servers = []
 
+        # Garante que servidores legados possuam scope ('corporate' por padrão da empresa)
+        for s in self.servers:
+            if "scope" not in s:
+                s["scope"] = "corporate"
+                s["is_shared"] = True
+            else:
+                s["is_shared"] = (s.get("scope") == "corporate")
+
         self._sync_coordinates()
         return self.servers
 
@@ -174,6 +182,10 @@ class StorageManager:
             except Exception:
                 pass
 
+        scope = (data.get("scope") or "corporate").strip().lower()
+        if scope not in ("corporate", "local"):
+            scope = "corporate"
+
         new_server = {
             "id": server_id,
             "name": data.get("name", "Sem Nome").strip(),
@@ -182,6 +194,8 @@ class StorageManager:
             "username": data.get("username", "").strip(),
             "password": self.vault.encrypt(plain_password),
             "group": (data.get("group") or "BEMTEVI").strip(),
+            "scope": scope,
+            "is_shared": (scope == "corporate"),
             "fullscreen": bool(data.get("fullscreen", True)),
             "admin_mode": bool(data.get("admin_mode", False)),
             "multimon": bool(data.get("multimon", False)),
@@ -213,6 +227,12 @@ class StorageManager:
                 s["admin_mode"] = bool(data.get("admin_mode", s.get("admin_mode", False)))
                 s["multimon"] = bool(data.get("multimon", s.get("multimon", False)))
                 s["notes"] = data.get("notes", s.get("notes", "")).strip()
+
+                if "scope" in data:
+                    sc = str(data["scope"]).strip().lower()
+                    if sc in ("corporate", "local"):
+                        s["scope"] = sc
+                        s["is_shared"] = (sc == "corporate")
 
                 # Atualiza coordenadas se fornecidas
                 if "latitude" in data:
@@ -254,3 +274,85 @@ class StorageManager:
             if grp:
                 groups.add(grp)
         return sorted(list(groups))
+
+    def get_corporate_servers(self) -> List[Dict[str, Any]]:
+        """Retorna apenas os servidores corporativos compartilhados da empresa."""
+        return [s for s in self.servers if s.get("scope", "corporate") == "corporate"]
+
+    def get_local_servers(self) -> List[Dict[str, Any]]:
+        """Retorna apenas os servidores particulares cadastrados localmente pelo usuário."""
+        return [s for s in self.servers if s.get("scope") == "local"]
+
+    def is_corporate(self, server_id: str) -> bool:
+        """Informa se o servidor é corporativo (gerenciado pela empresa)."""
+        for s in self.servers:
+            if s["id"] == server_id:
+                return s.get("scope", "corporate") == "corporate"
+        return False
+
+    def merge_cloud_servers(self, cloud_servers: List[Dict[str, Any]]) -> Tuple[bool, int, int]:
+        """
+        Mescla a lista de servidores corporativos obtidos da nuvem (Supabase).
+        - Atualiza ou insere servidores corporativos.
+        - Preserva 100% dos servidores particulares com scope == 'local'.
+        - Retorna uma tupla (houve_alteracao, qtd_inseridos, qtd_atualizados).
+        """
+        if not cloud_servers:
+            return False, 0, 0
+
+        changed = False
+        added_count = 0
+        updated_count = 0
+
+        local_map = {str(s["id"]): s for s in self.servers}
+
+        for cs in cloud_servers:
+            cid = str(cs.get("id"))
+            if not cid:
+                continue
+
+            if cid in local_map:
+                loc = local_map[cid]
+                # Se for corporativo, atualiza dados vindos da nuvem
+                if loc.get("scope", "corporate") == "corporate":
+                    for fld in ("name", "host", "port", "username", "group", "latitude", "longitude",
+                                "admin_mode", "multimon", "fullscreen", "notes"):
+                        if cs.get(fld) is not None and cs.get(fld) != loc.get(fld):
+                            loc[fld] = cs[fld]
+                            changed = True
+                    # Atualiza senha da nuvem se fornecida
+                    if cs.get("password") and cs.get("password") != loc.get("password"):
+                        loc["password"] = cs["password"]
+                        changed = True
+                    loc["scope"] = "corporate"
+                    loc["is_shared"] = True
+                    updated_count += 1
+            else:
+                # Novo servidor corporativo recebido da nuvem
+                new_entry = {
+                    "id": cid,
+                    "name": str(cs.get("name", "Servidor")).strip(),
+                    "host": str(cs.get("host", "")).strip(),
+                    "port": int(cs.get("port", 3389)),
+                    "username": str(cs.get("username", "")).strip(),
+                    "password": cs.get("password", ""),
+                    "group": str(cs.get("group", "BEMTEVI")).strip(),
+                    "scope": "corporate",
+                    "is_shared": True,
+                    "fullscreen": bool(cs.get("fullscreen", True)),
+                    "admin_mode": bool(cs.get("admin_mode", False)),
+                    "multimon": bool(cs.get("multimon", False)),
+                    "notes": str(cs.get("notes", "")).strip(),
+                    "created_at": cs.get("created_at", datetime.now().isoformat()),
+                    "last_connected": None,
+                    "latitude": cs.get("latitude"),
+                    "longitude": cs.get("longitude")
+                }
+                self.servers.append(new_entry)
+                changed = True
+                added_count += 1
+
+        if changed:
+            self.save()
+
+        return changed, added_count, updated_count

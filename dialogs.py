@@ -21,7 +21,8 @@ class ServerDialog(ctk.CTkToplevel):
         server_data: Optional[Dict[str, Any]] = None,
         existing_groups: Optional[List[str]] = None,
         on_save: Optional[Callable[[Dict[str, Any]], None]] = None,
-        on_delete: Optional[Callable[[], None]] = None
+        on_delete: Optional[Callable[[], None]] = None,
+        read_only: bool = False
     ):
         super().__init__(parent)
         self.parent = parent
@@ -33,8 +34,19 @@ class ServerDialog(ctk.CTkToplevel):
         self.on_delete = on_delete
         self.is_edit = bool(server_data and "id" in server_data)
 
-        self.title("Editar Servidor" if self.is_edit else "Novo Servidor RDP")
-        self.geometry("540x680")
+        self.is_admin = ConfigManager().is_dev_authenticated()
+        self.server_scope = self.server_data.get("scope", "corporate" if self.is_admin else "local")
+        if self.is_edit and not self.is_admin and self.server_scope == "corporate":
+            self.read_only = True
+        else:
+            self.read_only = read_only
+
+        if self.read_only:
+            self.title("Detalhes do Servidor Corporativo")
+        else:
+            self.title("Editar Servidor" if self.is_edit else "Novo Servidor RDP")
+
+        self.geometry("540x700")
         self.minsize(500, 640)
         self.resizable(False, False)
 
@@ -53,26 +65,68 @@ class ServerDialog(ctk.CTkToplevel):
         main_frame.pack(fill="both", expand=True, padx=16, pady=16)
 
         # Header com título estilizado
-        header_text = "⚙️ Editar Configurações RDP" if self.is_edit else "🖥️ Adicionar Novo Servidor"
+        if self.read_only:
+            header_text = "🏢 Servidor Corporativo"
+            sub_text = "Visualização das configurações do servidor da empresa."
+        elif self.is_edit:
+            header_text = "⚙️ Editar Configurações RDP"
+            sub_text = "Configure os dados de acesso e credenciais de login automático."
+        else:
+            header_text = "🖥️ Adicionar Novo Servidor"
+            sub_text = "Configure os dados de acesso e credenciais de login automático."
+
         lbl_title = ctk.CTkLabel(
             main_frame,
             text=header_text,
             font=ctk.CTkFont(size=18, weight="bold"),
             text_color=("gray10", "#ffffff")
         )
-        lbl_title.pack(anchor="w", padx=20, pady=(15, 5))
+        lbl_title.pack(anchor="w", padx=20, pady=(15, 2))
 
         lbl_subtitle = ctk.CTkLabel(
             main_frame,
-            text="Configure os dados de acesso e credenciais de login automático.",
+            text=sub_text,
             font=ctk.CTkFont(size=12),
             text_color=("gray40", "#a0a0a0")
         )
-        lbl_subtitle.pack(anchor="w", padx=20, pady=(0, 15))
+        lbl_subtitle.pack(anchor="w", padx=20, pady=(0, 10))
+
+        # Banner de aviso se for corporativo em modo somente leitura
+        if self.read_only:
+            banner = ctk.CTkFrame(main_frame, corner_radius=8, fg_color=("#e6f0fa", "#192436"), border_width=1, border_color=("#99c2ff", "#2a4269"))
+            banner.pack(fill="x", padx=16, pady=(0, 8))
+            ctk.CTkLabel(
+                banner,
+                text="🔒 Servidor Corporativo Oficial (Gerenciado pela Empresa)\nEste servidor é administrado pela TI. Credenciais e parâmetros de rede estão protegidos para visualização.",
+                font=ctk.CTkFont(size=11, weight="bold"),
+                text_color=("#0052cc", "#66a3ff"),
+                justify="left"
+            ).pack(padx=12, pady=8, anchor="w")
 
         # Formulário em ScrollableFrame para caber com elegância em qualquer resolução
         form_frame = ctk.CTkScrollableFrame(main_frame, fg_color="transparent")
         form_frame.pack(fill="both", expand=True, padx=10, pady=5)
+
+        # Se for Administrador: exibe seletor de escopo (Empresa vs Local)
+        if self.is_admin and not self.read_only:
+            ctk.CTkLabel(form_frame, text="Visibilidade do Servidor *", font=ctk.CTkFont(size=13, weight="bold")).pack(anchor="w", padx=10, pady=(5, 2))
+            self.seg_scope = ctk.CTkSegmentedButton(
+                form_frame,
+                values=["🏢 Empresa Toda (Corporativo)", "💻 Apenas este PC (Local)"],
+                height=34
+            )
+            init_scope = "🏢 Empresa Toda (Corporativo)" if self.server_scope == "corporate" else "💻 Apenas este PC (Local)"
+            self.seg_scope.set(init_scope)
+            self.seg_scope.pack(fill="x", padx=10, pady=(0, 10))
+        elif not self.is_admin and not self.read_only and not self.is_edit:
+            local_note = ctk.CTkFrame(form_frame, corner_radius=6, fg_color=("gray85", "#25252e"))
+            local_note.pack(fill="x", padx=10, pady=(2, 10))
+            ctk.CTkLabel(
+                local_note,
+                text="💻 Servidor Particular: Será salvo exclusivamente neste computador.",
+                font=ctk.CTkFont(size=11),
+                text_color=("gray40", "#a0a4b8")
+            ).pack(padx=10, pady=6, anchor="w")
 
         # 1. Nome Amigável
         ctk.CTkLabel(form_frame, text="Nome do Servidor *", font=ctk.CTkFont(size=13, weight="bold")).pack(anchor="w", padx=10, pady=(5, 2))
@@ -355,6 +409,31 @@ class ServerDialog(ctk.CTkToplevel):
             self.entry_lon.delete(0, "end")
             self.entry_lon.insert(0, str(self.server_data.get("longitude")))
 
+        # Se for modo Somente Leitura (cliente comum visualizando servidor corporativo)
+        if self.read_only:
+            self.entry_name.configure(state="disabled")
+            self.entry_host.configure(state="disabled")
+            self.entry_port.configure(state="disabled")
+            self.combo_group.configure(state="disabled")
+            self.entry_user.configure(state="disabled")
+            self.entry_password.delete(0, "end")
+            self.entry_password.insert(0, "••••••••••••")
+            self.entry_password.configure(state="disabled")
+            self.btn_toggle_pwd.configure(state="disabled")
+            self.chk_fullscreen.configure(state="disabled")
+            self.chk_admin.configure(state="disabled")
+            self.chk_multimon.configure(state="disabled")
+            self.entry_lat.configure(state="disabled")
+            self.entry_lon.configure(state="disabled")
+            self.btn_auto_geo.configure(state="disabled")
+            self.btn_choose_img.configure(state="disabled")
+            self.btn_reset_thumb.configure(state="disabled")
+            if hasattr(self, "btn_save"):
+                self.btn_save.pack_forget()
+            if hasattr(self, "btn_delete"):
+                self.btn_delete.pack_forget()
+            self.btn_cancel.configure(text="Fechar Janela", fg_color="#0066cc", hover_color="#0052a3", text_color="#ffffff")
+
     def _auto_detect_coordinates(self):
         from map_manager import resolve_server_coordinates
         name = self.entry_name.get().strip()
@@ -476,6 +555,14 @@ class ServerDialog(ctk.CTkToplevel):
                 except Exception:
                     pass
 
+        # Determina o escopo do servidor
+        if self.is_admin and hasattr(self, "seg_scope"):
+            scope = "corporate" if "Empresa" in self.seg_scope.get() else "local"
+        elif self.is_edit and self.server_data.get("scope"):
+            scope = self.server_data.get("scope")
+        else:
+            scope = "corporate" if self.is_admin else "local"
+
         payload = {
             "name": name,
             "host": host,
@@ -483,6 +570,8 @@ class ServerDialog(ctk.CTkToplevel):
             "group": group,
             "username": username,
             "password": password,
+            "scope": scope,
+            "is_shared": (scope == "corporate"),
             "fullscreen": bool(self.chk_fullscreen.get()),
             "admin_mode": bool(self.chk_admin.get()),
             "multimon": bool(self.chk_multimon.get()),

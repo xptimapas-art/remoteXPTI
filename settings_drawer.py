@@ -574,8 +574,12 @@ class SettingsDrawer(ctk.CTkFrame):
             SupabaseConfigDialog(self.parent, on_saved=self.reload)
             return
 
-        servers = getattr(self.parent, "storage", None)
-        if servers and hasattr(servers, "servers"):
-            ok, msg = CloudSyncManager.push_servers(servers.servers)
+        storage = getattr(self.parent, "storage", None)
+        if storage:
+            corporate_servers = storage.get_corporate_servers() if hasattr(storage, "get_corporate_servers") else storage.servers
+            ok, msg = CloudSyncManager.push_servers(corporate_servers)
             color = "#00cc66" if ok else "#ff4d4d"
-            self.lbl_custom_status.configure(text=msg, text_color=color)
+            if hasattr(self, "lbl_custom_status"):
+                self.lbl_custom_status.configure(text=msg, text_color=color)
+            if hasattr(self.parent, "set_message"):
+                self.parent.set_message(msg)
