@@ -1205,14 +1205,18 @@ class RemoteXPTIApp(ctk.CTk):
         self.start_status_checker(is_manual=True)
         if hasattr(self, "updater") and self.updater:
             self.updater.start_background_check()
+        if CloudSyncManager.is_configured():
+            threading.Thread(target=self._sync_servers_from_cloud, daemon=True).start()
 
     def _schedule_periodic_ping(self):
-        """Verifica os servidores e checa atualizações em segundo plano."""
+        """Verifica os servidores e checa atualizações e sincronização da nuvem em segundo plano."""
         self.start_status_checker(is_manual=False)
-        # Também checa atualizações silenciosamente a cada ciclo
         if hasattr(self, "updater") and self.updater:
             self.updater.start_background_check()
-        self._auto_ping_timer = self.after(45000, self._schedule_periodic_ping)
+        # Sincroniza servidores corporativos da nuvem automaticamente
+        if CloudSyncManager.is_configured():
+            threading.Thread(target=self._sync_servers_from_cloud, daemon=True).start()
+        self._auto_ping_timer = self.after(30000, self._schedule_periodic_ping)
 
     def open_add_dialog(self):
         is_admin = ConfigManager().is_dev_authenticated()

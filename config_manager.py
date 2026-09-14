@@ -67,6 +67,16 @@ class ConfigManager:
             except Exception as e:
                 log.warning(f"[ConfigManager] Erro ao carregar {self.file_path}: {e}")
 
+        # Migração automática: se o cliente possui URL/Key vazios ou desabilitados de versões anteriores,
+        # injeta as credenciais corporativas oficiais e ativa a sincronização
+        cur_url = self.data.get("supabase_url", "").strip()
+        cur_key = self.data.get("supabase_key", "").strip()
+        if not cur_url or not cur_key or cur_url == DEFAULT_SUPABASE_URL:
+            self.data["supabase_url"] = DEFAULT_SUPABASE_URL
+            self.data["supabase_key"] = DEFAULT_SUPABASE_KEY
+            self.data["cloud_sync_enabled"] = True
+            self.save()
+
         # Valida token de sessão existente se houver
         if self.data.get("dev_authenticated") and self.data.get("dev_session_token"):
             expected_token = self._generate_session_token()
@@ -139,6 +149,8 @@ class ConfigManager:
         url = self.data.get("supabase_url", "").strip() or DEFAULT_SUPABASE_URL
         key = self.data.get("supabase_key", "").strip() or DEFAULT_SUPABASE_KEY
         enabled = self.data.get("cloud_sync_enabled", True)
+        if url == DEFAULT_SUPABASE_URL and key:
+            enabled = True
         return {
             "url": url,
             "key": key,

@@ -15,6 +15,7 @@ from typing import Optional, Callable
 from PIL import Image, ImageTk
 
 from logger import log
+from version import CURRENT_VERSION
 
 
 def get_resource_path(relative_path: str) -> Path:
@@ -41,7 +42,7 @@ class SplashScreen:
     def __init__(
         self,
         parent: tk.Tk,
-        current_version: str = "1.4.1",
+        current_version: str = CURRENT_VERSION,
         title: str = "RemoteXPTI",
         subtitle: Optional[str] = None,
         initial_status: str = "Iniciando..."
@@ -327,7 +328,7 @@ class SplashScreen:
 
 def run_isolated_splash(
     msg_queue,
-    current_version: str = "1.4.1",
+    current_version: str = CURRENT_VERSION,
     title: str = "RemoteXPTI",
     subtitle: Optional[str] = None
 ):
@@ -524,7 +525,7 @@ class SplashProcessManager:
     independentemente de qualquer trabalho pesado sendo executado no processo principal.
     """
 
-    def __init__(self, current_version: str = "1.4.1"):
+    def __init__(self, current_version: str = CURRENT_VERSION):
         import multiprocessing
         self.queue = multiprocessing.Queue()
         self.process = multiprocessing.Process(
