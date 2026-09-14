@@ -9,6 +9,12 @@ from config_manager import ConfigManager
 from cloud_sync import CloudSyncManager
 from updater import SilentAutoUpdater
 from dialogs import SupabaseConfigDialog, ConfirmDialog
+try:
+    import win32gui
+    import win32con
+    HAS_WIN32 = True
+except ImportError:
+    HAS_WIN32 = False
 
 class SettingsDrawer(ctk.CTkToplevel):
     """
@@ -123,34 +129,83 @@ class SettingsDrawer(ctk.CTkToplevel):
         self.bind("<Escape>", lambda e: self.close())
 
     def reposition(self):
-        """Posiciona o popup perfeitamente alinhado ao canto superior direito da janela principal."""
+        """
+        Posiciona o popup perfeitamente alinhado ao canto superior direito da janela principal.
+        Utiliza Win32 GetWindowRect e SetWindowPos para precisão atômica de 60 FPS durante o redimensionamento.
+        """
         try:
             if not self.winfo_exists() or not self.parent.winfo_exists():
                 return
-            self.parent.update_idletasks()
+
             scale = ctk.ScalingTracker.get_window_scaling(self.parent)
 
-            rx = self.parent.winfo_rootx()
-            ry = self.parent.winfo_rooty()
-            rw = self.parent.winfo_width()
-            rh = self.parent.winfo_height()
+            # 1. Obter retângulo físico real do container/janela principal
+            has_win32 = False
+            if HAS_WIN32:
+                try:
+                    rect = win32gui.GetWindowRect(self.parent.winfo_id())
+                    rx, ry = rect[0], rect[1]
+                    rw = max(380, rect[2] - rect[0])
+                    rh = max(300, rect[3] - rect[1])
+                    has_win32 = True
+                except Exception:
+                    pass
 
-            popup_logical_w = 400
+            if not has_win32:
+                rx = self.parent.winfo_rootx()
+                ry = self.parent.winfo_rooty()
+                rw = max(380, self.parent.winfo_width())
+                rh = max(300, self.parent.winfo_height())
+
+            # 2. Dimensões responsivas do menu
+            # Em janelas normais ou maximizadas: 400px lógicos.
+            # Em janelas muito estreitas (ex: tela dividida / laptop pequeno): adapta para caber sem sair da janela.
+            popup_logical_w = min(400, max(280, int((rw - 30) / scale)))
             popup_phys_w = int(popup_logical_w * scale)
-            header_phys_h = int(64 * scale)
+
+            header_phys_h = int(60 * scale)
             footer_phys_h = int(28 * scale)
             margin = int(10 * scale)
 
+            # Posiciona no canto direito, respeitando a margem
             pos_x = int(rx + rw - popup_phys_w - margin)
+            # Garante que pos_x nunca seja menor que rx + margem (evita vazar para a esquerda em janelas ultra estreitas)
+            pos_x = max(int(rx + margin), pos_x)
+
             pos_y = int(ry + header_phys_h + margin)
+
+            # Altura responsiva: cabe perfeitamente na janela sem vazar sobre a barra de status inferior
             avail_phys_h = rh - header_phys_h - footer_phys_h - (margin * 2)
-            popup_logical_h = max(340, int(avail_phys_h / scale))
+            max_logical_h = 700
+            popup_logical_h = min(max_logical_h, max(240, int(avail_phys_h / scale)))
+            popup_phys_h = int(popup_logical_h * scale)
+
+            # Atualiza o rastreador de tamanho lógico do CustomTkinter
+            self._current_width = popup_logical_w
+            self._current_height = popup_logical_h
+
+            if has_win32:
+                try:
+                    top_hwnd = win32gui.GetParent(self.winfo_id())
+                    if top_hwnd and win32gui.IsWindow(top_hwnd):
+                        win32gui.SetWindowPos(
+                            top_hwnd,
+                            win32con.HWND_TOPMOST,
+                            pos_x,
+                            pos_y,
+                            popup_phys_w,
+                            popup_phys_h,
+                            win32con.SWP_NOACTIVATE | win32con.SWP_SHOWWINDOW
+                        )
+                        return
+                except Exception:
+                    pass
 
             self.geometry(f"{popup_logical_w}x{popup_logical_h}+{pos_x}+{pos_y}")
             self.lift()
             self.attributes("-topmost", True)
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning(f"[SettingsDrawer] Erro ao reposicionar popup: {e}")
 
     def close(self):
         if self._is_closing:

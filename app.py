@@ -308,6 +308,8 @@ class RemoteXPTIApp(ctk.CTk):
         self._process_action_queue()
 
         self.bind("<Configure>", self._on_window_configure, add="+")
+        self.bind("<Unmap>", lambda e: self.close_settings_drawer() if e.widget == self else None, add="+")
+        self.bind("<Button-1>", self._on_parent_click_dismiss, add="+")
         self.bind("<Escape>", lambda e: self.close_settings_drawer() if getattr(self, "_is_drawer_open", False) else None)
 
         # Inicia o warmup em estágios progressivos
@@ -676,6 +678,14 @@ class RemoteXPTIApp(ctk.CTk):
             on_uninstall=self.confirm_uninstall_app
         )
 
+    def _on_parent_click_dismiss(self, event):
+        """Fecha o popup flutuante ao clicar em qualquer lugar da janela principal."""
+        if not getattr(self, "settings_popup", None) or not self.settings_popup.winfo_exists():
+            return
+        if getattr(self, "btn_settings", None) and event.widget == self.btn_settings:
+            return
+        self.close_settings_drawer()
+
     def _on_settings_popup_closed(self):
         self._is_drawer_open = False
         self.btn_settings.configure(
@@ -746,6 +756,8 @@ class RemoteXPTIApp(ctk.CTk):
             return
         if getattr(self, "settings_popup", None) and self.settings_popup.winfo_exists():
             self.settings_popup.reposition()
+            # Garante ancoragem atômica após transições do gerenciador de janelas do Windows (ex: snap, maximizar)
+            self.after_idle(lambda: self.settings_popup.reposition() if getattr(self, "settings_popup", None) and self.settings_popup.winfo_exists() else None)
         if getattr(self, "_resize_timer", None):
             self.after_cancel(self._resize_timer)
         self._resize_timer = self.after(20, self._check_column_recalculation)
@@ -781,6 +793,13 @@ class RemoteXPTIApp(ctk.CTk):
 
     def _check_column_recalculation(self):
         w = self.winfo_width()
+        if w <= 200:
+            try:
+                import win32gui
+                rect = win32gui.GetWindowRect(self.winfo_id())
+                w = rect[2] - rect[0]
+            except Exception:
+                pass
         if w <= 200:
             return
 

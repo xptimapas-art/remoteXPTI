@@ -1395,7 +1395,10 @@ class WebMapManager:
                 w = max(400, self.container.winfo_width())
                 h = max(300, self.container.winfo_height())
                 log.info(f"[WebMapManager] Posicionando Edge no HWND_TOP com tamanho {w}x{h}...")
-                win32gui.SetWindowPos(self.edge_hwnd, win32con.HWND_TOP, 0, 0, w, h, win32con.SWP_SHOWWINDOW)
+                win32gui.SetWindowPos(
+                    self.edge_hwnd, win32con.HWND_TOP, 0, 0, w, h,
+                    win32con.SWP_FRAMECHANGED | win32con.SWP_SHOWWINDOW | win32con.SWP_NOACTIVATE
+                )
                 win32gui.ShowWindow(self.edge_hwnd, win32con.SW_SHOW)
                 win32gui.InvalidateRect(self.edge_hwnd, None, True)
                 win32gui.UpdateWindow(self.edge_hwnd)
