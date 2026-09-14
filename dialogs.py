@@ -336,6 +336,8 @@ class ServerDialog(ctk.CTkToplevel):
         pwd = self.server_data.get("password_plain", "")
         if pwd:
             self.entry_password.insert(0, pwd)
+        elif self.is_edit:
+            self.entry_password.configure(placeholder_text="Deixe em branco para manter a senha atual")
 
         if not self.server_data.get("fullscreen", True):
             self.chk_fullscreen.deselect()
@@ -462,10 +464,17 @@ class ServerDialog(ctk.CTkToplevel):
                 pass
 
         if lat_val is None or lon_val is None:
-            from map_manager import resolve_server_coordinates
-            auto_coords = resolve_server_coordinates({"name": name, "group": group})
-            if auto_coords:
-                lat_val, lon_val = auto_coords
+            if self.is_edit and self.server_data and self.server_data.get("latitude") is not None:
+                lat_val = self.server_data.get("latitude")
+                lon_val = self.server_data.get("longitude")
+            else:
+                try:
+                    from map_manager import resolve_server_coordinates
+                    auto_coords = resolve_server_coordinates({"name": name, "group": group})
+                    if auto_coords:
+                        lat_val, lon_val = auto_coords
+                except Exception:
+                    pass
 
         payload = {
             "name": name,

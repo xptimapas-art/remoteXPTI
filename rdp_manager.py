@@ -80,27 +80,23 @@ class RDPManager:
             try:
                 # 1. Limpa credencial antiga para evitar conflitos de cache
                 subprocess.run(
-                    f'cmdkey /delete:{target}',
-                    shell=True,
+                    ["cmdkey", f"/delete:{target}"],
                     capture_output=True,
                     creationflags=creation_flags
                 )
 
                 # 2. Registra como Senha do Domínio (/add:) - Requisito fundamental do NLA/CredSSP do mstsc
-                cmd_add = f'cmdkey /add:{target} /user:"{safe_user}" /pass:"{safe_pass}"'
+                # Usa lista de argumentos sem shell=True para o Windows tratar %, &, ^ e caracteres especiais literalmente
                 res_add = subprocess.run(
-                    cmd_add,
-                    shell=True,
+                    ["cmdkey", f"/add:{target}", f"/user:{safe_user}", f"/pass:{password}"],
                     capture_output=True,
                     text=True,
                     creationflags=creation_flags
                 )
 
                 # 3. Registra também como Genérica (/generic:) para fallbacks de RDP legado
-                cmd_gen = f'cmdkey /generic:{target} /user:"{safe_user}" /pass:"{safe_pass}"'
                 res_gen = subprocess.run(
-                    cmd_gen,
-                    shell=True,
+                    ["cmdkey", f"/generic:{target}", f"/user:{safe_user}", f"/pass:{password}"],
                     capture_output=True,
                     text=True,
                     creationflags=creation_flags

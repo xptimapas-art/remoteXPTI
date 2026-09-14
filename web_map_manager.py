@@ -1371,6 +1371,13 @@ class WebMapManager:
         self.edge_hwnd: Optional[int] = None
         self._is_docked = False
         self._is_visible = False
+        self._drawer_offset = 0
+
+    def set_drawer_offset(self, offset: int = 0):
+        """Define o recuo à direita para quando o menu lateral de configurações estiver aberto."""
+        self._drawer_offset = max(0, offset)
+        if self._is_visible and self.edge_hwnd and self._is_docked:
+            self.resize()
 
     def start(self):
         """Inicia o servidor HTTP embutido, limpa processos orfãos e pré-carrega o mapa em segundo plano."""
@@ -1392,9 +1399,9 @@ class WebMapManager:
                 self._launch_and_dock()
         if self.edge_hwnd and self._is_docked:
             try:
-                w = max(400, self.container.winfo_width())
+                w = max(300, self.container.winfo_width() - getattr(self, "_drawer_offset", 0))
                 h = max(300, self.container.winfo_height())
-                log.info(f"[WebMapManager] Posicionando Edge no HWND_TOP com tamanho {w}x{h}...")
+                log.info(f"[WebMapManager] Posicionando Edge no HWND_TOP com tamanho {w}x{h} (drawer_offset={self._drawer_offset})...")
                 win32gui.SetWindowPos(
                     self.edge_hwnd, win32con.HWND_TOP, 0, 0, w, h,
                     win32con.SWP_FRAMECHANGED | win32con.SWP_SHOWWINDOW | win32con.SWP_NOACTIVATE
@@ -1416,11 +1423,11 @@ class WebMapManager:
                 log.error(f"[WebMapManager] Erro ao ocultar janela do Edge: {e}")
 
     def resize(self):
-        """Ajusta o tamanho do Edge para corresponder perfeitamente ao container."""
+        """Ajusta o tamanho do Edge para corresponder perfeitamente ao container com offset do drawer."""
         if not self.edge_hwnd or not self._is_docked or not self.container:
             return
         try:
-            w = self.container.winfo_width()
+            w = max(300, self.container.winfo_width() - getattr(self, "_drawer_offset", 0))
             h = self.container.winfo_height()
             if w > 50 and h > 50:
                 win32gui.SetWindowPos(self.edge_hwnd, win32con.HWND_TOP, 0, 0, w, h, win32con.SWP_SHOWWINDOW | win32con.SWP_NOACTIVATE)

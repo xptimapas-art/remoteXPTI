@@ -100,7 +100,6 @@ class StorageManager:
             print(f"Erro ao carregar {self.data_file}: {e}")
             self.servers = []
 
-        self._sync_official_groups_and_users()
         self._sync_coordinates()
         return self.servers
 
@@ -119,40 +118,25 @@ class StorageManager:
             if changed:
                 self.save()
         except Exception as e:
-            print(f"[StorageManager] Erro ao sincronizar coordenadas: {e}")
-
-    def _sync_official_groups_and_users(self):
-        """Sincroniza automaticamente as tags oficiais (SEJURI e BEMTEVI) e o usuário padrão bemtevi.net\\xpti."""
-        sejuri_hosts = {
-            "192.168.190.61",  # Feminino Chapeco
-            "192.168.190.63",  # Joinville
-            "192.168.190.64",  # UMAX
-            "192.168.190.65",  # Industrial SCS
-        }
-        changed = False
-        for s in self.servers:
-            host = s.get("host", "").strip()
-            if host in sejuri_hosts:
-                if s.get("group") != "SEJURI":
-                    s["group"] = "SEJURI"
-                    changed = True
-            else:
-                if s.get("group") != "BEMTEVI":
-                    s["group"] = "BEMTEVI"
-                    changed = True
-                if s.get("username") != r"bemtevi.net\xpti":
-                    s["username"] = r"bemtevi.net\xpti"
-                    changed = True
-
-        if changed:
-            self.save()
+            try:
+                from logger import log
+                log.warning(f"[StorageManager] Erro ao sincronizar coordenadas: {e}")
+            except Exception:
+                pass
 
     def save(self):
+        """Salva a lista de servidores em disco de forma atômica e segura."""
         try:
-            with open(self.data_file, "w", encoding="utf-8") as f:
+            tmp_file = self.data_file.with_name(self.data_file.name + ".tmp")
+            with open(tmp_file, "w", encoding="utf-8") as f:
                 json.dump({"servers": self.servers, "version": "1.0"}, f, indent=4, ensure_ascii=False)
+            os.replace(tmp_file, self.data_file)
         except Exception as e:
-            print(f"Erro ao salvar {self.data_file}: {e}")
+            try:
+                from logger import log
+                log.error(f"[StorageManager] Erro ao salvar {self.data_file}: {e}")
+            except Exception:
+                print(f"Erro ao salvar {self.data_file}: {e}")
 
     def _get_initial_templates(self) -> List[Dict[str, Any]]:
         """Gera um servidor de exemplo caso o arquivo seja novo."""
@@ -169,7 +153,9 @@ class StorageManager:
                 "admin_mode": False,
                 "multimon": False,
                 "notes": "Servidor de exemplo criado automaticamente.",
-                "created_at": datetime.now().isoformat()
+                "created_at": datetime.now().isoformat(),
+                "latitude": None,
+                "longitude": None
             }
         ]
 
@@ -177,6 +163,17 @@ class StorageManager:
         server_id = str(uuid.uuid4())
         plain_password = data.get("password", "")
         
+        lat = data.get("latitude")
+        lon = data.get("longitude")
+        if lat is None or lon is None:
+            try:
+                from map_manager import resolve_server_coordinates
+                coords = resolve_server_coordinates({"name": data.get("name", ""), "group": data.get("group", "")})
+                if coords:
+                    lat, lon = coords
+            except Exception:
+                pass
+
         new_server = {
             "id": server_id,
             "name": data.get("name", "Sem Nome").strip(),
@@ -190,7 +187,9 @@ class StorageManager:
             "multimon": bool(data.get("multimon", False)),
             "notes": data.get("notes", "").strip(),
             "created_at": datetime.now().isoformat(),
-            "last_connected": None
+            "last_connected": None,
+            "latitude": lat,
+            "longitude": lon
         }
         self.servers.append(new_server)
         self.save()
@@ -204,15 +203,22 @@ class StorageManager:
                 s["port"] = int(data.get("port", s.get("port", 3389)))
                 s["username"] = data.get("username", s["username"]).strip()
                 
-                # Atualiza senha apenas se fornecida
-                if "password" in data and data["password"] is not None:
-                    s["password"] = self.vault.encrypt(data["password"])
+                # Atualiza senha APENAS se uma nova senha não vazia for fornecida
+                new_pwd = data.get("password")
+                if new_pwd and str(new_pwd).strip():
+                    s["password"] = self.vault.encrypt(str(new_pwd))
                 
-                s["group"] = (data.get("group") or "BEMTEVI").strip()
+                s["group"] = (data.get("group") or s.get("group", "BEMTEVI")).strip()
                 s["fullscreen"] = bool(data.get("fullscreen", s.get("fullscreen", True)))
                 s["admin_mode"] = bool(data.get("admin_mode", s.get("admin_mode", False)))
                 s["multimon"] = bool(data.get("multimon", s.get("multimon", False)))
                 s["notes"] = data.get("notes", s.get("notes", "")).strip()
+
+                # Atualiza coordenadas se fornecidas
+                if "latitude" in data:
+                    s["latitude"] = data["latitude"]
+                if "longitude" in data:
+                    s["longitude"] = data["longitude"]
                 
                 self.save()
                 return s

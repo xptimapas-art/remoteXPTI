@@ -16,13 +16,13 @@ try:
 except ImportError:
     HAS_WIN32 = False
 
-class SettingsDrawer(ctk.CTkToplevel):
+class SettingsDrawer(ctk.CTkFrame):
     """
-    Menu lateral flutuante em formato de Popup Card para Configurações Gerais,
+    Menu lateral deslizante e embutido (Internal Drawer Frame) para Configurações Gerais,
     Área do Desenvolvedor, Troca de Canais e Diagnóstico.
     
-    Aparece diretamente no canto superior direito sobre qualquer visualização
-    (Grade, Mapa, etc.) sem reorganizar, redimensionar ou empurrar nenhum elemento de trás.
+    Renderizado como CTkFrame interno na janela principal, ancorado à direita via .place(),
+    impossibilitando qualquer descolamento ou descompasso de coordenadas no Windows.
     """
 
     def __init__(
@@ -36,7 +36,15 @@ class SettingsDrawer(ctk.CTkToplevel):
         on_uninstall: Optional[Callable[[], None]] = None,
         **kwargs
     ):
-        super().__init__(parent, **kwargs)
+        super().__init__(
+            parent,
+            width=440,
+            corner_radius=12,
+            fg_color=("#f8f9fb", "#171922"),
+            border_width=1,
+            border_color=("#cfd4de", "#2e3142"),
+            **kwargs
+        )
         self.parent = parent
         self.current_version = current_version
         self.on_close_callback = on_close
@@ -47,25 +55,9 @@ class SettingsDrawer(ctk.CTkToplevel):
 
         self._fetched_releases = []
         self._is_fetching_releases = False
-        self._is_closing = False
-
-        # Configurações de popup flutuante sobreposto
-        self.overrideredirect(True)
-        self.attributes("-topmost", True)
-        self.transient(parent)
-
-        # Container principal com cantos arredondados e borda sutil AnyDesk
-        self.main_container = ctk.CTkFrame(
-            self,
-            corner_radius=12,
-            fg_color=("#f8f9fb", "#171922"),
-            border_width=1,
-            border_color=("#cfd4de", "#2e3142")
-        )
-        self.main_container.pack(fill="both", expand=True, padx=2, pady=2)
 
         # 1. Header do Menu
-        header_frame = ctk.CTkFrame(self.main_container, height=50, corner_radius=10, fg_color=("#eef1f6", "#1f212c"))
+        header_frame = ctk.CTkFrame(self, height=50, corner_radius=10, fg_color=("#eef1f6", "#1f212c"))
         header_frame.pack(fill="x", side="top", padx=8, pady=(8, 4))
         header_frame.pack_propagate(False)
 
@@ -102,7 +94,7 @@ class SettingsDrawer(ctk.CTkToplevel):
         btn_close.pack(side="right", padx=8, pady=8)
 
         # 2. Rodapé com botão de fechar rápido
-        footer_frame = ctk.CTkFrame(self.main_container, height=44, corner_radius=10, fg_color=("#eef1f6", "#1f212c"))
+        footer_frame = ctk.CTkFrame(self, height=44, corner_radius=10, fg_color=("#eef1f6", "#1f212c"))
         footer_frame.pack(fill="x", side="bottom", padx=8, pady=(4, 8))
         footer_frame.pack_propagate(False)
 
@@ -118,108 +110,39 @@ class SettingsDrawer(ctk.CTkToplevel):
         )
         btn_footer_close.pack(fill="x", padx=10, pady=7)
 
-        # 3. Área Scrollável de Opções
-        self.scroll = ctk.CTkScrollableFrame(self.main_container, fg_color="transparent")
+        # 3. Área Scrollável de Opções (Largura ampla de 440px)
+        self.scroll = ctk.CTkScrollableFrame(self, fg_color="transparent")
         self.scroll.pack(fill="both", expand=True, padx=6, pady=4)
 
         self._build_sections()
-        self.reposition()
 
-        # Tecla Escape para fechar
-        self.bind("<Escape>", lambda e: self.close())
+    def show(self):
+        """Exibe o menu gaveta perfeitamente ancorado na lateral direita da janela principal."""
+        import tkinter as tk
+        tk.Frame.place(
+            self,
+            relx=1.0,
+            x=-12,
+            y=64,
+            width=440,
+            relheight=1.0,
+            height=-104,
+            anchor="ne"
+        )
+        self.lift()
 
     def reposition(self):
-        """
-        Posiciona o popup perfeitamente alinhado ao canto superior direito da janela principal.
-        Utiliza Win32 GetWindowRect e SetWindowPos para precisão atômica de 60 FPS durante o redimensionamento.
-        """
-        try:
-            if not self.winfo_exists() or not self.parent.winfo_exists():
-                return
-
-            scale = ctk.ScalingTracker.get_window_scaling(self.parent)
-
-            # 1. Obter retângulo físico real do container/janela principal
-            has_win32 = False
-            if HAS_WIN32:
-                try:
-                    rect = win32gui.GetWindowRect(self.parent.winfo_id())
-                    rx, ry = rect[0], rect[1]
-                    rw = max(380, rect[2] - rect[0])
-                    rh = max(300, rect[3] - rect[1])
-                    has_win32 = True
-                except Exception:
-                    pass
-
-            if not has_win32:
-                rx = self.parent.winfo_rootx()
-                ry = self.parent.winfo_rooty()
-                rw = max(380, self.parent.winfo_width())
-                rh = max(300, self.parent.winfo_height())
-
-            # 2. Dimensões responsivas do menu
-            # Em janelas normais ou maximizadas: 400px lógicos.
-            # Em janelas muito estreitas (ex: tela dividida / laptop pequeno): adapta para caber sem sair da janela.
-            popup_logical_w = min(400, max(280, int((rw - 30) / scale)))
-            popup_phys_w = int(popup_logical_w * scale)
-
-            header_phys_h = int(60 * scale)
-            footer_phys_h = int(28 * scale)
-            margin = int(10 * scale)
-
-            # Posiciona no canto direito, respeitando a margem
-            pos_x = int(rx + rw - popup_phys_w - margin)
-            # Garante que pos_x nunca seja menor que rx + margem (evita vazar para a esquerda em janelas ultra estreitas)
-            pos_x = max(int(rx + margin), pos_x)
-
-            pos_y = int(ry + header_phys_h + margin)
-
-            # Altura responsiva: cabe perfeitamente na janela sem vazar sobre a barra de status inferior
-            avail_phys_h = rh - header_phys_h - footer_phys_h - (margin * 2)
-            max_logical_h = 700
-            popup_logical_h = min(max_logical_h, max(240, int(avail_phys_h / scale)))
-            popup_phys_h = int(popup_logical_h * scale)
-
-            # Atualiza o rastreador de tamanho lógico do CustomTkinter
-            self._current_width = popup_logical_w
-            self._current_height = popup_logical_h
-
-            if has_win32:
-                try:
-                    top_hwnd = win32gui.GetParent(self.winfo_id())
-                    if top_hwnd and win32gui.IsWindow(top_hwnd):
-                        win32gui.SetWindowPos(
-                            top_hwnd,
-                            win32con.HWND_TOPMOST,
-                            pos_x,
-                            pos_y,
-                            popup_phys_w,
-                            popup_phys_h,
-                            win32con.SWP_NOACTIVATE | win32con.SWP_SHOWWINDOW
-                        )
-                        return
-                except Exception:
-                    pass
-
-            self.geometry(f"{popup_logical_w}x{popup_logical_h}+{pos_x}+{pos_y}")
-            self.lift()
-            self.attributes("-topmost", True)
-        except Exception as e:
-            log.warning(f"[SettingsDrawer] Erro ao reposicionar popup: {e}")
+        """Compatibilidade no-op: o gerenciador .place() do Tkinter mantém ancoragem nativa automática."""
+        pass
 
     def close(self):
-        if self._is_closing:
-            return
-        self._is_closing = True
+        """Oculta o drawer e notifica o callback do aplicativo."""
+        self.place_forget()
         if self.on_close_callback:
             try:
                 self.on_close_callback()
             except Exception:
                 pass
-        try:
-            self.destroy()
-        except Exception:
-            pass
 
     def reload(self):
         """Recarrega os componentes internos preservando o estado da interface."""
@@ -295,7 +218,7 @@ class SettingsDrawer(ctk.CTkToplevel):
                 font=ctk.CTkFont(size=10),
                 text_color=("gray40", "#8e92a0"),
                 justify="left",
-                wraplength=340
+                wraplength=390
             ).pack(anchor="w", padx=12, pady=(0, 8))
 
             row_pwd = ctk.CTkFrame(card_dev, fg_color="transparent")
