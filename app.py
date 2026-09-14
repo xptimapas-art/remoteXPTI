@@ -156,6 +156,13 @@ class ServerCard(ctk.CTkFrame):
         self.is_online = is_online
         self.reload_thumbnail()
 
+    def update_server_data(self, server: Dict[str, Any]):
+        """Atualiza os dados do servidor e recarrega a renderização se algo mudou."""
+        if self.server != server:
+            self.server = server
+            self.is_fav = bool(server.get("favorite", False))
+            self.reload_thumbnail()
+
     def reload_thumbnail(self):
         """Atualiza a imagem do card na tela mantendo o estado de hover se ativo."""
         self._load_images()
@@ -312,6 +319,7 @@ class RemoteXPTIApp(ctk.CTk):
         self._process_action_queue()
 
         self.bind("<Configure>", self._on_window_configure, add="+")
+        self.bind("<FocusIn>", self._on_window_focus, add="+")
         self.bind("<Unmap>", lambda e: self.close_settings_drawer() if e.widget == self else None, add="+")
         self.bind("<Button-1>", self._on_parent_click_dismiss, add="+")
         self.bind("<Escape>", lambda e: self.close_settings_drawer() if getattr(self, "_is_drawer_open", False) else None)
@@ -368,6 +376,7 @@ class RemoteXPTIApp(ctk.CTk):
         # Inicia a checagem inicial de status
         self.start_status_checker(is_manual=False)
         self._schedule_periodic_ping()
+        self._schedule_cloud_sync()
         
         # Sistema de atualização silenciosa em background (estilo Antigravity)
         self.updater = SilentAutoUpdater(
@@ -630,14 +639,26 @@ class RemoteXPTIApp(ctk.CTk):
     def _sync_servers_from_cloud(self):
         try:
             remote = CloudSyncManager.fetch_servers()
-            if remote:
-                log.info(f"[RemoteXPTI] Recebidos {len(remote)} servidores do Supabase. Mesclando com storage corporativo...")
+            if remote is not None:
                 changed, added, updated = self.storage.merge_cloud_servers(remote)
                 if changed:
-                    self._action_queue.put(self.refresh_servers)
+                    PreviewManager.invalidate_cache()
+                    self._action_queue.put(self._on_cloud_sync_applied)
                     log.info(f"[RemoteXPTI] Nuvem sincronizada com sucesso: {added} adicionados, {updated} atualizados.")
         except Exception as e:
             log.warning(f"[RemoteXPTI] Erro na sincronização com Supabase: {e}")
+
+    def _on_cloud_sync_applied(self):
+        """Aplica alterações da nuvem na interface instantaneamente e re-checa pings."""
+        for card in list(self.card_widgets.values()):
+            try:
+                card.destroy()
+            except Exception:
+                pass
+        self.card_widgets.clear()
+        self.refresh_servers()
+        self.start_status_checker(is_manual=False)
+        self.set_message("☁️ Servidores sincronizados com a nuvem em tempo real.", duration_sec=4)
 
     def _ensure_settings_drawer(self):
         """Garante que a instância do SettingsDrawer embutido esteja criada."""
@@ -843,6 +864,16 @@ class RemoteXPTIApp(ctk.CTk):
     def _on_close(self):
         """Encerra a aplicação de forma limpa, finalizando o Edge e o pool de threads em segundo plano."""
         log.info("[RemoteXPTI] Encerrando aplicação (WM_DELETE_WINDOW)...")
+        if getattr(self, "_auto_ping_timer", None):
+            try:
+                self.after_cancel(self._auto_ping_timer)
+            except Exception:
+                pass
+        if getattr(self, "_cloud_sync_timer", None):
+            try:
+                self.after_cancel(self._cloud_sync_timer)
+            except Exception:
+                pass
         if hasattr(self, "splash_manager") and self.splash_manager:
             try:
                 self.splash_manager.close_now()
@@ -869,6 +900,16 @@ class RemoteXPTIApp(ctk.CTk):
                 self._status_executor.shutdown(wait=False)
         except Exception as e:
             log.warning(f"[RemoteXPTI] Erro ao desligar executor de status: {e}")
+
+        # Se houver atualização já baixada pronta para aplicar, aplica no encerramento
+        if hasattr(self, "updater") and self.updater and getattr(self.updater, "update_ready", False):
+            log.info("[RemoteXPTI] Atualização pronta detectada no fechamento. Aplicando agora...")
+            try:
+                self.updater.apply_update_and_restart()
+                return
+            except Exception as e:
+                log.warning(f"[RemoteXPTI] Falha ao aplicar atualização no fechamento: {e}")
+
         self.destroy()
         log.info("[RemoteXPTI] Aplicação finalizada.")
 
@@ -1016,6 +1057,7 @@ class RemoteXPTIApp(ctk.CTk):
 
             if s_id in self.card_widgets:
                 card = self.card_widgets[s_id]
+                card.update_server_data(server)
             else:
                 cached_status = self.server_status.get(s_id)
                 card = ServerCard(
@@ -1217,6 +1259,20 @@ class RemoteXPTIApp(ctk.CTk):
         if CloudSyncManager.is_configured():
             threading.Thread(target=self._sync_servers_from_cloud, daemon=True).start()
         self._auto_ping_timer = self.after(30000, self._schedule_periodic_ping)
+
+    def _schedule_cloud_sync(self):
+        """Sincroniza servidores corporativos da nuvem em segundo plano a cada 10 segundos."""
+        if CloudSyncManager.is_configured():
+            threading.Thread(target=self._sync_servers_from_cloud, daemon=True).start()
+        self._cloud_sync_timer = self.after(10000, self._schedule_cloud_sync)
+
+    def _on_window_focus(self, event=None):
+        """Dispara verificação imediata na nuvem quando a janela ganha foco (ex: alt-tab)."""
+        now = time.time()
+        if now - getattr(self, "_last_focus_sync", 0) > 6:
+            self._last_focus_sync = now
+            if CloudSyncManager.is_configured():
+                threading.Thread(target=self._sync_servers_from_cloud, daemon=True).start()
 
     def open_add_dialog(self):
         is_admin = ConfigManager().is_dev_authenticated()

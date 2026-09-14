@@ -318,7 +318,7 @@ class PreviewManager:
         scope: str = "corporate"
     ) -> ctk.CTkImage:
         """Retorna o CTkImage completo do card no estilo AnyDesk com cache inteligente."""
-        cache_key = f"{server_id}_{width}_{height}_{is_online}_{is_fav}_{is_hover}_{scope}"
+        cache_key = f"{server_id}_{name}_{host}_{width}_{height}_{is_online}_{is_fav}_{is_hover}_{scope}"
         if cache_key in cls._cache:
             return cls._cache[cache_key]
 

@@ -294,18 +294,33 @@ class StorageManager:
         """
         Mescla a lista de servidores corporativos obtidos da nuvem (Supabase).
         - Atualiza ou insere servidores corporativos.
+        - Remove servidores corporativos locais se foram excluídos na nuvem.
         - Preserva 100% dos servidores particulares com scope == 'local'.
         - Retorna uma tupla (houve_alteracao, qtd_inseridos, qtd_atualizados).
         """
-        if not cloud_servers:
+        if not cloud_servers and not any(s.get("scope", "corporate") == "corporate" for s in self.servers):
             return False, 0, 0
 
         changed = False
         added_count = 0
         updated_count = 0
 
+        cloud_ids = {str(cs.get("id")) for cs in cloud_servers if cs.get("id")}
+
+        # 1. Remove servidores corporativos locais que foram excluídos da nuvem
+        surviving_servers = []
+        for s in self.servers:
+            sid = str(s.get("id"))
+            if s.get("scope", "corporate") == "corporate" and sid not in cloud_ids:
+                changed = True
+                log.info(f"[StorageManager] Servidor corporativo '{s.get('name')}' (ID={sid}) removido da nuvem. Removendo localmente.")
+            else:
+                surviving_servers.append(s)
+        self.servers = surviving_servers
+
         local_map = {str(s["id"]): s for s in self.servers}
 
+        # 2. Atualiza existentes ou insere novos vindos da nuvem
         for cs in cloud_servers:
             cid = str(cs.get("id"))
             if not cid:
@@ -313,20 +328,34 @@ class StorageManager:
 
             if cid in local_map:
                 loc = local_map[cid]
-                # Se for corporativo, atualiza dados vindos da nuvem
                 if loc.get("scope", "corporate") == "corporate":
+                    server_changed = False
                     for fld in ("name", "host", "port", "username", "group", "latitude", "longitude",
                                 "admin_mode", "multimon", "fullscreen", "notes"):
-                        if cs.get(fld) is not None and cs.get(fld) != loc.get(fld):
+                        val_cs = cs.get(fld)
+                        val_loc = loc.get(fld)
+                        if fld == "port" and val_cs is not None and val_loc is not None:
+                            val_cs = int(val_cs)
+                            val_loc = int(val_loc)
+                        elif isinstance(val_cs, str):
+                            val_cs = val_cs.strip()
+                            val_loc = str(val_loc).strip() if val_loc is not None else ""
+                        elif isinstance(val_cs, bool):
+                            val_loc = bool(val_loc)
+
+                        if val_cs is not None and val_cs != val_loc:
                             loc[fld] = cs[fld]
-                            changed = True
-                    # Atualiza senha da nuvem se fornecida
+                            server_changed = True
+
                     if cs.get("password") and cs.get("password") != loc.get("password"):
                         loc["password"] = cs["password"]
+                        server_changed = True
+
+                    if server_changed:
                         changed = True
+                        updated_count += 1
                     loc["scope"] = "corporate"
                     loc["is_shared"] = True
-                    updated_count += 1
             else:
                 # Novo servidor corporativo recebido da nuvem
                 new_entry = {
