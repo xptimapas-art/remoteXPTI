@@ -395,6 +395,7 @@ class SilentAutoUpdater:
             log.warning("[SilentUpdater] apply_update_and_restart chamado mas downloaded_file não existe.")
             return
 
+        self.update_ready = False
         log.info(f"[SilentUpdater] Aplicando atualização para v{self.new_version} e reiniciando a aplicação...")
 
         is_frozen = getattr(sys, "frozen", False)
@@ -500,6 +501,7 @@ Write-Log "Iniciando processo de atualização para v{self.new_version}..."
 $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = 250
 $script:ticks = 0
+$script:isApplying = $false
 
 $timer.Add_Tick({{
     $script:ticks++
@@ -516,7 +518,8 @@ $timer.Add_Tick({{
             Get-CimInstance Win32_Process -Filter "name = 'msedge.exe'" | Where-Object {{ $_.CommandLine -and $_.CommandLine.ToLower().Contains($cache) }} | ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force }}
         }} catch {{}}
     }}
-    if ($script:ticks -ge 4) {{
+    if ($script:ticks -ge 4 -and -not $script:isApplying) {{
+        $script:isApplying = $true
         $copied = $false
         $destPath = '{str(current_exe)}'
         $sourcePath = '{str(self.downloaded_file)}'
@@ -552,15 +555,14 @@ $timer.Add_Tick({{
             }}
         }}
         if ($copied) {{
+            $timer.Stop()
             Write-Log "Iniciando nova versão v{self.new_version}..."
-            $statusLabel.Text = "Versão v{self.new_version} instalada com sucesso!"
-            $stepLabel.Text = "Iniciando RemoteXPTI..."
-            $stepLabel.ForeColor = [System.Drawing.Color]::FromArgb(0, 204, 102)
+            $statusLabel.Text = "Versão v{self.new_version} instalada com sucesso! Iniciando..."
+            $statusLabel.ForeColor = [System.Drawing.Color]::FromArgb(0, 204, 102)
             $pbar.Style = [System.Windows.Forms.ProgressBarStyle]::Continuous
             $pbar.Value = 100
             $form.Refresh()
             [System.Windows.Forms.Application]::DoEvents()
-            $timer.Stop()
             
             $env:PYINSTALLER_RESET_ENVIRONMENT = "1"
             $env:_MEIPASS2 = $null
@@ -584,6 +586,8 @@ $timer.Add_Tick({{
             [System.Windows.Forms.Application]::Exit()
             Remove-Item -Path '{str(ps1_path)}' -Force -ErrorAction SilentlyContinue
             Stop-Process -Id $PID -Force
+        }} else {{
+            $script:isApplying = $false
         }}
     }}
 }})
