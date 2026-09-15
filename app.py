@@ -906,16 +906,6 @@ class RemoteXPTIApp(ctk.CTk):
                 self._status_executor.shutdown(wait=False)
         except Exception as e:
             log.warning(f"[RemoteXPTI] Erro ao desligar executor de status: {e}")
-
-        # Se houver atualização já baixada pronta para aplicar, aplica no encerramento
-        if hasattr(self, "updater") and self.updater and getattr(self.updater, "update_ready", False):
-            log.info("[RemoteXPTI] Atualização pronta detectada no fechamento. Aplicando agora...")
-            try:
-                self.updater.apply_update_and_restart()
-                return
-            except Exception as e:
-                log.warning(f"[RemoteXPTI] Falha ao aplicar atualização no fechamento: {e}")
-
         self.destroy()
         log.info("[RemoteXPTI] Aplicação finalizada.")
 
