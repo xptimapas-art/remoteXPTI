@@ -1,6 +1,6 @@
 # 🚀 RemoteXPTI - Roteiro de Melhorias e Novas Funcionalidades
 
-> **Status Atual**: Versão **v1.5.0** (Canal Público Oficial) estável e consolidada com sincronização em nuvem Supabase, separação de escopos (Empresa vs. Local), atualização dinâmica em tempo real e executáveis assinados digitalmente.
+> **Status Atual**: Versão **v1.6.0** (Canal Público Oficial) estável e consolidada com novos ícones em alta definição, otimização de CPU, atualização automática sob demanda, sincronização em nuvem Supabase e executáveis assinados digitalmente.
 
 Este documento consolida as ideias, arquiteturas e especificações técnicas de melhorias para as próximas versões do **RemoteXPTI**, organizadas por impacto, viabilidade e prioridade.
 
