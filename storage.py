@@ -12,6 +12,8 @@ try:
 except ImportError:
     HAS_CRYPTO = False
 
+from logger import log
+
 def get_app_dir() -> Path:
     if getattr(sys, "frozen", False):
         return Path(sys.executable).parent

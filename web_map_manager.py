@@ -1105,8 +1105,14 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             } catch (err) {}
         }
 
-        // Ticker local a cada 1s: avança contadores na tela suavemente ao vivo
+        let isTabActive = true;
+        document.addEventListener('visibilitychange', () => {
+            isTabActive = !document.hidden;
+        });
+
+        // Ticker local a cada 1s: avança contadores na tela suavemente ao vivo apenas se ativo
         setInterval(() => {
+            if (!isTabActive) return;
             if (activeIncidents.length > 0) {
                 activeIncidents.forEach(inc => {
                     inc.duration_seconds = (inc.duration_seconds || 0) + 1;
@@ -1115,12 +1121,15 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             }
         }, 1000);
 
-        // Polling de incidentes em segundo plano a cada 2.0s
-        setInterval(loadIncidents, 2000);
+        // Polling de incidentes em segundo plano (a cada 6s)
+        setInterval(() => {
+            if (isTabActive) loadIncidents();
+        }, 6000);
         loadIncidents();
 
-        // Polling de Status Ping em segundo plano (a cada 2.5s)
+        // Polling de Status Ping em segundo plano (a cada 6s)
         setInterval(async () => {
+            if (!isTabActive) return;
             try {
                 const res = await fetch('/api/status');
                 const statusMap = await res.json();
@@ -1138,10 +1147,11 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     showCard(currentSelectedServer);
                 }
             } catch (err) {}
-        }, 2500);
+        }, 6000);
 
-        // Sincronização em tempo real da lista de servidores / busca do topo (a cada 700ms)
+        // Sincronização da lista de servidores (a cada 4s)
         setInterval(async () => {
+            if (!isTabActive) return;
             try {
                 const res = await fetch('/api/servers');
                 const text = await res.text();
@@ -1156,7 +1166,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     }
                 }
             } catch (err) {}
-        }, 700);
+        }, 4000);
 
         loadServers();
     </script>
@@ -1380,23 +1390,22 @@ class WebMapManager:
             self.resize()
 
     def start(self):
-        """Inicia o servidor HTTP embutido, limpa processos orfãos e pré-carrega o mapa em segundo plano."""
-        log.info("[WebMapManager] Inicializando subsistema do mapa Leaflet...")
+        """Inicia o servidor HTTP embutido e limpa processos orfãos (Edge é carregado sob demanda)."""
+        log.info("[WebMapManager] Inicializando servidor HTTP do mapa Leaflet...")
         cache_dir = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "RemoteXPTI" / "map_cache"
         cleanup_orphaned_edge_processes(cache_dir)
         self.server.start()
-        log.info(f"[WebMapServer] Servidor Leaflet pronto em http://127.0.0.1:{self.server.port}")
-        # Pré-carrega o Edge totalmente fora da tela para inicialização instantânea (0ms) sem flashes visíveis
-        threading.Thread(target=self._launch_and_dock, daemon=True).start()
+        log.info(f"[WebMapServer] Servidor Leaflet pronto em http://127.0.0.1:{self.server.port} (Edge em standby)")
 
     def show(self):
-        """Garante que o Edge esteja iniciado, docado no container e visível."""
+        """Garante que o Edge esteja iniciado, docado no container e visível sob demanda."""
         self._is_visible = True
         log.info(f"[WebMapManager] show() acionado (is_docked={self._is_docked}, edge_hwnd={self.edge_hwnd})")
         if not self._is_docked:
             if not self.edge_proc or self.edge_proc.poll() is not None:
-                log.info("[WebMapManager] Edge não estava em execução. Disparando _launch_and_dock()...")
-                self._launch_and_dock()
+                log.info("[WebMapManager] Inicializando Edge sob demanda no primeiro acesso ao Mapa...")
+                threading.Thread(target=self._launch_and_dock, daemon=True).start()
+                return
         if self.edge_hwnd and self._is_docked:
             try:
                 w = max(300, self.container.winfo_width() - getattr(self, "_drawer_offset", 0))
@@ -1474,8 +1483,7 @@ class WebMapManager:
             "--disable-component-update",
             "--disable-sync",
             "--disable-features=Translate",
-            "--disable-backgrounding-occluded-windows",
-            "--disable-renderer-backgrounding",
+            "--enable-features=IntensiveWakeUpThrottling,QuickBackForwardCache",
             "--disable-background-networking",
             "--window-position=-10000,-10000",
             f"--window-size={w},{h}"

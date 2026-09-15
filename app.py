@@ -384,6 +384,7 @@ class RemoteXPTIApp(ctk.CTk):
             on_status_callback=self._on_update_status
         )
         self.after(3500, self.updater.start_background_check)
+        self._schedule_periodic_update_check()
 
         # Sincronização em nuvem automática com Supabase se configurado
         if CloudSyncManager.is_configured():
@@ -489,20 +490,20 @@ class RemoteXPTIApp(ctk.CTk):
         if icon_grid_path.exists():
             try:
                 pil_g = Image.open(icon_grid_path)
-                self.img_seg_grid = ctk.CTkImage(light_image=pil_g, dark_image=pil_g, size=(16, 16))
+                self.img_seg_grid = ctk.CTkImage(light_image=pil_g, dark_image=pil_g, size=(18, 18))
             except Exception:
                 pass
         if icon_map_path.exists():
             try:
                 pil_m = Image.open(icon_map_path)
-                self.img_seg_map = ctk.CTkImage(light_image=pil_m, dark_image=pil_m, size=(16, 16))
+                self.img_seg_map = ctk.CTkImage(light_image=pil_m, dark_image=pil_m, size=(18, 18))
             except Exception:
                 pass
 
         self.seg_view = ctk.CTkSegmentedButton(
             actions_box,
             values=["Grade", "Mapa"],
-            width=165,
+            width=175,
             height=34,
             selected_color="#0066cc",
             selected_hover_color="#0052a3",
@@ -872,6 +873,11 @@ class RemoteXPTIApp(ctk.CTk):
         if getattr(self, "_cloud_sync_timer", None):
             try:
                 self.after_cancel(self._cloud_sync_timer)
+            except Exception:
+                pass
+        if getattr(self, "_auto_update_timer", None):
+            try:
+                self.after_cancel(self._auto_update_timer)
             except Exception:
                 pass
         if hasattr(self, "splash_manager") and self.splash_manager:
@@ -1251,20 +1257,26 @@ class RemoteXPTIApp(ctk.CTk):
             threading.Thread(target=self._sync_servers_from_cloud, daemon=True).start()
 
     def _schedule_periodic_ping(self):
-        """Verifica os servidores e checa atualizações e sincronização da nuvem em segundo plano."""
+        """Verifica a conectividade dos servidores periodicamente em segundo plano."""
         self.start_status_checker(is_manual=False)
+        self._auto_ping_timer = self.after(35000, self._schedule_periodic_ping)
+
+    def _schedule_periodic_update_check(self):
+        """Checa atualizações em segundo plano a cada 45 minutos."""
         if hasattr(self, "updater") and self.updater:
             self.updater.start_background_check()
-        # Sincroniza servidores corporativos da nuvem automaticamente
-        if CloudSyncManager.is_configured():
-            threading.Thread(target=self._sync_servers_from_cloud, daemon=True).start()
-        self._auto_ping_timer = self.after(30000, self._schedule_periodic_ping)
+        self._auto_update_timer = self.after(2700000, self._schedule_periodic_update_check)
 
     def _schedule_cloud_sync(self):
-        """Sincroniza servidores corporativos da nuvem em segundo plano a cada 10 segundos."""
+        """Sincroniza servidores corporativos da nuvem em segundo plano com intervalo adaptativo."""
         if CloudSyncManager.is_configured():
             threading.Thread(target=self._sync_servers_from_cloud, daemon=True).start()
-        self._cloud_sync_timer = self.after(10000, self._schedule_cloud_sync)
+        try:
+            is_minimized = self.state() == "iconic"
+        except Exception:
+            is_minimized = False
+        delay = 45000 if is_minimized else 15000
+        self._cloud_sync_timer = self.after(delay, self._schedule_cloud_sync)
 
     def _on_window_focus(self, event=None):
         """Dispara verificação imediata na nuvem quando a janela ganha foco (ex: alt-tab)."""
