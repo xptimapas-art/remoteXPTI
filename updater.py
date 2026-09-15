@@ -52,10 +52,12 @@ class SilentAutoUpdater:
     def __init__(
         self,
         on_ready_callback: Optional[Callable[[str], None]] = None,
-        on_status_callback: Optional[Callable[[str], None]] = None
+        on_status_callback: Optional[Callable[[str], None]] = None,
+        cleanup_callback: Optional[Callable[[], None]] = None
     ):
         self.on_ready_callback = on_ready_callback
         self.on_status_callback = on_status_callback
+        self.cleanup_callback = cleanup_callback
         self.is_checking = False
         self.is_downloading = False
         self.update_ready = False
@@ -389,14 +391,41 @@ class SilentAutoUpdater:
         finally:
             self.is_downloading = False
 
-    def apply_update_and_restart(self):
-        """Substitui o executável atual e reinicia o aplicativo imediatamente."""
+    def apply_update_and_restart(self, cleanup_func: Optional[Callable[[], None]] = None):
+        """Substitui o executável atual e reinicia o aplicativo imediatamente de forma limpa."""
         if not self.downloaded_file or not self.downloaded_file.exists():
             log.warning("[SilentUpdater] apply_update_and_restart chamado mas downloaded_file não existe.")
             return
 
         self.update_ready = False
         log.info(f"[SilentUpdater] Aplicando atualização para v{self.new_version} e reiniciando a aplicação...")
+
+        # 1. Executa encerramento gracioso dos subsistemas (Edge, servidores, timers, splash)
+        func_to_clean = cleanup_func or self.cleanup_callback
+        if func_to_clean:
+            try:
+                log.info("[SilentUpdater] Executando rotina de limpeza pré-atualização...")
+                func_to_clean()
+            except Exception as e:
+                log.warning(f"[SilentUpdater] Erro na rotina de limpeza pré-atualização: {e}")
+
+        # Varredura complementar de processos Edge vinculados ao map_cache antes de fechar
+        try:
+            cache_dir = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "RemoteXPTI" / "map_cache"
+            cache_str = str(cache_dir).lower()
+            import win32com.client
+            wmi = win32com.client.GetObject("winmgmts:")
+            procs = wmi.ExecQuery("SELECT ProcessId, CommandLine FROM Win32_Process WHERE Name = 'msedge.exe'")
+            for p in procs:
+                cmd = (p.CommandLine or "").lower()
+                if cache_str in cmd:
+                    try:
+                        creation_flags = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
+                        subprocess.run(["taskkill", "/F", "/T", "/PID", str(p.ProcessId)], capture_output=True, creationflags=creation_flags)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
 
         is_frozen = getattr(sys, "frozen", False)
         current_exe = Path(sys.executable).resolve()
@@ -515,7 +544,12 @@ $timer.Add_Tick({{
         }} catch {{}}
         try {{
             $cache = (Join-Path $env:LOCALAPPDATA "RemoteXPTI\\map_cache").ToLower()
-            Get-CimInstance Win32_Process -Filter "name = 'msedge.exe'" | Where-Object {{ $_.CommandLine -and $_.CommandLine.ToLower().Contains($cache) }} | ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force }}
+            Get-CimInstance Win32_Process -Filter "name = 'msedge.exe'" | Where-Object {{
+                ($_.CommandLine -and $_.CommandLine.ToLower().Contains($cache)) -or
+                ($_.ParentProcessId -eq {current_pid})
+            }} | ForEach-Object {{
+                try {{ cmd.exe /c "taskkill /F /T /PID $($_.ProcessId) >nul 2>&1" }} catch {{ Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }}
+            }}
         }} catch {{}}
     }}
     if ($script:ticks -ge 4 -and -not $script:isApplying) {{
@@ -567,7 +601,12 @@ $timer.Add_Tick({{
             $env:PYINSTALLER_RESET_ENVIRONMENT = "1"
             $env:_MEIPASS2 = $null
             $env:_MEIPASS = $null
-            Start-Process -FilePath '{str(current_exe)}' -WorkingDirectory '{str(app_dir)}'
+            
+            $psi = New-Object System.Diagnostics.ProcessStartInfo
+            $psi.FileName = '{str(current_exe)}'
+            $psi.WorkingDirectory = '{str(app_dir)}'
+            $psi.UseShellExecute = $true
+            [System.Diagnostics.Process]::Start($psi) | Out-Null
             
             Start-Sleep -Milliseconds 400
             $form.Hide()

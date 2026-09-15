@@ -1323,6 +1323,7 @@ class WebMapServer:
 def cleanup_orphaned_edge_processes(cache_dir: Path):
     """Encerra de forma nativa e 100% silenciosa processos msedge.exe antigos atrelados ao cache do mapa."""
     cache_str = str(cache_dir).lower()
+    creation_flags = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
     try:
         import win32com.client
         wmi = win32com.client.GetObject("winmgmts:")
@@ -1331,9 +1332,12 @@ def cleanup_orphaned_edge_processes(cache_dir: Path):
             cmd = (p.CommandLine or "").lower()
             if cache_str in cmd:
                 try:
-                    p.Terminate()
+                    subprocess.run(["taskkill", "/F", "/T", "/PID", str(p.ProcessId)], capture_output=True, creationflags=creation_flags)
                 except Exception:
-                    pass
+                    try:
+                        p.Terminate()
+                    except Exception:
+                        pass
     except Exception:
         pass
 

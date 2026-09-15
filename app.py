@@ -381,7 +381,8 @@ class RemoteXPTIApp(ctk.CTk):
         # Sistema de atualização silenciosa em background (estilo Antigravity)
         self.updater = SilentAutoUpdater(
             on_ready_callback=self._on_update_ready,
-            on_status_callback=self._on_update_status
+            on_status_callback=self._on_update_status,
+            cleanup_callback=self._prepare_for_restart
         )
         self.after(3500, self.updater.start_background_check)
         self._schedule_periodic_update_check()
@@ -784,6 +785,40 @@ class RemoteXPTIApp(ctk.CTk):
             self.set_message(message, duration_sec=7)
         self.after(0, show)
 
+    def _prepare_for_restart(self):
+        """Encerra de forma limpa e graciosa todos os subsistemas antes do restart pelo updater."""
+        log.info("[RemoteXPTI] _prepare_for_restart: Encerrando conexões, timers e subsistema Edge...")
+        if getattr(self, "_auto_ping_timer", None):
+            try:
+                self.after_cancel(self._auto_ping_timer)
+            except Exception:
+                pass
+        if getattr(self, "_cloud_sync_timer", None):
+            try:
+                self.after_cancel(self._cloud_sync_timer)
+            except Exception:
+                pass
+        if getattr(self, "_auto_update_timer", None):
+            try:
+                self.after_cancel(self._auto_update_timer)
+            except Exception:
+                pass
+        if hasattr(self, "splash_manager") and self.splash_manager:
+            try:
+                self.splash_manager.close_now()
+            except Exception:
+                pass
+        if hasattr(self, "web_map") and self.web_map:
+            try:
+                self.web_map.shutdown()
+            except Exception:
+                pass
+        if hasattr(self, "_status_executor"):
+            try:
+                self._status_executor.shutdown(wait=False)
+            except Exception:
+                pass
+
     def _on_update_ready(self, new_version: str):
         """Chamado quando o update terminou de baixar: muda discretamente o botão de versão para Restart."""
         def show():
@@ -792,7 +827,7 @@ class RemoteXPTIApp(ctk.CTk):
                 fg_color="#0066cc",
                 hover_color="#0052a3",
                 text_color="#ffffff",
-                command=self.updater.apply_update_and_restart
+                command=lambda: self.updater.apply_update_and_restart(cleanup_func=self._prepare_for_restart)
             )
             self.set_message(f"🚀 Versão {new_version} pronta! Clique em 'Restart para Atualizar' abaixo.", duration_sec=10)
         self.after(0, show)
