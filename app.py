@@ -26,6 +26,8 @@ from logger import log
 from config_manager import ConfigManager
 from cloud_sync import CloudSyncManager
 from splash_screen import SplashScreen, SplashProcessManager
+from ajin_view import AjinView
+from ajin_sync_bridge import AjinSyncBridge
 
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
@@ -391,6 +393,13 @@ class RemoteXPTIApp(ctk.CTk):
         if CloudSyncManager.is_configured():
             threading.Thread(target=self._sync_servers_from_cloud, daemon=True).start()
 
+        # Inicia monitoramento de telemetria da Ajin de forma independente
+        try:
+            self.ajin_bridge = AjinSyncBridge()
+            self.ajin_bridge.start_background_loop()
+        except Exception as e:
+            log.warning(f"[RemoteXPTI] Falha ao iniciar AjinSyncBridge: {e}")
+
         self._warmup_done = True
         self.after(50, self._check_splash_ready)
 
@@ -503,8 +512,8 @@ class RemoteXPTIApp(ctk.CTk):
 
         self.seg_view = ctk.CTkSegmentedButton(
             actions_box,
-            values=["Grade", "Mapa"],
-            width=175,
+            values=["Grade", "Mapa", "ONUs Ajin"],
+            width=275,
             height=34,
             selected_color="#0066cc",
             selected_hover_color="#0052a3",
@@ -584,8 +593,15 @@ class RemoteXPTIApp(ctk.CTk):
         self.map_container.grid(row=0, column=0, sticky="nsew")
         self.map_container.bind("<Configure>", self._on_map_container_configure, add="+")
 
+        # 3. Modo ONUs Ajin (Supervisão Óptica em Tempo Real)
+        self.ajin_container = ctk.CTkFrame(self.content_area, fg_color="transparent")
+        self.ajin_container.grid(row=0, column=0, sticky="nsew")
+        self.ajin_view = AjinView(self.ajin_container, on_view_map_point=self._focus_map_on_onu)
+        self.ajin_view.pack(fill="both", expand=True)
+
         # Inicia exibindo a grade por padrão
         self.map_container.lower()
+        self.ajin_container.lower()
         if hasattr(self.scroll_frame, "_parent_frame"):
             self.scroll_frame._parent_frame.tkraise()
         else:
@@ -963,6 +979,11 @@ class RemoteXPTIApp(ctk.CTk):
         if self.view_mode == "mapa" and self.web_map:
             self.web_map.resize()
 
+    def _focus_map_on_onu(self, onu: Dict[str, Any]):
+        """Centraliza o mapa de satélite na região de Jurerê ao solicitar visualização da ONU."""
+        self.seg_view.set("Mapa")
+        self._on_view_mode_changed("Mapa")
+
     def _on_view_mode_changed(self, mode: str):
         log.info(f"[RemoteXPTI] Alternando modo de visualização para: {mode}")
         if "Mapa" in mode:
@@ -971,6 +992,8 @@ class RemoteXPTIApp(ctk.CTk):
                 self.scroll_frame._parent_frame.lower()
             else:
                 self.scroll_frame.lower()
+            if hasattr(self, "ajin_container"):
+                self.ajin_container.lower()
             self.map_container.tkraise()
             self.filter_servers()
             if self.web_map:
@@ -981,12 +1004,30 @@ class RemoteXPTIApp(ctk.CTk):
                 self.web_map.show()
             if getattr(self, "settings_drawer", None) and self.settings_drawer.winfo_exists() and self._is_drawer_open:
                 self.settings_drawer.lift()
+        elif "Ajin" in mode or "ONU" in mode:
+            self.view_mode = "ajin"
+            if self.web_map:
+                self.web_map.set_drawer_offset(0)
+                self.web_map.hide()
+            self.map_container.lower()
+            if hasattr(self.scroll_frame, "_parent_frame"):
+                self.scroll_frame._parent_frame.lower()
+            else:
+                self.scroll_frame.lower()
+            if hasattr(self, "ajin_container"):
+                self.ajin_container.tkraise()
+                if hasattr(self, "ajin_view"):
+                    threading.Thread(target=self.ajin_view.refresh_data, daemon=True).start()
+            if getattr(self, "settings_drawer", None) and self.settings_drawer.winfo_exists() and self._is_drawer_open:
+                self.settings_drawer.lift()
         else:
             self.view_mode = "grade"
             if self.web_map:
                 self.web_map.set_drawer_offset(0)
                 self.web_map.hide()
             self.map_container.lower()
+            if hasattr(self, "ajin_container"):
+                self.ajin_container.lower()
             if hasattr(self.scroll_frame, "_parent_frame"):
                 self.scroll_frame._parent_frame.tkraise()
             else:
@@ -1278,6 +1319,8 @@ class RemoteXPTIApp(ctk.CTk):
         self.start_status_checker(is_manual=True)
         if hasattr(self, "updater") and self.updater:
             self.updater.start_background_check()
+        if hasattr(self, "ajin_view"):
+            threading.Thread(target=self.ajin_view.refresh_data, daemon=True).start()
         if CloudSyncManager.is_configured():
             threading.Thread(target=self._sync_servers_from_cloud, daemon=True).start()
 

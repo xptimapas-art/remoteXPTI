@@ -25,3 +25,7 @@ thumbnails/*.png
 
 # Cache de mapas offline
 cache/
+
+# Logs e dumps locais
+*.log*
+logs de terceiros/
