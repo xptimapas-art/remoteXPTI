@@ -26,7 +26,7 @@ from logger import log
 from config_manager import ConfigManager
 from cloud_sync import CloudSyncManager
 from splash_screen import SplashScreen, SplashProcessManager
-from ajin_view import AjinView
+from web_ajin_manager import WebAjinManager
 from ajin_sync_bridge import AjinSyncBridge
 
 ctk.set_appearance_mode("Dark")
@@ -303,6 +303,7 @@ class RemoteXPTIApp(ctk.CTk):
         self.view_mode = "grade"
         self.filtered_servers: List[Dict[str, Any]] = list(self.storage.servers)
         self.web_map: Optional[WebMapManager] = None
+        self.web_ajin: Optional[WebAjinManager] = None
         
         self.last_cols = -1
         self._resize_timer = None
@@ -355,6 +356,12 @@ class RemoteXPTIApp(ctk.CTk):
             self.web_map.start()
         except Exception as e:
             log.warning(f"[RemoteXPTI] Falha ao iniciar WebMapManager: {e}")
+
+        # Inicializa o painel web da Ajin com aceleração de GPU
+        try:
+            self.web_ajin = WebAjinManager(container_widget=self.ajin_container)
+        except Exception as e:
+            log.warning(f"[RemoteXPTI] Falha ao iniciar WebAjinManager: {e}")
 
         # Etapa 3: Organização de servidores e layout
         self.after(200, self._warmup_step3_layout)
@@ -593,11 +600,10 @@ class RemoteXPTIApp(ctk.CTk):
         self.map_container.grid(row=0, column=0, sticky="nsew")
         self.map_container.bind("<Configure>", self._on_map_container_configure, add="+")
 
-        # 3. Modo ONUs Ajin (Supervisão Óptica em Tempo Real)
-        self.ajin_container = ctk.CTkFrame(self.content_area, fg_color="transparent")
+        # 3. Modo ONUs Ajin (Dashboard Real Integrado)
+        self.ajin_container = tk.Frame(self.content_area, bg="#ffffff")
         self.ajin_container.grid(row=0, column=0, sticky="nsew")
-        self.ajin_view = AjinView(self.ajin_container, on_view_map_point=self._focus_map_on_onu)
-        self.ajin_view.pack(fill="both", expand=True)
+        self.ajin_container.bind("<Configure>", self._on_ajin_container_configure, add="+")
 
         # Inicia exibindo a grade por padrão
         self.map_container.lower()
@@ -710,9 +716,11 @@ class RemoteXPTIApp(ctk.CTk):
         drawer = self._ensure_settings_drawer()
         drawer.show()
 
-        # Se estiver no modo Mapa, ajusta o Edge para não colidir com o menu
+        # Se estiver no modo Mapa ou Ajin, ajusta o Edge para não colidir com o menu
         if self.view_mode == "mapa" and getattr(self, "web_map", None):
             self.web_map.set_drawer_offset(452)
+        elif self.view_mode == "ajin" and getattr(self, "web_ajin", None):
+            self.web_ajin.set_drawer_offset(452)
 
     def _is_widget_child_of(self, child, parent):
         """Verifica se um widget é filho ou descendente de outro widget."""
@@ -761,6 +769,8 @@ class RemoteXPTIApp(ctk.CTk):
         )
         if getattr(self, "web_map", None):
             self.web_map.set_drawer_offset(0)
+        if getattr(self, "web_ajin", None):
+            self.web_ajin.set_drawer_offset(0)
 
     def close_settings_drawer(self):
         """Fecha o menu lateral embutido de configurações."""
@@ -953,6 +963,11 @@ class RemoteXPTIApp(ctk.CTk):
         except Exception as e:
             log.warning(f"[RemoteXPTI] Erro ao encerrar web_map: {e}")
         try:
+            if hasattr(self, "web_ajin") and self.web_ajin:
+                self.web_ajin.shutdown()
+        except Exception as e:
+            log.warning(f"[RemoteXPTI] Erro ao encerrar web_ajin: {e}")
+        try:
             if hasattr(self, "_status_executor"):
                 self._status_executor.shutdown(wait=False)
         except Exception as e:
@@ -979,6 +994,10 @@ class RemoteXPTIApp(ctk.CTk):
         if self.view_mode == "mapa" and self.web_map:
             self.web_map.resize()
 
+    def _on_ajin_container_configure(self, event=None):
+        if self.view_mode == "ajin" and hasattr(self, "web_ajin") and self.web_ajin:
+            self.web_ajin.resize()
+
     def _focus_map_on_onu(self, onu: Dict[str, Any]):
         """Centraliza o mapa de satélite na região de Jurerê ao solicitar visualização da ONU."""
         self.seg_view.set("Mapa")
@@ -988,6 +1007,9 @@ class RemoteXPTIApp(ctk.CTk):
         log.info(f"[RemoteXPTI] Alternando modo de visualização para: {mode}")
         if "Mapa" in mode:
             self.view_mode = "mapa"
+            if hasattr(self, "web_ajin") and self.web_ajin:
+                self.web_ajin.set_drawer_offset(0)
+                self.web_ajin.hide()
             if hasattr(self.scroll_frame, "_parent_frame"):
                 self.scroll_frame._parent_frame.lower()
             else:
@@ -1016,8 +1038,13 @@ class RemoteXPTIApp(ctk.CTk):
                 self.scroll_frame.lower()
             if hasattr(self, "ajin_container"):
                 self.ajin_container.tkraise()
-                if hasattr(self, "ajin_view"):
-                    threading.Thread(target=self.ajin_view.refresh_data, daemon=True).start()
+            if hasattr(self, "web_ajin") and self.web_ajin:
+                if getattr(self, "_is_drawer_open", False):
+                    self.web_ajin.set_drawer_offset(452)
+                else:
+                    self.web_ajin.set_drawer_offset(0)
+                self.web_ajin.show()
+                self.web_ajin.resize()
             if getattr(self, "settings_drawer", None) and self.settings_drawer.winfo_exists() and self._is_drawer_open:
                 self.settings_drawer.lift()
         else:
@@ -1025,6 +1052,9 @@ class RemoteXPTIApp(ctk.CTk):
             if self.web_map:
                 self.web_map.set_drawer_offset(0)
                 self.web_map.hide()
+            if hasattr(self, "web_ajin") and self.web_ajin:
+                self.web_ajin.set_drawer_offset(0)
+                self.web_ajin.hide()
             self.map_container.lower()
             if hasattr(self, "ajin_container"):
                 self.ajin_container.lower()
@@ -1319,8 +1349,6 @@ class RemoteXPTIApp(ctk.CTk):
         self.start_status_checker(is_manual=True)
         if hasattr(self, "updater") and self.updater:
             self.updater.start_background_check()
-        if hasattr(self, "ajin_view"):
-            threading.Thread(target=self.ajin_view.refresh_data, daemon=True).start()
         if CloudSyncManager.is_configured():
             threading.Thread(target=self._sync_servers_from_cloud, daemon=True).start()
 
