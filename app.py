@@ -238,6 +238,43 @@ def sync_windows_shortcuts_icon():
         pass
 
 
+def enable_windows_double_buffering(window):
+    """
+    Habilita double-buffering nativo acelerado pelo DWM (Desktop Window Manager) do Windows.
+    Aplica WS_EX_COMPOSITED (0x02000000) e WS_CLIPCHILDREN (0x02000000) na janela Win32.
+    Isso forca o Windows a compor recursivamente todos os widgets filhos em um buffer unico de video (off-screen)
+    antes de desenhar na tela, eliminando o tearing, cintilacao (flicker) e visual embaralhado
+    ao rolar o scroll ou redimensionar a janela em todo o programa.
+    """
+    if sys.platform != "win32":
+        return
+    try:
+        window.update_idletasks()
+        raw_hwnd = window.winfo_id()
+        if not raw_hwnd:
+            return
+
+        GWL_STYLE = -16
+        GWL_EXSTYLE = -20
+        WS_CLIPCHILDREN = 0x02000000
+        WS_EX_COMPOSITED = 0x02000000
+
+        parent_hwnd = ctypes.windll.user32.GetParent(raw_hwnd)
+        target_hwnds = {raw_hwnd}
+        if parent_hwnd:
+            target_hwnds.add(parent_hwnd)
+
+        for hwnd in target_hwnds:
+            if hwnd:
+                style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_STYLE)
+                ex_style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+                ctypes.windll.user32.SetWindowLongW(hwnd, GWL_STYLE, style | WS_CLIPCHILDREN)
+                ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex_style | WS_EX_COMPOSITED)
+        log.info(f"[RemoteXPTI] Double-buffering DWM (WS_EX_COMPOSITED) ativado com sucesso nos HWNDs {target_hwnds}.")
+    except Exception as e:
+        log.warning(f"[RemoteXPTI] Falha ao ativar double-buffering DWM: {e}")
+
+
 class RemoteXPTIApp(ctk.CTk):
     """Janela principal da aplicação RemoteXPTI."""
 
@@ -324,6 +361,8 @@ class RemoteXPTIApp(ctk.CTk):
         self.bind("<Unmap>", lambda e: self.close_settings_drawer() if e.widget == self else None, add="+")
         self.bind("<Button-1>", self._on_parent_click_dismiss, add="+")
         self.bind("<Escape>", lambda e: self.close_settings_drawer() if getattr(self, "_is_drawer_open", False) else None)
+
+        enable_windows_double_buffering(self)
 
         # Inicia o warmup em estágios progressivos
         self.after(30, self._start_staged_warmup)
@@ -416,6 +455,7 @@ class RemoteXPTIApp(ctk.CTk):
         self.deiconify()
         self.lift()
         self.focus_force()
+        enable_windows_double_buffering(self)
         self._check_column_recalculation()
         if hasattr(self, "splash_manager") and self.splash_manager:
             self.splash_manager.finish()
@@ -855,12 +895,12 @@ class RemoteXPTIApp(ctk.CTk):
             return
         if getattr(self, "_resize_timer", None):
             self.after_cancel(self._resize_timer)
-        self._resize_timer = self.after(20, self._check_column_recalculation)
+        self._resize_timer = self.after(120, self._check_column_recalculation)
 
     def _on_scroll_frame_configure(self, event=None):
         if getattr(self, "_resize_timer", None):
             self.after_cancel(self._resize_timer)
-        self._resize_timer = self.after(20, self._check_column_recalculation)
+        self._resize_timer = self.after(120, self._check_column_recalculation)
 
     def _calculate_columns(self) -> int:
         """
@@ -1099,13 +1139,16 @@ class RemoteXPTIApp(ctk.CTk):
         cols = self._calculate_columns()
         self.last_cols = cols
 
-        # Limpa configurações de colunas anteriores
-        for i in range(35):
-            self.scroll_frame.grid_columnconfigure(i, weight=0, minsize=0)
+        # Limpa apenas as colunas que deixaram de ser utilizadas
+        prev_cols = getattr(self, "_configured_grid_cols", 0)
+        if prev_cols > cols:
+            for i in range(cols, prev_cols + 1):
+                self.scroll_frame.grid_columnconfigure(i, weight=0, minsize=0)
 
         # Configura colunas ativas para expandir proporcionalmente e preencher toda a largura
         for i in range(cols):
             self.scroll_frame.grid_columnconfigure(i, weight=1, minsize=int(CARD_WIDTH + 10))
+        self._configured_grid_cols = cols
 
         visible_ids = {s["id"] for s in servers}
 
