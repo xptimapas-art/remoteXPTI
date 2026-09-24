@@ -365,6 +365,8 @@ class RemoteXPTIApp(ctk.CTk):
         self.web_map: Optional[WebMapManager] = None
         
         self.last_cols = -1
+        self._last_window_size = None
+        self._last_map_container_size = None
         self._resize_timer = None
         self._auto_ping_timer = None
         self._search_debounce_timer = None
@@ -915,9 +917,15 @@ class RemoteXPTIApp(ctk.CTk):
     def _on_window_configure(self, event):
         if event.widget != self:
             return
+        # Ignora completamente eventos de simples movimentação da janela (X / Y)
+        cur_size = (event.width, event.height)
+        if cur_size == getattr(self, "_last_window_size", None):
+            return
+        self._last_window_size = cur_size
+
         if getattr(self, "_resize_timer", None):
             self.after_cancel(self._resize_timer)
-        self._resize_timer = self.after(80, self._check_column_recalculation)
+        self._resize_timer = self.after(120, self._check_column_recalculation)
 
     def _calculate_columns(self) -> int:
         """
@@ -1030,8 +1038,14 @@ class RemoteXPTIApp(ctk.CTk):
         self.filter_servers()
 
     def _on_map_container_configure(self, event=None):
-        if self.view_mode == "mapa" and self.web_map:
-            self.web_map.resize()
+        if self.view_mode != "mapa" or not self.web_map:
+            return
+        if event:
+            cur_size = (event.width, event.height)
+            if cur_size == getattr(self, "_last_map_container_size", None):
+                return
+            self._last_map_container_size = cur_size
+        self.web_map.resize()
 
     def _on_view_mode_changed(self, mode: str):
         log.info(f"[RemoteXPTI] Alternando modo de visualização para: {mode}")
