@@ -233,34 +233,81 @@ class AjinRowWidget:
         self.frame.pack(fill="x", pady=1)
 
 
-class NocSectionBlock:
-    """Bloco de métrica da Sidebar NOC com divisores contínuos e hover suave (leve destaque)."""
+class NocSidebarManager:
+    """Controlador central de hover para a Sidebar NOC. Garante exclusividade de destaque e zero bugs."""
 
-    def __init__(self, master, base_bg: str = "#2870c2", hover_bg: str = "#4083d2"):
+    def __init__(self):
+        self.blocks: List['NocSectionBlock'] = []
+        self.active_block: Optional['NocSectionBlock'] = None
+        self._check_job = None
+
+    def register(self, block: 'NocSectionBlock'):
+        self.blocks.append(block)
+
+    def set_hover(self, block: 'NocSectionBlock'):
+        if self.active_block == block:
+            return
+        # Desativa imediatamente todos os outros blocos (garante exclusividade)
+        for b in self.blocks:
+            if b != block:
+                b.set_normal()
+        self.active_block = block
+        if block:
+            block.set_hover()
+
+    def clear(self):
+        for b in self.blocks:
+            b.set_normal()
+        self.active_block = None
+
+    def request_leave_check(self, block: 'NocSectionBlock'):
+        if self._check_job:
+            try:
+                block.frame.after_cancel(self._check_job)
+            except Exception:
+                pass
+        self._check_job = block.frame.after(35, lambda: self._do_leave_check(block))
+
+    def _do_leave_check(self, block: 'NocSectionBlock'):
+        self._check_job = None
+        if self.active_block != block:
+            return
+        try:
+            x, y = block.frame.winfo_pointerxy()
+            rx, ry = block.frame.winfo_rootx(), block.frame.winfo_rooty()
+            rw, rh = block.frame.winfo_width(), block.frame.winfo_height()
+            if not (rx <= x <= rx + rw and ry <= y <= ry + rh):
+                block.set_normal()
+                if self.active_block == block:
+                    self.active_block = None
+        except Exception:
+            block.set_normal()
+            self.active_block = None
+
+
+class NocSectionBlock:
+    """Bloco de métrica da Sidebar NOC com divisores contínuos e hover exclusivo (leve destaque)."""
+
+    def __init__(self, master, manager: NocSidebarManager, base_bg: str = "#2870c2", hover_bg: str = "#4083d2"):
+        self.manager = manager
         self.base_bg = base_bg
         self.hover_bg = hover_bg
         self.frame = ctk.CTkFrame(master, fg_color=self.base_bg, corner_radius=0)
         self.frame.pack(fill="x", padx=0, pady=0)
+        self.manager.register(self)
+
+    def set_normal(self):
+        self.frame.configure(fg_color=self.base_bg)
+
+    def set_hover(self):
+        self.frame.configure(fg_color=self.hover_bg)
 
     def bind_recursive(self, w=None):
         target = w or self.frame
-        target.bind("<Enter>", self._on_enter, add="+")
-        target.bind("<Leave>", self._on_leave, add="+")
+        target.bind("<Enter>", lambda e: self.manager.set_hover(self), add="+")
+        target.bind("<Leave>", lambda e: self.manager.request_leave_check(self), add="+")
         for child in target.winfo_children():
             self.bind_recursive(child)
-
-    def _on_enter(self, e=None):
-        self.frame.configure(fg_color=self.hover_bg)
-
-    def _on_leave(self, e=None):
-        try:
-            x, y = self.frame.winfo_pointerxy()
-            rx, ry = self.frame.winfo_rootx(), self.frame.winfo_rooty()
-            rw, rh = self.frame.winfo_width(), self.frame.winfo_height()
-            if not (rx <= x <= rx + rw and ry <= y <= ry + rh):
-                self.frame.configure(fg_color=self.base_bg)
-        except Exception:
-            self.frame.configure(fg_color=self.base_bg)
 
 
 class AjinView(ctk.CTkFrame):
@@ -278,6 +325,7 @@ class AjinView(ctk.CTkFrame):
         self._auto_refresh_enabled: bool = True
         self._refresh_countdown: int = 10
         self._active_dialog = None
+        self._noc_hover_mgr = NocSidebarManager()
 
         self._build_layout()
 
@@ -587,15 +635,15 @@ class AjinView(ctk.CTkFrame):
         return None
 
     def _add_noc_divider(self, parent):
-        """Divisor horizontal sutil de 1px entre seções no padrão idêntico à referência."""
-        div = ctk.CTkFrame(parent, height=1, fg_color="#5c93d3", corner_radius=0)
+        """Divisor horizontal sutil e visível de 1px entre categorias no padrão da referência."""
+        div = tk.Frame(parent, height=1, bg="#5d9ee6")
         div.pack(fill="x", padx=0, pady=0)
         div.pack_propagate(False)
         return div
 
     def _create_noc_stat_section(self, parent, icon_img, val_str, label_str):
-        """Cria uma seção de métrica clean com divisor e hover suave (leve destaque)."""
-        block = NocSectionBlock(parent)
+        """Cria uma seção de métrica clean com divisor e hover suave exclusivo."""
+        block = NocSectionBlock(parent, self._noc_hover_mgr)
 
         sec = ctk.CTkFrame(block.frame, fg_color="transparent")
         sec.pack(fill="x", padx=16, pady=(10, 10))
@@ -642,6 +690,19 @@ class AjinView(ctk.CTkFrame):
         self.sidebar_frame.grid(row=0, column=1, sticky="ns", padx=(0, 6), pady=(4, 6))
         self.sidebar_frame.grid_propagate(False)
 
+        # Monitor de saída da sidebar para limpar o hover com 100% de precisão
+        def _on_sidebar_leave(e):
+            try:
+                x, y = self.sidebar_frame.winfo_pointerxy()
+                rx, ry = self.sidebar_frame.winfo_rootx(), self.sidebar_frame.winfo_rooty()
+                rw, rh = self.sidebar_frame.winfo_width(), self.sidebar_frame.winfo_height()
+                if not (rx <= x <= rx + rw and ry <= y <= ry + rh):
+                    self._noc_hover_mgr.clear()
+            except Exception:
+                self._noc_hover_mgr.clear()
+
+        self.sidebar_frame.bind("<Leave>", _on_sidebar_leave, add="+")
+
         # Pré-carrega os ícones nativos
         self._img_router = self._load_noc_icon("noc_router", (34, 30))
         self._img_check = self._load_noc_icon("noc_check", (34, 34))
@@ -666,6 +727,7 @@ class AjinView(ctk.CTkFrame):
         except Exception:
             pass
         self.scroll_noc.pack(side="top", fill="both", expand=True, padx=0, pady=0)
+        self.scroll_noc.bind("<Leave>", _on_sidebar_leave, add="+")
 
         # 1. Total
         self.lbl_total_val, _ = self._create_noc_stat_section(
@@ -692,7 +754,7 @@ class AjinView(ctk.CTkFrame):
         self._add_noc_divider(self.scroll_noc)
 
         # 5. Portas PON
-        block_pon = NocSectionBlock(self.scroll_noc)
+        block_pon = NocSectionBlock(self.scroll_noc, self._noc_hover_mgr)
         sec_pon = ctk.CTkFrame(block_pon.frame, fg_color="transparent")
         sec_pon.pack(fill="x", padx=16, pady=(10, 8))
 
@@ -722,7 +784,7 @@ class AjinView(ctk.CTkFrame):
         self._add_noc_divider(self.scroll_noc)
 
         # 6. Última Coleta
-        block_col = NocSectionBlock(self.scroll_noc)
+        block_col = NocSectionBlock(self.scroll_noc, self._noc_hover_mgr)
         sec_coleta = ctk.CTkFrame(block_col.frame, fg_color="transparent")
         sec_coleta.pack(fill="x", padx=16, pady=(10, 8))
 
@@ -766,7 +828,7 @@ class AjinView(ctk.CTkFrame):
         self._add_noc_divider(self.scroll_noc)
 
         # 7. Servidor Coletor (Status da Coleta)
-        block_srv = NocSectionBlock(self.scroll_noc)
+        block_srv = NocSectionBlock(self.scroll_noc, self._noc_hover_mgr)
         sec_srv = ctk.CTkFrame(block_srv.frame, fg_color="transparent")
         sec_srv.pack(fill="x", padx=16, pady=(10, 8))
 
@@ -810,7 +872,7 @@ class AjinView(ctk.CTkFrame):
         self._add_noc_divider(self.scroll_noc)
 
         # 8. OLT Principal
-        block_olt = NocSectionBlock(self.scroll_noc)
+        block_olt = NocSectionBlock(self.scroll_noc, self._noc_hover_mgr)
         sec_olt = ctk.CTkFrame(block_olt.frame, fg_color="transparent")
         sec_olt.pack(fill="x", padx=16, pady=(10, 8))
 
@@ -852,9 +914,11 @@ class AjinView(ctk.CTkFrame):
 
         block_olt.bind_recursive()
 
-        # Rodapé da Sidebar: Auto-Refresh elegante e clean
+        # Rodapé da Sidebar: Divisor e Auto-Refresh elegante
+        self._add_noc_divider(self.sidebar_frame)
+
         self.noc_footer = ctk.CTkFrame(self.sidebar_frame, fg_color="#205fa8", corner_radius=8, height=32)
-        self.noc_footer.pack(side="bottom", fill="x", padx=8, pady=(2, 6))
+        self.noc_footer.pack(side="bottom", fill="x", padx=8, pady=(4, 6))
         self.noc_footer.pack_propagate(False)
 
         self.chk_autorefresh = ctk.CTkSwitch(
