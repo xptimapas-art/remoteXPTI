@@ -398,18 +398,12 @@ class AjinView(ctk.CTkFrame):
         )
         self._add_noc_divider(self.scroll_noc)
 
-        # 4. Câmeras Mapeadas
-        self.lbl_cams_val, _ = self._create_noc_stat_section(
-            self.scroll_noc, self._img_cam, "0", "Câmeras Mapeadas"
-        )
-        self._add_noc_divider(self.scroll_noc)
-
-        # 5. Portas PON
+        # 4. Portas PON
         sec_pon = ctk.CTkFrame(self.scroll_noc, fg_color="transparent")
-        sec_pon.pack(fill="x", padx=10, pady=(6, 5))
+        sec_pon.pack(fill="x", padx=10, pady=(3, 2))
 
         top_pon = ctk.CTkFrame(sec_pon, fg_color="transparent")
-        top_pon.pack(fill="x", pady=(0, 4))
+        top_pon.pack(fill="x", pady=(0, 2))
 
         if self._img_pon:
             lbl_pon_ico = ctk.CTkLabel(top_pon, image=self._img_pon, text="")
@@ -420,7 +414,7 @@ class AjinView(ctk.CTkFrame):
         lbl_pon_title = ctk.CTkLabel(
             top_pon,
             text="Portas PON",
-            font=ctk.CTkFont(size=12, weight="bold"),
+            font=ctk.CTkFont(size=11, weight="bold"),
             text_color="#ffffff"
         )
         lbl_pon_title.pack(side="right", anchor="e")
@@ -432,14 +426,14 @@ class AjinView(ctk.CTkFrame):
 
         self._add_noc_divider(self.scroll_noc)
 
-        # 6. Última Coleta
+        # 5. Última Coleta
         sec_coleta = ctk.CTkFrame(self.scroll_noc, fg_color="transparent")
-        sec_coleta.pack(fill="x", padx=10, pady=(6, 5))
+        sec_coleta.pack(fill="x", padx=10, pady=(3, 2))
 
         if self._img_clock:
             lbl_col_ico = ctk.CTkLabel(sec_coleta, image=self._img_clock, text="")
         else:
-            lbl_col_ico = ctk.CTkLabel(sec_coleta, text="⏱️", font=ctk.CTkFont(size=20), text_color="#ffffff")
+            lbl_col_ico = ctk.CTkLabel(sec_coleta, text="⏱️", font=ctk.CTkFont(size=18), text_color="#ffffff")
         lbl_col_ico.pack(side="left", anchor="center")
 
         box_col = ctk.CTkFrame(sec_coleta, fg_color="transparent")
@@ -448,7 +442,7 @@ class AjinView(ctk.CTkFrame):
         self.lbl_coleta_time = ctk.CTkLabel(
             box_col,
             text="--:--:--",
-            font=ctk.CTkFont(size=16, weight="bold"),
+            font=ctk.CTkFont(size=15, weight="bold"),
             text_color="#ffffff",
             anchor="e"
         )
@@ -466,24 +460,105 @@ class AjinView(ctk.CTkFrame):
         lbl_col_sub = ctk.CTkLabel(
             box_col,
             text="Última Coleta",
-            font=ctk.CTkFont(size=11, weight="bold"),
+            font=ctk.CTkFont(size=10, weight="bold"),
             text_color="#ffffff",
             anchor="e"
         )
         lbl_col_sub.pack(anchor="e")
 
+        self._add_noc_divider(self.scroll_noc)
+
+        # 6. Servidor Coletor (Status da Coleta)
+        sec_srv = ctk.CTkFrame(self.scroll_noc, fg_color="transparent")
+        sec_srv.pack(fill="x", padx=10, pady=(3, 2))
+
+        if self._img_globe:
+            lbl_srv_ico = ctk.CTkLabel(sec_srv, image=self._img_globe, text="")
+        else:
+            lbl_srv_ico = ctk.CTkLabel(sec_srv, text="🌐", font=ctk.CTkFont(size=18), text_color="#2fe091")
+        lbl_srv_ico.pack(side="left", anchor="center")
+
+        box_srv = ctk.CTkFrame(sec_srv, fg_color="transparent")
+        box_srv.pack(side="right", anchor="e")
+
+        self.lbl_server_stt = ctk.CTkLabel(
+            box_srv,
+            text="Ping OK",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            text_color="#2fe091",
+            anchor="e"
+        )
+        self.lbl_server_stt.pack(anchor="e")
+
+        self.lbl_server_ip = ctk.CTkLabel(
+            box_srv,
+            text="192.168.190.187",
+            font=ctk.CTkFont(size=11),
+            text_color="#ffffff",
+            anchor="e"
+        )
+        self.lbl_server_ip.pack(anchor="e")
+
+        lbl_srv_sub = ctk.CTkLabel(
+            box_srv,
+            text="Servidor Coletor",
+            font=ctk.CTkFont(size=10, weight="bold"),
+            text_color="#ffffff",
+            anchor="e"
+        )
+        lbl_srv_sub.pack(anchor="e")
+
+        self._add_noc_divider(self.scroll_noc)
+
+        # 7. OLT Principal
+        sec_olt = ctk.CTkFrame(self.scroll_noc, fg_color="transparent")
+        sec_olt.pack(fill="x", padx=10, pady=(3, 2))
+
+        if self._img_db:
+            lbl_olt_ico = ctk.CTkLabel(sec_olt, image=self._img_db, text="")
+        else:
+            lbl_olt_ico = ctk.CTkLabel(sec_olt, text="💾", font=ctk.CTkFont(size=18), text_color="#ffffff")
+        lbl_olt_ico.pack(side="left", anchor="center")
+
+        box_olt = ctk.CTkFrame(sec_olt, fg_color="transparent")
+        box_olt.pack(side="right", anchor="e")
+
+        self.lbl_olt_model = ctk.CTkLabel(
+            box_olt,
+            text="C-Data FD1108S",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color="#ffffff",
+            anchor="e"
+        )
+        self.lbl_olt_model.pack(anchor="e")
+
+        self.lbl_olt_ip = ctk.CTkLabel(
+            box_olt,
+            text="192.168.1.100",
+            font=ctk.CTkFont(size=11),
+            text_color="#ffffff",
+            anchor="e"
+        )
+        self.lbl_olt_ip.pack(anchor="e")
+
+        lbl_olt_sub = ctk.CTkLabel(
+            box_olt,
+            text="OLT Principal",
+            font=ctk.CTkFont(size=10, weight="bold"),
+            text_color="#ffffff",
+            anchor="e"
+        )
+        lbl_olt_sub.pack(anchor="e")
+
         # Aliases para compatibilidade legada
         self.card_total = self.lbl_total_val
         self.card_online = self.lbl_status_online
         self.card_offline = self.lbl_status_offline
-        self.card_cams = self.lbl_cams_val
+        self.card_cams = None
+        self.lbl_cams_val = None
         self.lbl_port_s1p1 = self.lbl_p1_val
         self.lbl_port_s2p1 = self.lbl_p2_val
         self.lbl_port_s2p2 = self.lbl_p3_val
-        self.lbl_server_stt = None
-        self.lbl_server_ip = None
-        self.lbl_olt_model = None
-        self.lbl_olt_ip = None
         self.lbl_sidebar_time = None
         self.lbl_sidebar_refresh = None
 
@@ -519,7 +594,8 @@ class AjinView(ctk.CTkFrame):
         self.lbl_total_val.configure(text=str(total))
         self.lbl_status_online.configure(text=str(online))
         self.lbl_status_offline.configure(text=str(offline))
-        self.lbl_cams_val.configure(text=str(cams))
+        if getattr(self, "lbl_cams_val", None):
+            self.lbl_cams_val.configure(text=str(cams))
 
         # Portas PON (converte lista de dicts da API em dict indexado)
         raw_ports = data.get("ports", [])
