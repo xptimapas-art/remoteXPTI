@@ -233,6 +233,36 @@ class AjinRowWidget:
         self.frame.pack(fill="x", pady=1)
 
 
+class NocSectionBlock:
+    """Bloco de métrica da Sidebar NOC com divisores contínuos e hover suave (leve destaque)."""
+
+    def __init__(self, master, base_bg: str = "#2870c2", hover_bg: str = "#4083d2"):
+        self.base_bg = base_bg
+        self.hover_bg = hover_bg
+        self.frame = ctk.CTkFrame(master, fg_color=self.base_bg, corner_radius=0)
+        self.frame.pack(fill="x", padx=0, pady=0)
+
+    def bind_recursive(self, w=None):
+        target = w or self.frame
+        target.bind("<Enter>", self._on_enter, add="+")
+        target.bind("<Leave>", self._on_leave, add="+")
+        for child in target.winfo_children():
+            self.bind_recursive(child)
+
+    def _on_enter(self, e=None):
+        self.frame.configure(fg_color=self.hover_bg)
+
+    def _on_leave(self, e=None):
+        try:
+            x, y = self.frame.winfo_pointerxy()
+            rx, ry = self.frame.winfo_rootx(), self.frame.winfo_rooty()
+            rw, rh = self.frame.winfo_width(), self.frame.winfo_height()
+            if not (rx <= x <= rx + rw and ry <= y <= ry + rh):
+                self.frame.configure(fg_color=self.base_bg)
+        except Exception:
+            self.frame.configure(fg_color=self.base_bg)
+
+
 class AjinView(ctk.CTkFrame):
     """Componente principal da aba de monitoramento das ONUs Ajin."""
 
@@ -557,15 +587,18 @@ class AjinView(ctk.CTkFrame):
         return None
 
     def _add_noc_divider(self, parent):
-        """Divisor horizontal sutil de 1px entre seções no padrão clean."""
-        div = ctk.CTkFrame(parent, height=1, fg_color="#4f8ecc", corner_radius=0)
-        div.pack(fill="x", padx=12, pady=1)
+        """Divisor horizontal sutil de 1px entre seções no padrão idêntico à referência."""
+        div = ctk.CTkFrame(parent, height=1, fg_color="#5c93d3", corner_radius=0)
+        div.pack(fill="x", padx=0, pady=0)
+        div.pack_propagate(False)
         return div
 
     def _create_noc_stat_section(self, parent, icon_img, val_str, label_str):
-        """Cria uma seção de métrica clean: ícone à esquerda, número grande e rótulo à direita."""
-        sec = ctk.CTkFrame(parent, fg_color="transparent")
-        sec.pack(fill="x", padx=10, pady=(6, 5))
+        """Cria uma seção de métrica clean com divisor e hover suave (leve destaque)."""
+        block = NocSectionBlock(parent)
+
+        sec = ctk.CTkFrame(block.frame, fg_color="transparent")
+        sec.pack(fill="x", padx=16, pady=(10, 10))
 
         if icon_img:
             lbl_ico = ctk.CTkLabel(sec, image=icon_img, text="")
@@ -594,13 +627,14 @@ class AjinView(ctk.CTkFrame):
         )
         lbl_sub.pack(anchor="e")
 
+        block.bind_recursive()
         return lbl_val, lbl_sub
 
     def _build_sidebar_noc(self):
-        # Painel lateral azul (#2870c2) com bordas arredondadas e responsividade
+        # Painel lateral azul (#2870c2) com bordas arredondadas e divisores contínuos
         self.sidebar_frame = ctk.CTkFrame(
             self,
-            width=240,
+            width=260,
             corner_radius=12,
             fg_color="#2870c2",
             border_width=0
@@ -618,7 +652,7 @@ class AjinView(ctk.CTkFrame):
         self._img_globe = self._load_noc_icon("noc_globe", (30, 31))
         self._img_db = self._load_noc_icon("noc_db", (26, 28))
 
-        # Área de Conteúdo Rolável Responsiva (Adapta-se a qualquer resolução de tela ou redimensionamento)
+        # Área de Conteúdo Rolável com divisor contínuo de ponta a ponta
         self.scroll_noc = ctk.CTkScrollableFrame(
             self.sidebar_frame,
             fg_color="transparent",
@@ -631,7 +665,7 @@ class AjinView(ctk.CTkFrame):
             self.scroll_noc._scrollbar.configure(width=4)
         except Exception:
             pass
-        self.scroll_noc.pack(side="top", fill="both", expand=True, padx=4, pady=4)
+        self.scroll_noc.pack(side="top", fill="both", expand=True, padx=0, pady=0)
 
         # 1. Total
         self.lbl_total_val, _ = self._create_noc_stat_section(
@@ -658,11 +692,12 @@ class AjinView(ctk.CTkFrame):
         self._add_noc_divider(self.scroll_noc)
 
         # 5. Portas PON
-        sec_pon = ctk.CTkFrame(self.scroll_noc, fg_color="transparent")
-        sec_pon.pack(fill="x", padx=10, pady=(3, 2))
+        block_pon = NocSectionBlock(self.scroll_noc)
+        sec_pon = ctk.CTkFrame(block_pon.frame, fg_color="transparent")
+        sec_pon.pack(fill="x", padx=16, pady=(10, 8))
 
         top_pon = ctk.CTkFrame(sec_pon, fg_color="transparent")
-        top_pon.pack(fill="x", pady=(0, 2))
+        top_pon.pack(fill="x", pady=(0, 4))
 
         if self._img_pon:
             lbl_pon_ico = ctk.CTkLabel(top_pon, image=self._img_pon, text="")
@@ -683,11 +718,13 @@ class AjinView(ctk.CTkFrame):
         self.lbl_p2_val = self._create_pon_row(sec_pon, "Slot2-PON1", "- / -")
         self.lbl_p3_val = self._create_pon_row(sec_pon, "Slot2-PON2", "- / -")
 
+        block_pon.bind_recursive()
         self._add_noc_divider(self.scroll_noc)
 
         # 6. Última Coleta
-        sec_coleta = ctk.CTkFrame(self.scroll_noc, fg_color="transparent")
-        sec_coleta.pack(fill="x", padx=10, pady=(3, 2))
+        block_col = NocSectionBlock(self.scroll_noc)
+        sec_coleta = ctk.CTkFrame(block_col.frame, fg_color="transparent")
+        sec_coleta.pack(fill="x", padx=16, pady=(10, 8))
 
         if self._img_clock:
             lbl_col_ico = ctk.CTkLabel(sec_coleta, image=self._img_clock, text="")
@@ -725,11 +762,13 @@ class AjinView(ctk.CTkFrame):
         )
         lbl_col_sub.pack(anchor="e")
 
+        block_col.bind_recursive()
         self._add_noc_divider(self.scroll_noc)
 
-        # 6. Servidor Coletor (Status da Coleta)
-        sec_srv = ctk.CTkFrame(self.scroll_noc, fg_color="transparent")
-        sec_srv.pack(fill="x", padx=10, pady=(3, 2))
+        # 7. Servidor Coletor (Status da Coleta)
+        block_srv = NocSectionBlock(self.scroll_noc)
+        sec_srv = ctk.CTkFrame(block_srv.frame, fg_color="transparent")
+        sec_srv.pack(fill="x", padx=16, pady=(10, 8))
 
         if self._img_globe:
             lbl_srv_ico = ctk.CTkLabel(sec_srv, image=self._img_globe, text="")
@@ -767,11 +806,13 @@ class AjinView(ctk.CTkFrame):
         )
         lbl_srv_sub.pack(anchor="e")
 
+        block_srv.bind_recursive()
         self._add_noc_divider(self.scroll_noc)
 
-        # 7. OLT Principal
-        sec_olt = ctk.CTkFrame(self.scroll_noc, fg_color="transparent")
-        sec_olt.pack(fill="x", padx=10, pady=(3, 2))
+        # 8. OLT Principal
+        block_olt = NocSectionBlock(self.scroll_noc)
+        sec_olt = ctk.CTkFrame(block_olt.frame, fg_color="transparent")
+        sec_olt.pack(fill="x", padx=16, pady=(10, 8))
 
         if self._img_db:
             lbl_olt_ico = ctk.CTkLabel(sec_olt, image=self._img_db, text="")
@@ -808,6 +849,8 @@ class AjinView(ctk.CTkFrame):
             anchor="e"
         )
         lbl_olt_sub.pack(anchor="e")
+
+        block_olt.bind_recursive()
 
         # Rodapé da Sidebar: Auto-Refresh elegante e clean
         self.noc_footer = ctk.CTkFrame(self.sidebar_frame, fg_color="#205fa8", corner_radius=8, height=32)
@@ -910,7 +953,7 @@ class AjinView(ctk.CTkFrame):
             if srv_info.get("online"):
                 self.lbl_server_stt.configure(text="Ping OK", text_color="#2fe091")
             else:
-                self.lbl_server_stt.configure(text="Sem Ping", text_color="#ff5252")
+                self.lbl_server_stt.configure(text="Sem Ping", text_color="#ff8a80")
             if srv_info.get("ip") and self.lbl_server_ip:
                 self.lbl_server_ip.configure(text=str(srv_info.get("ip")))
 
