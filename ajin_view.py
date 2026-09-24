@@ -644,9 +644,14 @@ class AjinView(ctk.CTkFrame):
                 self.lbl_olt_ip.configure(text=str(olt_info.get("ip")))
 
         # Botão de incidentes
-        events_hist = data.get("events_history", [])
-        active_probs = data.get("active_problems", offline)
-        self.btn_events.configure(text=f"⚠️ Incidentes ({active_probs})")
+        active_raw = data.get("active_problems", offline)
+        if isinstance(active_raw, list):
+            active_count = len(active_raw)
+        elif isinstance(active_raw, (int, float)):
+            active_count = int(active_raw)
+        else:
+            active_count = offline
+        self.btn_events.configure(text=f"⚠️ Incidentes ({active_count})")
 
         # 2. Aplica filtros e renderiza linhas na tabela
         self._apply_filters()
@@ -1004,13 +1009,35 @@ class AjinView(ctk.CTkFrame):
         lbl_t.pack(anchor="w", padx=pad, pady=(pad, 4))
 
         data = self.mgr.get_data()
+        active_list = data.get("active_problems", [])
+        if not isinstance(active_list, list):
+            active_list = []
         events = data.get("events_history", data.get("events", []))
-        if not events:
+        if not isinstance(events, list):
+            events = []
+
+        if not active_list and not events:
             lbl_empty = ctk.CTkLabel(dlg, text="Nenhum incidente registrado recentemente. Rede estável! ✅", font=ctk.CTkFont(size=12), text_color="#2ecc71")
             lbl_empty.pack(pady=40)
         else:
-            scroll = ctk.CTkScrollableFrame(dlg, height=280)
+            scroll = ctk.CTkScrollableFrame(dlg, height=290)
             scroll.pack(fill="both", expand=True, padx=pad, pady=4)
+
+            # 1. Problemas ativos atualmente
+            for a in active_list:
+                rf = ctk.CTkFrame(scroll, height=38, fg_color=("#fee2e2", "#2e1818"))
+                rf.pack(fill="x", pady=2)
+                rf.pack_propagate(False)
+
+                lbl_badge = ctk.CTkLabel(rf, text="🔴 Offline", font=ctk.CTkFont(size=10, weight="bold"), text_color="#e74c3c", width=70)
+                lbl_badge.pack(side="left", padx=6)
+
+                p_str = a.get("point_name") or a.get("label") or f"{a.get('port')}_{a.get('onu_id')}"
+                dt_str = a.get("duration_detailed") or a.get("since") or a.get("duration", "ativo")
+                lbl_info = ctk.CTkLabel(rf, text=f"{p_str} ({a.get('serial', '')}) - {dt_str}", font=ctk.CTkFont(size=11, weight="bold"))
+                lbl_info.pack(side="left", padx=6)
+
+            # 2. Histórico recente de quedas e retornos
             for e in events[:30]:
                 rf = ctk.CTkFrame(scroll, height=38, fg_color=("#f1f5f9", "#181a22"))
                 rf.pack(fill="x", pady=2)
