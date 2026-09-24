@@ -93,7 +93,10 @@ class AjinView(ctk.CTkFrame):
             ctrl_frame,
             placeholder_text="🔍 Pesquisar por Nome, Serial / MAC...",
             width=230,
-            height=34
+            height=34,
+            fg_color="#181c26",
+            border_color="#2e3547",
+            text_color="#ffffff"
         )
         self.entry_search.pack(side="left", padx=(0, 6))
         self.entry_search.bind("<KeyRelease>", lambda e: self._apply_filters())
@@ -104,6 +107,12 @@ class AjinView(ctk.CTkFrame):
             values=["Todas as Portas PON", "Slot1-PON1", "Slot1-PON2", "Slot2-PON1", "Slot2-PON2"],
             width=140,
             height=34,
+            fg_color="#181c26",
+            button_color="#242b3b",
+            button_hover_color="#30384c",
+            border_color="#2e3547",
+            dropdown_fg_color="#1c202d",
+            text_color="#ffffff",
             command=lambda val: self._apply_filters()
         )
         self.combo_pon.set("Todas as Portas PON")
@@ -115,6 +124,12 @@ class AjinView(ctk.CTkFrame):
             values=["Todos os Status", "Em Funcionamento (Online)", "Fora de Funcionamento (Offline)"],
             width=165,
             height=34,
+            fg_color="#181c26",
+            button_color="#242b3b",
+            button_hover_color="#30384c",
+            border_color="#2e3547",
+            dropdown_fg_color="#1c202d",
+            text_color="#ffffff",
             command=lambda val: self._apply_filters()
         )
         self.combo_status.set("Todos os Status")
@@ -126,9 +141,11 @@ class AjinView(ctk.CTkFrame):
             text="🔄 Câmeras",
             width=115,
             height=34,
-            fg_color=("#e2e8f0", "#262832"),
-            text_color=("gray10", "#ffffff"),
-            hover_color=("#cbd5e1", "#343644"),
+            fg_color="#222736",
+            hover_color="#30384c",
+            border_width=1,
+            border_color="#374151",
+            text_color="#ffffff",
             font=ctk.CTkFont(size=12, weight="bold"),
             command=self._on_sync_cameras_clicked
         )
@@ -140,8 +157,9 @@ class AjinView(ctk.CTkFrame):
             text="🔍 Scanner",
             width=115,
             height=34,
-            fg_color="#0066cc",
-            hover_color="#0052a3",
+            fg_color="#0284c7",
+            hover_color="#0369a1",
+            text_color="#ffffff",
             font=ctk.CTkFont(size=12, weight="bold"),
             command=self._open_scanner_dialog
         )
@@ -153,8 +171,11 @@ class AjinView(ctk.CTkFrame):
             text="⚠️ Incidentes (0)",
             width=140,
             height=34,
-            fg_color="#a83232",
-            hover_color="#8c2828",
+            fg_color="#7f1d1d",
+            hover_color="#991b1b",
+            border_width=1,
+            border_color="#b91c1c",
+            text_color="#fecaca",
             font=ctk.CTkFont(size=12, weight="bold"),
             command=self._open_events_dialog
         )
@@ -164,43 +185,59 @@ class AjinView(ctk.CTkFrame):
     # TABELA PRINCIPAL DE DISPOSITIVOS (8 COLUNAS)
     # =========================================================================
     def _build_table_view(self):
-        # Container da Tabela
-        self.table_container = ctk.CTkFrame(self.left_panel, corner_radius=6, fg_color=("#f8fafc", "#16181f"), border_width=1, border_color=("#e2e8f0", "#232630"))
+        # Container da Tabela com acabamento Dark Mode Profissional (NOC Clean)
+        self.table_container = ctk.CTkFrame(
+            self.left_panel,
+            corner_radius=8,
+            fg_color="#13161f",
+            border_width=1,
+            border_color="#232838"
+        )
         self.table_container.grid(row=1, column=0, sticky="nsew")
         self.table_container.grid_rowconfigure(1, weight=1)
         self.table_container.grid_columnconfigure(0, weight=1)
 
         # Cabeçalho Fixo com as 8 Colunas Exatas
-        self.header_frame = ctk.CTkFrame(self.table_container, height=36, corner_radius=0, fg_color=("#eef2f6", "#1c1f28"))
+        self.header_frame = ctk.CTkFrame(
+            self.table_container,
+            height=36,
+            corner_radius=0,
+            fg_color="#1a1e2b"
+        )
         self.header_frame.grid(row=0, column=0, sticky="ew")
         self.header_frame.grid_propagate(False)
 
         headers = [
             ("Nome (Ponto)", 135, "name"),
-            ("Em Funcionamento 🔼", 135, "status"),
-            ("Endereço / Serial", 125, "serial"),
-            ("Descrição (Rua / Local)", 220, "desc"),
+            ("Status", 115, "status"),
+            ("Endereço / Serial", 135, "serial"),
+            ("Descrição (Rua / Local)", 225, "desc"),
             ("Fabricante", 100, "vendor"),
             ("Tempo no Status", 110, "uptime"),
-            ("Canal OLT", 115, "port"),
-            ("Ações", 90, None)
+            ("Canal OLT", 120, "port"),
+            ("Ações", 80, None)
         ]
 
+        self._header_buttons = {}
         for text, width, sort_key in headers:
             if sort_key:
+                initial_text = f"{text} ▲" if sort_key == self._sort_col else text
+                initial_color = "#38bdf8" if sort_key == self._sort_col else "#94a3b8"
                 btn = ctk.CTkButton(
                     self.header_frame,
-                    text=text,
+                    text=initial_text,
                     width=width,
                     height=32,
                     fg_color="transparent",
-                    text_color=("gray20", "#c5cad6"),
-                    hover_color=("#e2e8f0", "#282c37"),
+                    text_color=initial_color,
+                    hover_color="#252c3d",
                     anchor="w",
                     font=ctk.CTkFont(size=11, weight="bold"),
                     command=lambda k=sort_key: self._on_column_sort(k)
                 )
+                btn._base_title = text
                 btn.pack(side="left", padx=4)
+                self._header_buttons[sort_key] = btn
             else:
                 lbl = ctk.CTkLabel(
                     self.header_frame,
@@ -208,7 +245,7 @@ class AjinView(ctk.CTkFrame):
                     width=width,
                     anchor="w",
                     font=ctk.CTkFont(size=11, weight="bold"),
-                    text_color=("gray20", "#c5cad6")
+                    text_color="#94a3b8"
                 )
                 lbl.pack(side="left", padx=4)
 
@@ -226,6 +263,15 @@ class AjinView(ctk.CTkFrame):
         else:
             self._sort_col = col_key
             self._sort_ascending = True
+
+        for k, btn in getattr(self, "_header_buttons", {}).items():
+            base_t = getattr(btn, "_base_title", "")
+            if k == self._sort_col:
+                arr = "▲" if self._sort_ascending else "▼"
+                btn.configure(text=f"{base_t} {arr}", text_color="#38bdf8")
+            else:
+                btn.configure(text=base_t, text_color="#94a3b8")
+
         self._apply_filters()
 
     # =========================================================================
@@ -240,7 +286,7 @@ class AjinView(ctk.CTkFrame):
             bot_frame,
             text="0 de 0 dispositivos",
             font=ctk.CTkFont(size=12, weight="bold"),
-            text_color=("gray30", "#a6accd")
+            text_color="#94a3b8"
         )
         self.lbl_counter.pack(side="left", padx=(0, 14))
 
@@ -250,9 +296,11 @@ class AjinView(ctk.CTkFrame):
             text="Exportar",
             width=80,
             height=30,
-            fg_color=("#e2e8f0", "#262832"),
-            text_color=("gray10", "#ffffff"),
-            hover_color=("#cbd5e1", "#343644"),
+            fg_color="#222736",
+            text_color="#f1f5f9",
+            hover_color="#30384c",
+            border_width=1,
+            border_color="#374151",
             font=ctk.CTkFont(size=11, weight="bold"),
             command=self._on_export_clicked
         )
@@ -264,8 +312,9 @@ class AjinView(ctk.CTkFrame):
             text="Atualizar",
             width=80,
             height=30,
-            fg_color="#0066cc",
-            hover_color="#0052a3",
+            fg_color="#0284c7",
+            hover_color="#0369a1",
+            text_color="#ffffff",
             font=ctk.CTkFont(size=11, weight="bold"),
             command=self._on_manual_refresh_clicked
         )
@@ -276,7 +325,7 @@ class AjinView(ctk.CTkFrame):
             bot_frame,
             text="Hora: --:--:--",
             font=ctk.CTkFont(size=11),
-            text_color=("gray40", "#8e92a0")
+            text_color="#94a3b8"
         )
         self.lbl_timer_status.pack(side="right")
 
@@ -729,123 +778,198 @@ class AjinView(ctk.CTkFrame):
 
         for idx, r in enumerate(self._filtered_rows):
             is_even = (idx % 2 == 0)
-            row_bg = ("#ffffff", "#181a22") if is_even else ("#f8fafc", "#14161c")
+            row_bg = "#181c27" if is_even else "#141721"
 
-            row_frame = ctk.CTkFrame(self.scroll_table, height=36, corner_radius=3, fg_color=row_bg)
+            row_frame = ctk.CTkFrame(self.scroll_table, height=38, corner_radius=4, fg_color=row_bg)
             row_frame.pack(fill="x", pady=1)
             row_frame.pack_propagate(False)
 
-            # Coluna 1: Nome (Ponto) + Badge 2P + Lápis ✏️
+            # Coluna 1: Nome (Ponto) + Badge 2P + Lápis ✏️ (width 135)
             c1 = ctk.CTkFrame(row_frame, width=135, fg_color="transparent")
             c1.pack(side="left", padx=4)
             c1.pack_propagate(False)
 
             p_name = r.get("name") or "--"
-            lbl_p = ctk.CTkLabel(c1, text=f"🖧 {p_name}", font=ctk.CTkFont(size=12, weight="bold"), text_color="#0066cc")
+            lbl_p = ctk.CTkLabel(
+                c1,
+                text=f"🖧 {p_name}",
+                font=ctk.CTkFont(size=12, weight="bold"),
+                text_color="#ffffff"
+            )
             lbl_p.pack(side="left", padx=(0, 4))
 
             if r.get("multi_llid"):
-                badge_2p = ctk.CTkLabel(c1, text="2P", font=ctk.CTkFont(size=9, weight="bold"), text_color="#3498db", fg_color=("#e1f0fa", "#162e4a"), corner_radius=3, width=22, height=16)
+                badge_2p = ctk.CTkLabel(
+                    c1,
+                    text="2P",
+                    font=ctk.CTkFont(size=9, weight="bold"),
+                    text_color="#38bdf8",
+                    fg_color="#0f2b48",
+                    corner_radius=3,
+                    width=22,
+                    height=16
+                )
                 badge_2p.pack(side="left", padx=(0, 4))
 
             btn_edit_name = ctk.CTkButton(
-                c1, text="✏️", width=20, height=20, fg_color="transparent",
-                hover_color=("#e2e8f0", "#282c37"), font=ctk.CTkFont(size=10),
+                c1,
+                text="✏️",
+                width=20,
+                height=20,
+                fg_color="transparent",
+                hover_color="#282f42",
+                font=ctk.CTkFont(size=10),
                 command=lambda row=r: self._open_edit_dialog(row)
             )
             btn_edit_name.pack(side="left")
 
-            # Coluna 2: Em Funcionamento (🔴 Não / 🟢 Sim)
-            c2 = ctk.CTkFrame(row_frame, width=135, fg_color="transparent")
+            # Coluna 2: Status (width 115) - Badge Profissional NOC Clean
+            c2 = ctk.CTkFrame(row_frame, width=115, fg_color="transparent")
             c2.pack(side="left", padx=4)
             c2.pack_propagate(False)
 
             is_online = (r.get("status") == "Online")
-            stt_icon = "🟢 Sim" if is_online else "🔴 Não"
-            stt_color = "#27ae60" if is_online else "#e74c3c"
-            lbl_stt = ctk.CTkLabel(c2, text=stt_icon, font=ctk.CTkFont(size=12, weight="bold"), text_color=stt_color)
+            if is_online:
+                lbl_stt = ctk.CTkLabel(
+                    c2,
+                    text="● Online",
+                    font=ctk.CTkFont(size=10, weight="bold"),
+                    text_color="#4ade80",
+                    fg_color="#0d2e1c",
+                    corner_radius=10,
+                    width=68,
+                    height=22
+                )
+            else:
+                lbl_stt = ctk.CTkLabel(
+                    c2,
+                    text="● Offline",
+                    font=ctk.CTkFont(size=10, weight="bold"),
+                    text_color="#f87171",
+                    fg_color="#3c1418",
+                    corner_radius=10,
+                    width=70,
+                    height=22
+                )
             lbl_stt.pack(side="left")
 
-            # Coluna 3: Endereço / Serial (MAC)
-            c3 = ctk.CTkFrame(row_frame, width=125, fg_color="transparent")
+            # Coluna 3: Endereço / Serial (MAC) (width 135)
+            c3 = ctk.CTkFrame(row_frame, width=135, fg_color="transparent")
             c3.pack(side="left", padx=4)
             c3.pack_propagate(False)
-            lbl_ser = ctk.CTkLabel(c3, text=r.get("serial", "-"), font=ctk.CTkFont(family="Consolas", size=11), text_color=("gray20", "#c5cad6"))
+            lbl_ser = ctk.CTkLabel(
+                c3,
+                text=r.get("serial", "-"),
+                font=ctk.CTkFont(family="Consolas", size=11, weight="bold"),
+                text_color="#cbd5e1"
+            )
             lbl_ser.pack(side="left")
 
-            # Coluna 4: Descrição (Rua / Local) + Lápis ✏️
-            c4 = ctk.CTkFrame(row_frame, width=220, fg_color="transparent")
+            # Coluna 4: Descrição (Rua / Local) + Lápis ✏️ (width 225)
+            c4 = ctk.CTkFrame(row_frame, width=225, fg_color="transparent")
             c4.pack(side="left", padx=4)
             c4.pack_propagate(False)
 
             p_desc = r.get("desc") or ""
             if not p_desc:
-                lbl_desc = ctk.CTkLabel(c4, text="+ adicionar rua", font=ctk.CTkFont(size=11, slant="italic"), text_color=("gray50", "#7f8c8d"))
+                lbl_desc = ctk.CTkLabel(
+                    c4,
+                    text="+ adicionar rua",
+                    font=ctk.CTkFont(size=10, slant="italic"),
+                    text_color="#64748b"
+                )
             else:
-                lbl_desc = ctk.CTkLabel(c4, text=p_desc, font=ctk.CTkFont(size=11), text_color=("gray10", "#ecf0f1"))
+                lbl_desc = ctk.CTkLabel(
+                    c4,
+                    text=p_desc,
+                    font=ctk.CTkFont(size=11),
+                    text_color="#f1f5f9"
+                )
             lbl_desc.pack(side="left", padx=(0, 4))
 
             btn_edit_desc = ctk.CTkButton(
-                c4, text="✏️", width=20, height=20, fg_color="transparent",
-                hover_color=("#e2e8f0", "#282c37"), font=ctk.CTkFont(size=10),
+                c4,
+                text="✏️",
+                width=20,
+                height=20,
+                fg_color="transparent",
+                hover_color="#282f42",
+                font=ctk.CTkFont(size=10),
                 command=lambda row=r: self._open_edit_dialog(row)
             )
             btn_edit_desc.pack(side="left")
 
-            # Coluna 5: Fabricante
+            # Coluna 5: Fabricante (width 100)
             c5 = ctk.CTkFrame(row_frame, width=100, fg_color="transparent")
             c5.pack(side="left", padx=4)
             c5.pack_propagate(False)
 
-            vendor_pill = ctk.CTkLabel(
-                c5, text=r.get("vendor", "-"),
-                font=ctk.CTkFont(size=10),
-                text_color=("gray20", "#bdc3c7"),
-                fg_color=("#f1f5f9", "#1e222d"),
-                corner_radius=4, padx=6, height=20
+            lbl_vendor = ctk.CTkLabel(
+                c5,
+                text=r.get("vendor", "-"),
+                font=ctk.CTkFont(size=11),
+                text_color="#94a3b8"
             )
-            vendor_pill.pack(side="left")
+            lbl_vendor.pack(side="left")
 
-            # Coluna 6: Tempo no Status (vermelho se offline)
+            # Coluna 6: Tempo no Status (width 110)
             c6 = ctk.CTkFrame(row_frame, width=110, fg_color="transparent")
             c6.pack(side="left", padx=4)
             c6.pack_propagate(False)
 
             upt_txt = r.get("uptime") or "-"
-            upt_col = "#e74c3c" if not is_online else ("gray10", "#ecf0f1")
+            upt_col = "#f87171" if not is_online else "#94a3b8"
             upt_weight = "bold" if not is_online else "normal"
-            lbl_upt = ctk.CTkLabel(c6, text=upt_txt, font=ctk.CTkFont(size=11, weight=upt_weight), text_color=upt_col)
+            lbl_upt = ctk.CTkLabel(
+                c6,
+                text=upt_txt,
+                font=ctk.CTkFont(size=11, weight=upt_weight),
+                text_color=upt_col
+            )
             lbl_upt.pack(side="left")
 
-            # Coluna 7: Canal OLT
-            c7 = ctk.CTkFrame(row_frame, width=115, fg_color="transparent")
+            # Coluna 7: Canal OLT (width 120)
+            c7 = ctk.CTkFrame(row_frame, width=120, fg_color="transparent")
             c7.pack(side="left", padx=4)
             c7.pack_propagate(False)
 
             canal_txt = f"{r.get('port')}_{str(r.get('id')).zfill(3)}" if show_olt else "--"
-            lbl_canal = ctk.CTkLabel(c7, text=canal_txt, font=ctk.CTkFont(size=11), text_color=("gray30", "#95a5a6"))
+            lbl_canal = ctk.CTkLabel(
+                c7,
+                text=canal_txt,
+                font=ctk.CTkFont(family="Consolas", size=11),
+                text_color="#cbd5e1"
+            )
             lbl_canal.pack(side="left")
 
-            # Coluna 8: Ações ([🔍 Menu] e [🗑️])
-            c8 = ctk.CTkFrame(row_frame, width=90, fg_color="transparent")
+            # Coluna 8: Ações (width 80)
+            c8 = ctk.CTkFrame(row_frame, width=80, fg_color="transparent")
             c8.pack(side="left", padx=4)
             c8.pack_propagate(False)
 
             btn_menu = ctk.CTkButton(
-                c8, text="🔍 Menu", width=60, height=24,
-                fg_color=("#e2e8f0", "#262832"),
-                text_color=("gray10", "#ffffff"),
-                hover_color=("#cbd5e1", "#343644"),
+                c8,
+                text="Menu",
+                width=50,
+                height=24,
+                fg_color="#222736",
+                hover_color="#30384c",
+                border_width=1,
+                border_color="#374151",
+                text_color="#f1f5f9",
                 font=ctk.CTkFont(size=10, weight="bold"),
                 command=lambda row=r: self._open_menu_dialog(row)
             )
             btn_menu.pack(side="left", padx=(0, 4))
 
             btn_del = ctk.CTkButton(
-                c8, text="🗑️", width=24, height=24,
+                c8,
+                text="🗑️",
+                width=22,
+                height=24,
                 fg_color="transparent",
-                hover_color=("#fee2e2", "#3b1e1e"),
-                text_color="#e74c3c",
+                hover_color="#3d1418",
+                text_color="#f87171",
                 font=ctk.CTkFont(size=11),
                 command=lambda row=r: self._on_delete_onu(row)
             )
