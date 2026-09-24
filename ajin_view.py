@@ -13,14 +13,21 @@ import threading
 import time
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 import webbrowser
 
 import customtkinter as ctk
 from PIL import Image
+import sys
 
 from ajin_manager import AjinManager
 from logger import log
+
+
+def get_resource_path(relative_path: str) -> Path:
+    if hasattr(sys, "_MEIPASS"):
+        return Path(sys._MEIPASS) / relative_path
+    return Path(__file__).parent / relative_path
 
 
 class AjinView(ctk.CTkFrame):
@@ -284,252 +291,275 @@ class AjinView(ctk.CTkFrame):
         self.lbl_timer_status.pack(side="right")
 
     # =========================================================================
-    # SIDEBAR DIREITA: CARDS DE MÉTRICAS NOC MODULARES
+    # SIDEBAR DIREITA: MÉTRICAS NOC CLEAN (PADRÃO AJIN)
     # =========================================================================
-    def _create_card_container(self, parent):
-        """Cria um card modular com estilo visual de console NOC."""
-        card = ctk.CTkFrame(
-            parent,
-            fg_color="#0c2543",
-            corner_radius=8,
-            border_width=1,
-            border_color="#184a7e"
+    def _load_noc_icon(self, name: str, size: Tuple[int, int]) -> Optional[ctk.CTkImage]:
+        try:
+            p = get_resource_path(f"imagens/{name}.png")
+            if p.exists():
+                pil_img = Image.open(str(p)).convert("RGBA")
+                return ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=size)
+        except Exception as e:
+            log.warning(f"Erro ao carregar ícone NOC {name}: {e}")
+        return None
+
+    def _add_noc_divider(self, parent):
+        """Divisor horizontal sutil de 1px entre seções no padrão clean."""
+        div = ctk.CTkFrame(parent, height=1, fg_color="#4f8ecc", corner_radius=0)
+        div.pack(fill="x", padx=14, pady=0)
+        return div
+
+    def _create_noc_stat_section(self, parent, icon_img, val_str, label_str):
+        """Cria uma seção de métrica clean: ícone à esquerda, número grande e rótulo à direita."""
+        sec = ctk.CTkFrame(parent, fg_color="transparent")
+        sec.pack(fill="x", padx=16, pady=(10, 8))
+
+        if icon_img:
+            lbl_ico = ctk.CTkLabel(sec, image=icon_img, text="")
+        else:
+            lbl_ico = ctk.CTkLabel(sec, text="●", font=ctk.CTkFont(size=20), text_color="#ffffff")
+        lbl_ico.pack(side="left", anchor="center")
+
+        r_box = ctk.CTkFrame(sec, fg_color="transparent")
+        r_box.pack(side="right", anchor="e")
+
+        lbl_val = ctk.CTkLabel(
+            r_box,
+            text=val_str,
+            font=ctk.CTkFont(size=28, weight="bold"),
+            text_color="#ffffff",
+            anchor="e"
         )
-        card.pack(fill="x", padx=8, pady=4)
-        return card
+        lbl_val.pack(anchor="e")
+
+        lbl_sub = ctk.CTkLabel(
+            r_box,
+            text=label_str,
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color="#ffffff",
+            anchor="e"
+        )
+        lbl_sub.pack(anchor="e")
+
+        return lbl_val, lbl_sub
 
     def _build_sidebar_noc(self):
-        # Painel lateral azul marinho escuro com cantos arredondados
+        # Painel lateral azul contínuo (#2870c2) fiel à referência clean
         self.sidebar_frame = ctk.CTkFrame(
             self,
-            width=245,
-            corner_radius=10,
-            fg_color="#081b33",
-            border_width=1,
-            border_color="#10335e"
+            width=260,
+            corner_radius=0,
+            fg_color="#2870c2",
+            border_width=0
         )
-        self.sidebar_frame.grid(row=0, column=1, sticky="ns", padx=(0, 4), pady=(0, 2))
+        self.sidebar_frame.grid(row=0, column=1, sticky="ns", padx=(0, 0), pady=(0, 0))
         self.sidebar_frame.grid_propagate(False)
 
-        # 1. Card Total de ONUs
-        card_total = self._create_card_container(self.sidebar_frame)
-        lbl_tot_title = ctk.CTkLabel(
-            card_total,
-            text="TOTAL DE ONUs",
-            font=ctk.CTkFont(size=9, weight="bold"),
-            text_color="#7fa1c4"
-        )
-        lbl_tot_title.pack(anchor="w", padx=10, pady=(6, 1))
+        # Pré-carrega os ícones nativos
+        self._img_router = self._load_noc_icon("noc_router", (34, 30))
+        self._img_check = self._load_noc_icon("noc_check", (34, 34))
+        self._img_cross = self._load_noc_icon("noc_cross", (34, 34))
+        self._img_cam = self._load_noc_icon("noc_cam", (34, 24))
+        self._img_pon = self._load_noc_icon("noc_pon", (26, 26))
+        self._img_clock = self._load_noc_icon("noc_clock", (32, 32))
+        self._img_globe = self._load_noc_icon("noc_globe", (30, 31))
+        self._img_db = self._load_noc_icon("noc_db", (26, 28))
 
-        self.lbl_total_val = ctk.CTkLabel(
-            card_total,
-            text="🖧  0",
-            font=ctk.CTkFont(size=20, weight="bold"),
+        # 1. Total
+        self.lbl_total_val, _ = self._create_noc_stat_section(
+            self.sidebar_frame, self._img_router, "0", "Total"
+        )
+        self._add_noc_divider(self.sidebar_frame)
+
+        # 2. Em Funcionamento
+        self.lbl_status_online, _ = self._create_noc_stat_section(
+            self.sidebar_frame, self._img_check, "0", "Em Funcionamento"
+        )
+        self._add_noc_divider(self.sidebar_frame)
+
+        # 3. Fora de Funcionamento
+        self.lbl_status_offline, _ = self._create_noc_stat_section(
+            self.sidebar_frame, self._img_cross, "0", "Fora de Funcionamento"
+        )
+        self._add_noc_divider(self.sidebar_frame)
+
+        # 4. Câmeras Mapeadas
+        self.lbl_cams_val, _ = self._create_noc_stat_section(
+            self.sidebar_frame, self._img_cam, "0", "Câmeras Mapeadas"
+        )
+        self._add_noc_divider(self.sidebar_frame)
+
+        # 5. Portas PON
+        sec_pon = ctk.CTkFrame(self.sidebar_frame, fg_color="transparent")
+        sec_pon.pack(fill="x", padx=16, pady=(10, 8))
+
+        top_pon = ctk.CTkFrame(sec_pon, fg_color="transparent")
+        top_pon.pack(fill="x", pady=(0, 6))
+
+        if self._img_pon:
+            lbl_pon_ico = ctk.CTkLabel(top_pon, image=self._img_pon, text="")
+        else:
+            lbl_pon_ico = ctk.CTkLabel(top_pon, text="🗄️", font=ctk.CTkFont(size=18), text_color="#ffffff")
+        lbl_pon_ico.pack(side="left", anchor="w")
+
+        lbl_pon_title = ctk.CTkLabel(
+            top_pon,
+            text="Portas PON",
+            font=ctk.CTkFont(size=12, weight="bold"),
             text_color="#ffffff"
         )
-        self.lbl_total_val.pack(anchor="w", padx=10, pady=(0, 1))
+        lbl_pon_title.pack(side="right", anchor="e")
 
-        lbl_tot_sub = ctk.CTkLabel(
-            card_total,
-            text="Dispositivos na OLT",
-            font=ctk.CTkFont(size=9),
-            text_color="#8da4be"
-        )
-        lbl_tot_sub.pack(anchor="w", padx=10, pady=(0, 6))
+        # 3 linhas de portas
+        self.lbl_p1_val = self._create_pon_row(sec_pon, "Slot1-PON1", "- / -")
+        self.lbl_p2_val = self._create_pon_row(sec_pon, "Slot2-PON1", "- / -")
+        self.lbl_p3_val = self._create_pon_row(sec_pon, "Slot2-PON2", "- / -")
 
-        # 2. Card Status Operacional (Online e Quedas lado a lado)
-        card_status = self._create_card_container(self.sidebar_frame)
-        lbl_st_title = ctk.CTkLabel(
-            card_status,
-            text="STATUS OPERACIONAL",
-            font=ctk.CTkFont(size=9, weight="bold"),
-            text_color="#7fa1c4"
-        )
-        lbl_st_title.pack(anchor="w", padx=10, pady=(6, 4))
+        self._add_noc_divider(self.sidebar_frame)
 
-        status_row = ctk.CTkFrame(card_status, fg_color="transparent")
-        status_row.pack(fill="x", padx=8, pady=(0, 8))
-        status_row.grid_columnconfigure(0, weight=1)
-        status_row.grid_columnconfigure(1, weight=1)
+        # 6. Última Coleta
+        sec_coleta = ctk.CTkFrame(self.sidebar_frame, fg_color="transparent")
+        sec_coleta.pack(fill="x", padx=16, pady=(10, 8))
 
-        # Sub-box Online
-        box_online = ctk.CTkFrame(
-            status_row,
-            fg_color="#0a321f",
-            corner_radius=6,
-            border_width=1,
-            border_color="#196c44"
-        )
-        box_online.grid(row=0, column=0, sticky="nsew", padx=(0, 4))
-        
-        self.lbl_status_online = ctk.CTkLabel(
-            box_online,
-            text="🟢 0",
-            font=ctk.CTkFont(size=17, weight="bold"),
-            text_color="#2ecc71"
-        )
-        self.lbl_status_online.pack(pady=(4, 0))
-        lbl_on_sub = ctk.CTkLabel(
-            box_online,
-            text="Online",
-            font=ctk.CTkFont(size=9, weight="bold"),
-            text_color="#7fe5b2"
-        )
-        lbl_on_sub.pack(pady=(0, 4))
+        if self._img_clock:
+            lbl_col_ico = ctk.CTkLabel(sec_coleta, image=self._img_clock, text="")
+        else:
+            lbl_col_ico = ctk.CTkLabel(sec_coleta, text="⏱️", font=ctk.CTkFont(size=20), text_color="#ffffff")
+        lbl_col_ico.pack(side="left", anchor="center")
 
-        # Sub-box Quedas (Offline)
-        box_offline = ctk.CTkFrame(
-            status_row,
-            fg_color="#361016",
-            corner_radius=6,
-            border_width=1,
-            border_color="#7b222d"
-        )
-        box_offline.grid(row=0, column=1, sticky="nsew", padx=(4, 0))
-        
-        self.lbl_status_offline = ctk.CTkLabel(
-            box_offline,
-            text="🔴 0",
-            font=ctk.CTkFont(size=17, weight="bold"),
-            text_color="#ff5252"
-        )
-        self.lbl_status_offline.pack(pady=(4, 0))
-        lbl_off_sub = ctk.CTkLabel(
-            box_offline,
-            text="Quedas",
-            font=ctk.CTkFont(size=9, weight="bold"),
-            text_color="#ff9999"
-        )
-        lbl_off_sub.pack(pady=(0, 4))
-
-        # 3. Card Câmeras Mapeadas
-        card_cams = self._create_card_container(self.sidebar_frame)
-        lbl_cam_title = ctk.CTkLabel(
-            card_cams,
-            text="CÂMERAS IP (LAN)",
-            font=ctk.CTkFont(size=9, weight="bold"),
-            text_color="#7fa1c4"
-        )
-        lbl_cam_title.pack(anchor="w", padx=10, pady=(6, 1))
-
-        self.lbl_cams_val = ctk.CTkLabel(
-            card_cams,
-            text="📷  0",
-            font=ctk.CTkFont(size=20, weight="bold"),
-            text_color="#38bdf8"
-        )
-        self.lbl_cams_val.pack(anchor="w", padx=10, pady=(0, 1))
-
-        lbl_cam_sub = ctk.CTkLabel(
-            card_cams,
-            text="Câmeras ativas nas portas LAN",
-            font=ctk.CTkFont(size=9),
-            text_color="#8da4be"
-        )
-        lbl_cam_sub.pack(anchor="w", padx=10, pady=(0, 6))
-
-        # 4. Card Quebra por Portas PON com mini barras de progresso
-        card_ports = self._create_card_container(self.sidebar_frame)
-        lbl_p_title = ctk.CTkLabel(
-            card_ports,
-            text="PORTAS PON (OLT)",
-            font=ctk.CTkFont(size=9, weight="bold"),
-            text_color="#7fa1c4"
-        )
-        lbl_p_title.pack(anchor="w", padx=10, pady=(6, 4))
-
-        # Slot1-PON1
-        p1_row = ctk.CTkFrame(card_ports, fg_color="transparent")
-        p1_row.pack(fill="x", padx=10, pady=(2, 1))
-        lbl_p1_name = ctk.CTkLabel(p1_row, text="Slot1-PON1", font=ctk.CTkFont(size=10, weight="bold"), text_color="#ecf0f1")
-        lbl_p1_name.pack(side="left")
-        self.lbl_p1_val = ctk.CTkLabel(p1_row, text="- / -", font=ctk.CTkFont(size=10, weight="bold"), text_color="#bdc3c7")
-        self.lbl_p1_val.pack(side="right")
-        self.bar_p1 = ctk.CTkProgressBar(card_ports, height=5, corner_radius=3, fg_color="#142e4e", progress_color="#2ecc71")
-        self.bar_p1.set(0)
-        self.bar_p1.pack(fill="x", padx=10, pady=(0, 5))
-
-        # Slot2-PON1
-        p2_row = ctk.CTkFrame(card_ports, fg_color="transparent")
-        p2_row.pack(fill="x", padx=10, pady=(2, 1))
-        lbl_p2_name = ctk.CTkLabel(p2_row, text="Slot2-PON1", font=ctk.CTkFont(size=10, weight="bold"), text_color="#ecf0f1")
-        lbl_p2_name.pack(side="left")
-        self.lbl_p2_val = ctk.CTkLabel(p2_row, text="- / -", font=ctk.CTkFont(size=10, weight="bold"), text_color="#bdc3c7")
-        self.lbl_p2_val.pack(side="right")
-        self.bar_p2 = ctk.CTkProgressBar(card_ports, height=5, corner_radius=3, fg_color="#142e4e", progress_color="#2ecc71")
-        self.bar_p2.set(0)
-        self.bar_p2.pack(fill="x", padx=10, pady=(0, 5))
-
-        # Slot2-PON2
-        p3_row = ctk.CTkFrame(card_ports, fg_color="transparent")
-        p3_row.pack(fill="x", padx=10, pady=(2, 1))
-        lbl_p3_name = ctk.CTkLabel(p3_row, text="Slot2-PON2", font=ctk.CTkFont(size=10, weight="bold"), text_color="#ecf0f1")
-        lbl_p3_name.pack(side="left")
-        self.lbl_p3_val = ctk.CTkLabel(p3_row, text="- / -", font=ctk.CTkFont(size=10, weight="bold"), text_color="#bdc3c7")
-        self.lbl_p3_val.pack(side="right")
-        self.bar_p3 = ctk.CTkProgressBar(card_ports, height=5, corner_radius=3, fg_color="#142e4e", progress_color="#2ecc71")
-        self.bar_p3.set(0)
-        self.bar_p3.pack(fill="x", padx=10, pady=(0, 7))
-
-        # 5. Card Última Coleta & Sincronização
-        card_coleta = self._create_card_container(self.sidebar_frame)
-        lbl_col_title = ctk.CTkLabel(
-            card_coleta,
-            text="ÚLTIMA SINCRONIZAÇÃO",
-            font=ctk.CTkFont(size=9, weight="bold"),
-            text_color="#7fa1c4"
-        )
-        lbl_col_title.pack(anchor="w", padx=10, pady=(6, 2))
+        box_col = ctk.CTkFrame(sec_coleta, fg_color="transparent")
+        box_col.pack(side="right", anchor="e")
 
         self.lbl_coleta_time = ctk.CTkLabel(
-            card_coleta,
-            text="⏱️  --:--:--",
-            font=ctk.CTkFont(size=17, weight="bold"),
-            text_color="#ffffff"
+            box_col,
+            text="--:--:--",
+            font=ctk.CTkFont(size=16, weight="bold"),
+            text_color="#ffffff",
+            anchor="e"
         )
-        self.lbl_coleta_time.pack(anchor="w", padx=10, pady=(0, 1))
+        self.lbl_coleta_time.pack(anchor="e")
 
         self.lbl_coleta_date = ctk.CTkLabel(
-            card_coleta,
-            text="Data: --/--/----",
-            font=ctk.CTkFont(size=10),
-            text_color="#8da4be"
+            box_col,
+            text="--/--/----",
+            font=ctk.CTkFont(size=11),
+            text_color="#ffffff",
+            anchor="e"
         )
-        self.lbl_coleta_date.pack(anchor="w", padx=10, pady=(0, 2))
+        self.lbl_coleta_date.pack(anchor="e")
 
         lbl_col_sub = ctk.CTkLabel(
-            card_coleta,
-            text="● Sincronizado a cada 10s",
-            font=ctk.CTkFont(size=9),
-            text_color="#2ecc71"
+            box_col,
+            text="Última Coleta",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color="#ffffff",
+            anchor="e"
         )
-        lbl_col_sub.pack(anchor="w", padx=10, pady=(0, 6))
+        lbl_col_sub.pack(anchor="e")
 
-        # 6. Card Infraestrutura (Hub e OLT)
-        card_infra = self._create_card_container(self.sidebar_frame)
-        lbl_inf_title = ctk.CTkLabel(
-            card_infra,
-            text="INFRAESTRUTURA DE REDE",
-            font=ctk.CTkFont(size=9, weight="bold"),
-            text_color="#7fa1c4"
+        self._add_noc_divider(self.sidebar_frame)
+
+        # 7. Servidor Coletor
+        sec_srv = ctk.CTkFrame(self.sidebar_frame, fg_color="transparent")
+        sec_srv.pack(fill="x", padx=16, pady=(10, 8))
+
+        if self._img_globe:
+            lbl_srv_ico = ctk.CTkLabel(sec_srv, image=self._img_globe, text="")
+        else:
+            lbl_srv_ico = ctk.CTkLabel(sec_srv, text="🌐", font=ctk.CTkFont(size=20), text_color="#2fe091")
+        lbl_srv_ico.pack(side="left", anchor="center")
+
+        box_srv = ctk.CTkFrame(sec_srv, fg_color="transparent")
+        box_srv.pack(side="right", anchor="e")
+
+        self.lbl_server_stt = ctk.CTkLabel(
+            box_srv,
+            text="Ping OK",
+            font=ctk.CTkFont(size=15, weight="bold"),
+            text_color="#2fe091",
+            anchor="e"
         )
-        lbl_inf_title.pack(anchor="w", padx=10, pady=(6, 4))
+        self.lbl_server_stt.pack(anchor="e")
 
-        # Linha Hub
-        row_hub = ctk.CTkFrame(card_infra, fg_color="transparent")
-        row_hub.pack(fill="x", padx=10, pady=(1, 2))
-        lbl_hub_tag = ctk.CTkLabel(row_hub, text="🖥️ Hub XPTI", font=ctk.CTkFont(size=10, weight="bold"), text_color="#ecf0f1")
-        lbl_hub_tag.pack(side="left")
-        self.lbl_hub_ip = ctk.CTkLabel(row_hub, text="192.168.12.10", font=ctk.CTkFont(size=10), text_color="#2ecc71")
-        self.lbl_hub_ip.pack(side="right")
+        self.lbl_server_ip = ctk.CTkLabel(
+            box_srv,
+            text="192.168.190.187",
+            font=ctk.CTkFont(size=11),
+            text_color="#ffffff",
+            anchor="e"
+        )
+        self.lbl_server_ip.pack(anchor="e")
 
-        # Linha OLT
-        row_olt = ctk.CTkFrame(card_infra, fg_color="transparent")
-        row_olt.pack(fill="x", padx=10, pady=(1, 6))
-        lbl_olt_tag = ctk.CTkLabel(row_olt, text="💾 FD1108S", font=ctk.CTkFont(size=10, weight="bold"), text_color="#ecf0f1")
-        lbl_olt_tag.pack(side="left")
-        self.lbl_olt_ip = ctk.CTkLabel(row_olt, text="192.168.1.100", font=ctk.CTkFont(size=10), text_color="#8da4be")
-        self.lbl_olt_ip.pack(side="right")
+        lbl_srv_sub = ctk.CTkLabel(
+            box_srv,
+            text="Servidor Coletor",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color="#ffffff",
+            anchor="e"
+        )
+        lbl_srv_sub.pack(anchor="e")
+
+        self._add_noc_divider(self.sidebar_frame)
+
+        # 8. OLT Principal
+        sec_olt = ctk.CTkFrame(self.sidebar_frame, fg_color="transparent")
+        sec_olt.pack(fill="x", padx=16, pady=(10, 8))
+
+        if self._img_db:
+            lbl_olt_ico = ctk.CTkLabel(sec_olt, image=self._img_db, text="")
+        else:
+            lbl_olt_ico = ctk.CTkLabel(sec_olt, text="💾", font=ctk.CTkFont(size=20), text_color="#ffffff")
+        lbl_olt_ico.pack(side="left", anchor="center")
+
+        box_olt = ctk.CTkFrame(sec_olt, fg_color="transparent")
+        box_olt.pack(side="right", anchor="e")
+
+        self.lbl_olt_model = ctk.CTkLabel(
+            box_olt,
+            text="C-Data FD1108S",
+            font=ctk.CTkFont(size=13, weight="bold"),
+            text_color="#ffffff",
+            anchor="e"
+        )
+        self.lbl_olt_model.pack(anchor="e")
+
+        self.lbl_olt_ip = ctk.CTkLabel(
+            box_olt,
+            text="192.168.1.100",
+            font=ctk.CTkFont(size=11),
+            text_color="#ffffff",
+            anchor="e"
+        )
+        self.lbl_olt_ip.pack(anchor="e")
+
+        lbl_olt_sub = ctk.CTkLabel(
+            box_olt,
+            text="OLT Principal",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color="#ffffff",
+            anchor="e"
+        )
+        lbl_olt_sub.pack(anchor="e")
+
+        # Barra Inferior Fixa
+        self.bot_strip = ctk.CTkFrame(self.sidebar_frame, height=36, fg_color="#20578e", corner_radius=0)
+        self.bot_strip.pack(side="bottom", fill="x")
+
+        self.lbl_sidebar_time = ctk.CTkLabel(
+            self.bot_strip,
+            text="Hora: --:--:--",
+            font=ctk.CTkFont(size=11),
+            text_color="#ffffff"
+        )
+        self.lbl_sidebar_time.pack(side="left", padx=14, pady=6)
+
+        self.lbl_sidebar_refresh = ctk.CTkLabel(
+            self.bot_strip,
+            text="Refresh: 10s",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color="#ffffff"
+        )
+        self.lbl_sidebar_refresh.pack(side="right", padx=14, pady=6)
 
         # Aliases para compatibilidade legada
         self.card_total = self.lbl_total_val
@@ -539,6 +569,15 @@ class AjinView(ctk.CTkFrame):
         self.lbl_port_s1p1 = self.lbl_p1_val
         self.lbl_port_s2p1 = self.lbl_p2_val
         self.lbl_port_s2p2 = self.lbl_p3_val
+
+    def _create_pon_row(self, parent, name: str, default_val: str):
+        row = ctk.CTkFrame(parent, fg_color="transparent")
+        row.pack(fill="x", pady=2)
+        lbl_n = ctk.CTkLabel(row, text=name, font=ctk.CTkFont(size=11), text_color="#ffffff")
+        lbl_n.pack(side="left")
+        lbl_v = ctk.CTkLabel(row, text=default_val, font=ctk.CTkFont(size=12, weight="bold"), text_color="#ffffff")
+        lbl_v.pack(side="right")
+        return lbl_v
 
     # =========================================================================
     # ATUALIZAÇÃO E RENDERIZAÇÃO DOS DADOS
@@ -560,10 +599,10 @@ class AjinView(ctk.CTkFrame):
         offline = data.get("offline", 0)
         cams = data.get("total_cameras", 0)
 
-        self.lbl_total_val.configure(text=f"🖧  {total}")
-        self.lbl_status_online.configure(text=f"🟢 {online}")
-        self.lbl_status_offline.configure(text=f"🔴 {offline}")
-        self.lbl_cams_val.configure(text=f"📷  {cams}")
+        self.lbl_total_val.configure(text=str(total))
+        self.lbl_status_online.configure(text=str(online))
+        self.lbl_status_offline.configure(text=str(offline))
+        self.lbl_cams_val.configure(text=str(cams))
 
         # Portas PON (converte lista de dicts da API em dict indexado)
         raw_ports = data.get("ports", [])
@@ -574,51 +613,42 @@ class AjinView(ctk.CTkFrame):
         else:
             ports = {}
 
-        def _update_pon_ui(port_key, lbl_widget, bar_widget):
-            if port_key in ports:
-                p = ports[port_key]
-                on = p.get("online", 0)
-                tot = p.get("total", 0)
-                lbl_widget.configure(text=f"{on} / {tot}")
-                if tot > 0:
-                    ratio = max(0.0, min(1.0, on / tot))
-                    bar_widget.set(ratio)
-                    if ratio >= 1.0:
-                        lbl_widget.configure(text_color="#2ecc71")
-                        bar_widget.configure(progress_color="#2ecc71")
-                    elif ratio >= 0.8:
-                        lbl_widget.configure(text_color="#f39c12")
-                        bar_widget.configure(progress_color="#f39c12")
-                    else:
-                        lbl_widget.configure(text_color="#e74c3c")
-                        bar_widget.configure(progress_color="#e74c3c")
-                else:
-                    bar_widget.set(0)
+        if "Slot1-PON1" in ports:
+            p = ports["Slot1-PON1"]
+            self.lbl_p1_val.configure(text=f"{p.get('online', 0)} / {p.get('total', 0)}")
+        if "Slot2-PON1" in ports:
+            p = ports["Slot2-PON1"]
+            self.lbl_p2_val.configure(text=f"{p.get('online', 0)} / {p.get('total', 0)}")
+        if "Slot2-PON2" in ports:
+            p = ports["Slot2-PON2"]
+            self.lbl_p3_val.configure(text=f"{p.get('online', 0)} / {p.get('total', 0)}")
 
-        _update_pon_ui("Slot1-PON1", self.lbl_p1_val, self.bar_p1)
-        _update_pon_ui("Slot2-PON1", self.lbl_p2_val, self.bar_p2)
-        _update_pon_ui("Slot2-PON2", self.lbl_p3_val, self.bar_p3)
-
-        # Horário da última coleta (trata "24/09/2026 às 12:07:40" com regex seguro)
+        # Horário da última coleta
         coleta_str = str(data.get("coleta_formatted", ""))
         m = re.search(r"(\d{2}/\d{2}/\d{4}).*?(\d{2}:\d{2}:\d{2})", coleta_str)
         if m:
             d_part, t_part = m.group(1), m.group(2)
-            self.lbl_coleta_time.configure(text=f"⏱️  {t_part}")
-            self.lbl_coleta_date.configure(text=f"Data: {d_part}")
+            self.lbl_coleta_time.configure(text=t_part)
+            self.lbl_coleta_date.configure(text=d_part)
         elif coleta_str and coleta_str != "-":
             self.lbl_coleta_time.configure(text=coleta_str)
 
         # Status Hub e OLT
         srv_info = data.get("server", {})
-        if isinstance(srv_info, dict) and srv_info.get("online"):
-            self.lbl_hub_ip.configure(text="192.168.12.10 (OK)", text_color="#2ecc71")
-        else:
-            self.lbl_hub_ip.configure(text="192.168.12.10", text_color="#2ecc71")
+        if isinstance(srv_info, dict):
+            if srv_info.get("online"):
+                self.lbl_server_stt.configure(text="Ping OK", text_color="#2fe091")
+            else:
+                self.lbl_server_stt.configure(text="Sem Ping", text_color="#ff5252")
+            if srv_info.get("ip"):
+                self.lbl_server_ip.configure(text=str(srv_info.get("ip")))
 
         olt_info = data.get("olt", {})
-        if isinstance(olt_info, dict) and olt_info.get("ip"):
-            self.lbl_olt_ip.configure(text=str(olt_info.get("ip", "192.168.1.100")))
+        if isinstance(olt_info, dict):
+            if olt_info.get("modelo"):
+                self.lbl_olt_model.configure(text=str(olt_info.get("modelo")))
+            if olt_info.get("ip"):
+                self.lbl_olt_ip.configure(text=str(olt_info.get("ip")))
 
         # Botão de incidentes
         events_hist = data.get("events_history", [])
@@ -1052,7 +1082,14 @@ class AjinView(ctk.CTkFrame):
                 self._refresh_countdown = 10
                 self.mgr.fetch_telemetry_async()
             self.lbl_timer_status.configure(text=f"Hora: {now_str} | Refresh: {self._refresh_countdown}s")
+            if hasattr(self, "lbl_sidebar_refresh"):
+                self.lbl_sidebar_refresh.configure(text=f"Refresh: {self._refresh_countdown}s")
         else:
             self.lbl_timer_status.configure(text=f"Hora: {now_str} | Refresh: Pausado")
+            if hasattr(self, "lbl_sidebar_refresh"):
+                self.lbl_sidebar_refresh.configure(text="Refresh: Pausado")
+
+        if hasattr(self, "lbl_sidebar_time"):
+            self.lbl_sidebar_time.configure(text=f"Hora: {now_str}")
 
         self.after(1000, self._schedule_countdown)
