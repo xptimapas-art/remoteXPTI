@@ -312,7 +312,7 @@ class AjinView(ctk.CTkFrame):
     def _create_noc_stat_section(self, parent, icon_img, val_str, label_str):
         """Cria uma seção de métrica clean: ícone à esquerda, número grande e rótulo à direita."""
         sec = ctk.CTkFrame(parent, fg_color="transparent")
-        sec.pack(fill="x", padx=16, pady=(10, 8))
+        sec.pack(fill="x", padx=10, pady=(5, 4))
 
         if icon_img:
             lbl_ico = ctk.CTkLabel(sec, image=icon_img, text="")
@@ -326,7 +326,7 @@ class AjinView(ctk.CTkFrame):
         lbl_val = ctk.CTkLabel(
             r_box,
             text=val_str,
-            font=ctk.CTkFont(size=28, weight="bold"),
+            font=ctk.CTkFont(size=26, weight="bold"),
             text_color="#ffffff",
             anchor="e"
         )
@@ -344,15 +344,15 @@ class AjinView(ctk.CTkFrame):
         return lbl_val, lbl_sub
 
     def _build_sidebar_noc(self):
-        # Painel lateral azul contínuo (#2870c2) fiel à referência clean
+        # Painel lateral azul (#2870c2) com bordas arredondadas e responsividade
         self.sidebar_frame = ctk.CTkFrame(
             self,
-            width=260,
-            corner_radius=0,
+            width=265,
+            corner_radius=12,
             fg_color="#2870c2",
             border_width=0
         )
-        self.sidebar_frame.grid(row=0, column=1, sticky="ns", padx=(0, 0), pady=(0, 0))
+        self.sidebar_frame.grid(row=0, column=1, sticky="ns", padx=(0, 6), pady=(4, 6))
         self.sidebar_frame.grid_propagate(False)
 
         # Pré-carrega os ícones nativos
@@ -365,36 +365,71 @@ class AjinView(ctk.CTkFrame):
         self._img_globe = self._load_noc_icon("noc_globe", (30, 31))
         self._img_db = self._load_noc_icon("noc_db", (26, 28))
 
+        # Barra Inferior Fixa (Sempre visível no rodapé do painel com cantos arredondados)
+        self.bot_strip = ctk.CTkFrame(self.sidebar_frame, height=34, fg_color="#1d538c", corner_radius=8)
+        self.bot_strip.pack(side="bottom", fill="x", padx=6, pady=(0, 6))
+
+        self.lbl_sidebar_time = ctk.CTkLabel(
+            self.bot_strip,
+            text="Hora: --:--:--",
+            font=ctk.CTkFont(size=11),
+            text_color="#ffffff"
+        )
+        self.lbl_sidebar_time.pack(side="left", padx=12, pady=4)
+
+        self.lbl_sidebar_refresh = ctk.CTkLabel(
+            self.bot_strip,
+            text="Refresh: 10s",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color="#ffffff"
+        )
+        self.lbl_sidebar_refresh.pack(side="right", padx=12, pady=4)
+
+        # Área de Conteúdo Rolável Responsiva (Adapta-se a qualquer resolução de tela ou redimensionamento)
+        self.scroll_noc = ctk.CTkScrollableFrame(
+            self.sidebar_frame,
+            fg_color="transparent",
+            corner_radius=0,
+            scrollbar_fg_color="transparent",
+            scrollbar_button_color="#4f8ecc",
+            scrollbar_button_hover_color="#63a4e6"
+        )
+        try:
+            self.scroll_noc._scrollbar.configure(width=5)
+        except Exception:
+            pass
+        self.scroll_noc.pack(side="top", fill="both", expand=True, padx=2, pady=(4, 2))
+
         # 1. Total
         self.lbl_total_val, _ = self._create_noc_stat_section(
-            self.sidebar_frame, self._img_router, "0", "Total"
+            self.scroll_noc, self._img_router, "0", "Total"
         )
-        self._add_noc_divider(self.sidebar_frame)
+        self._add_noc_divider(self.scroll_noc)
 
         # 2. Em Funcionamento
         self.lbl_status_online, _ = self._create_noc_stat_section(
-            self.sidebar_frame, self._img_check, "0", "Em Funcionamento"
+            self.scroll_noc, self._img_check, "0", "Em Funcionamento"
         )
-        self._add_noc_divider(self.sidebar_frame)
+        self._add_noc_divider(self.scroll_noc)
 
         # 3. Fora de Funcionamento
         self.lbl_status_offline, _ = self._create_noc_stat_section(
-            self.sidebar_frame, self._img_cross, "0", "Fora de Funcionamento"
+            self.scroll_noc, self._img_cross, "0", "Fora de Funcionamento"
         )
-        self._add_noc_divider(self.sidebar_frame)
+        self._add_noc_divider(self.scroll_noc)
 
         # 4. Câmeras Mapeadas
         self.lbl_cams_val, _ = self._create_noc_stat_section(
-            self.sidebar_frame, self._img_cam, "0", "Câmeras Mapeadas"
+            self.scroll_noc, self._img_cam, "0", "Câmeras Mapeadas"
         )
-        self._add_noc_divider(self.sidebar_frame)
+        self._add_noc_divider(self.scroll_noc)
 
         # 5. Portas PON
-        sec_pon = ctk.CTkFrame(self.sidebar_frame, fg_color="transparent")
-        sec_pon.pack(fill="x", padx=16, pady=(10, 8))
+        sec_pon = ctk.CTkFrame(self.scroll_noc, fg_color="transparent")
+        sec_pon.pack(fill="x", padx=10, pady=(5, 4))
 
         top_pon = ctk.CTkFrame(sec_pon, fg_color="transparent")
-        top_pon.pack(fill="x", pady=(0, 6))
+        top_pon.pack(fill="x", pady=(0, 4))
 
         if self._img_pon:
             lbl_pon_ico = ctk.CTkLabel(top_pon, image=self._img_pon, text="")
@@ -415,11 +450,11 @@ class AjinView(ctk.CTkFrame):
         self.lbl_p2_val = self._create_pon_row(sec_pon, "Slot2-PON1", "- / -")
         self.lbl_p3_val = self._create_pon_row(sec_pon, "Slot2-PON2", "- / -")
 
-        self._add_noc_divider(self.sidebar_frame)
+        self._add_noc_divider(self.scroll_noc)
 
         # 6. Última Coleta
-        sec_coleta = ctk.CTkFrame(self.sidebar_frame, fg_color="transparent")
-        sec_coleta.pack(fill="x", padx=16, pady=(10, 8))
+        sec_coleta = ctk.CTkFrame(self.scroll_noc, fg_color="transparent")
+        sec_coleta.pack(fill="x", padx=10, pady=(5, 4))
 
         if self._img_clock:
             lbl_col_ico = ctk.CTkLabel(sec_coleta, image=self._img_clock, text="")
@@ -457,11 +492,11 @@ class AjinView(ctk.CTkFrame):
         )
         lbl_col_sub.pack(anchor="e")
 
-        self._add_noc_divider(self.sidebar_frame)
+        self._add_noc_divider(self.scroll_noc)
 
         # 7. Servidor Coletor
-        sec_srv = ctk.CTkFrame(self.sidebar_frame, fg_color="transparent")
-        sec_srv.pack(fill="x", padx=16, pady=(10, 8))
+        sec_srv = ctk.CTkFrame(self.scroll_noc, fg_color="transparent")
+        sec_srv.pack(fill="x", padx=10, pady=(5, 4))
 
         if self._img_globe:
             lbl_srv_ico = ctk.CTkLabel(sec_srv, image=self._img_globe, text="")
@@ -499,11 +534,11 @@ class AjinView(ctk.CTkFrame):
         )
         lbl_srv_sub.pack(anchor="e")
 
-        self._add_noc_divider(self.sidebar_frame)
+        self._add_noc_divider(self.scroll_noc)
 
         # 8. OLT Principal
-        sec_olt = ctk.CTkFrame(self.sidebar_frame, fg_color="transparent")
-        sec_olt.pack(fill="x", padx=16, pady=(10, 8))
+        sec_olt = ctk.CTkFrame(self.scroll_noc, fg_color="transparent")
+        sec_olt.pack(fill="x", padx=10, pady=(5, 4))
 
         if self._img_db:
             lbl_olt_ico = ctk.CTkLabel(sec_olt, image=self._img_db, text="")
@@ -540,26 +575,6 @@ class AjinView(ctk.CTkFrame):
             anchor="e"
         )
         lbl_olt_sub.pack(anchor="e")
-
-        # Barra Inferior Fixa
-        self.bot_strip = ctk.CTkFrame(self.sidebar_frame, height=36, fg_color="#20578e", corner_radius=0)
-        self.bot_strip.pack(side="bottom", fill="x")
-
-        self.lbl_sidebar_time = ctk.CTkLabel(
-            self.bot_strip,
-            text="Hora: --:--:--",
-            font=ctk.CTkFont(size=11),
-            text_color="#ffffff"
-        )
-        self.lbl_sidebar_time.pack(side="left", padx=14, pady=6)
-
-        self.lbl_sidebar_refresh = ctk.CTkLabel(
-            self.bot_strip,
-            text="Refresh: 10s",
-            font=ctk.CTkFont(size=11, weight="bold"),
-            text_color="#ffffff"
-        )
-        self.lbl_sidebar_refresh.pack(side="right", padx=14, pady=6)
 
         # Aliases para compatibilidade legada
         self.card_total = self.lbl_total_val
