@@ -484,11 +484,13 @@ class RemoteXPTIApp(ctk.CTk):
         self.combo_filter_group.set("Todos os Grupos")
         self.combo_filter_group.pack(side="left", padx=(0, 8))
 
-        # Alternador de Modo de Exibição (Grade AnyDesk / Mapa Interativo)
+        # Alternador de Modo de Exibição (Grade AnyDesk / Mapa Interativo / AJIN)
         icon_grid_path = get_resource_path("imagens/icon_grid.png")
         icon_map_path = get_resource_path("imagens/icon_map.png")
+        icon_ajin_path = get_resource_path("imagens/icon_ajin.png")
         self.img_seg_grid = None
         self.img_seg_map = None
+        self.img_seg_ajin = None
         if icon_grid_path.exists():
             try:
                 pil_g = Image.open(icon_grid_path)
@@ -501,11 +503,17 @@ class RemoteXPTIApp(ctk.CTk):
                 self.img_seg_map = ctk.CTkImage(light_image=pil_m, dark_image=pil_m, size=(18, 18))
             except Exception:
                 pass
+        if icon_ajin_path.exists():
+            try:
+                pil_a = Image.open(icon_ajin_path)
+                self.img_seg_ajin = ctk.CTkImage(light_image=pil_a, dark_image=pil_a, size=(18, 18))
+            except Exception:
+                pass
 
         self.seg_view = ctk.CTkSegmentedButton(
             actions_box,
-            values=["Grade", "Mapa", "ONUs Ajin"],
-            width=270,
+            values=["Grade", "Mapa", "AJIN"],
+            width=255,
             height=34,
             selected_color="#0066cc",
             selected_hover_color="#0052a3",
@@ -519,6 +527,8 @@ class RemoteXPTIApp(ctk.CTk):
             self.seg_view._buttons_dict["Grade"].configure(image=self.img_seg_grid, compound="left")
         if self.img_seg_map and "Mapa" in getattr(self.seg_view, "_buttons_dict", {}):
             self.seg_view._buttons_dict["Mapa"].configure(image=self.img_seg_map, compound="left")
+        if self.img_seg_ajin and "AJIN" in getattr(self.seg_view, "_buttons_dict", {}):
+            self.seg_view._buttons_dict["AJIN"].configure(image=self.img_seg_ajin, compound="left")
 
         # Botão Atualizar Status Manual
         self.btn_refresh = ctk.CTkButton(
@@ -973,7 +983,7 @@ class RemoteXPTIApp(ctk.CTk):
 
     def _on_view_mode_changed(self, mode: str):
         log.info(f"[RemoteXPTI] Alternando modo de visualização para: {mode}")
-        if "Ajin" in mode:
+        if "ajin" in mode.lower():
             self.view_mode = "ajin"
             if self.web_map:
                 self.web_map.hide()
