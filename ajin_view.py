@@ -91,8 +91,8 @@ class AjinView(ctk.CTkFrame):
         # 1. Campo de Busca
         self.entry_search = ctk.CTkEntry(
             ctrl_frame,
-            placeholder_text="🔍 Pesquisar por Nome, Serial / MAC (LAN 1 ou...",
-            width=260,
+            placeholder_text="🔍 Pesquisar por Nome, Serial / MAC...",
+            width=230,
             height=34
         )
         self.entry_search.pack(side="left", padx=(0, 6))
@@ -102,7 +102,7 @@ class AjinView(ctk.CTkFrame):
         self.combo_pon = ctk.CTkComboBox(
             ctrl_frame,
             values=["Todas as Portas PON", "Slot1-PON1", "Slot1-PON2", "Slot2-PON1", "Slot2-PON2"],
-            width=150,
+            width=140,
             height=34,
             command=lambda val: self._apply_filters()
         )
@@ -113,7 +113,7 @@ class AjinView(ctk.CTkFrame):
         self.combo_status = ctk.CTkComboBox(
             ctrl_frame,
             values=["Todos os Status", "Em Funcionamento (Online)", "Fora de Funcionamento (Offline)"],
-            width=175,
+            width=165,
             height=34,
             command=lambda val: self._apply_filters()
         )
@@ -123,8 +123,8 @@ class AjinView(ctk.CTkFrame):
         # 4. Botão Atualizar Câmeras
         self.btn_sync_cams = ctk.CTkButton(
             ctrl_frame,
-            text="🔄 Atualizar Câmeras",
-            width=135,
+            text="🔄 Câmeras",
+            width=115,
             height=34,
             fg_color=("#e2e8f0", "#262832"),
             text_color=("gray10", "#ffffff"),
@@ -137,8 +137,8 @@ class AjinView(ctk.CTkFrame):
         # 5. Botão Scanner de ONUs
         self.btn_scanner = ctk.CTkButton(
             ctrl_frame,
-            text="🔍 Scanner de ONUs",
-            width=130,
+            text="🔍 Scanner",
+            width=115,
             height=34,
             fg_color="#0066cc",
             hover_color="#0052a3",
@@ -150,8 +150,8 @@ class AjinView(ctk.CTkFrame):
         # 6. Botão Incidentes & Eventos (com badge)
         self.btn_events = ctk.CTkButton(
             ctrl_frame,
-            text="⚠️ Incidentes & Eventos (0)",
-            width=165,
+            text="⚠️ Incidentes (0)",
+            width=140,
             height=34,
             fg_color="#a83232",
             hover_color="#8c2828",
@@ -176,14 +176,14 @@ class AjinView(ctk.CTkFrame):
         self.header_frame.grid_propagate(False)
 
         headers = [
-            ("Nome (Ponto)", 140, "name"),
-            ("Em Funcionamento 🔼", 145, "status"),
-            ("Endereço / Serial", 130, "serial"),
-            ("Descrição (Rua / Local)", 240, "desc"),
-            ("Fabricante", 110, "vendor"),
-            ("Tempo no Status", 120, "uptime"),
-            ("Canal OLT", 130, "port"),
-            ("Ações", 100, None)
+            ("Nome (Ponto)", 135, "name"),
+            ("Em Funcionamento 🔼", 135, "status"),
+            ("Endereço / Serial", 125, "serial"),
+            ("Descrição (Rua / Local)", 220, "desc"),
+            ("Fabricante", 100, "vendor"),
+            ("Tempo no Status", 110, "uptime"),
+            ("Canal OLT", 115, "port"),
+            ("Ações", 90, None)
         ]
 
         for text, width, sort_key in headers:
@@ -236,29 +236,29 @@ class AjinView(ctk.CTkFrame):
         bot_frame.grid(row=2, column=0, sticky="ew", pady=(8, 0))
 
         # Checkboxes
-        self.chk_offline_only = ctk.CTkCheckBox(bot_frame, text="Exibir fora de funcionamento", font=ctk.CTkFont(size=11), command=self._apply_filters)
-        self.chk_offline_only.pack(side="left", padx=(0, 10))
+        self.chk_offline_only = ctk.CTkCheckBox(bot_frame, text="Apenas offline", font=ctk.CTkFont(size=11), command=self._apply_filters)
+        self.chk_offline_only.pack(side="left", padx=(0, 8))
 
-        self.chk_show_cams = ctk.CTkCheckBox(bot_frame, text="Exibir Câmeras", font=ctk.CTkFont(size=11), command=self._apply_filters)
-        self.chk_show_cams.pack(side="left", padx=(0, 10))
+        self.chk_show_cams = ctk.CTkCheckBox(bot_frame, text="Câmeras", font=ctk.CTkFont(size=11), command=self._apply_filters)
+        self.chk_show_cams.pack(side="left", padx=(0, 8))
 
-        self.chk_show_olt = ctk.CTkCheckBox(bot_frame, text="Exibir Canal OLT", font=ctk.CTkFont(size=11), command=self._apply_filters)
+        self.chk_show_olt = ctk.CTkCheckBox(bot_frame, text="Canal OLT", font=ctk.CTkFont(size=11), command=self._apply_filters)
         self.chk_show_olt.select()
-        self.chk_show_olt.pack(side="left", padx=(0, 10))
+        self.chk_show_olt.pack(side="left", padx=(0, 8))
 
-        self.chk_autorefresh = ctk.CTkCheckBox(bot_frame, text="Auto-refresh (10s)", font=ctk.CTkFont(size=11), command=self._on_autorefresh_toggle)
+        self.chk_autorefresh = ctk.CTkCheckBox(bot_frame, text="Auto-refresh", font=ctk.CTkFont(size=11), command=self._on_autorefresh_toggle)
         self.chk_autorefresh.select()
-        self.chk_autorefresh.pack(side="left", padx=(0, 14))
+        self.chk_autorefresh.pack(side="left", padx=(0, 10))
 
         # Contador de dispositivos
         self.lbl_counter = ctk.CTkLabel(bot_frame, text="0 de 0 dispositivos", font=ctk.CTkFont(size=11), text_color=("gray40", "#8e92a0"))
-        self.lbl_counter.pack(side="left", padx=(0, 14))
+        self.lbl_counter.pack(side="left", padx=(0, 10))
 
         # Botão Exportar CSV
         self.btn_export = ctk.CTkButton(
             bot_frame,
             text="Exportar",
-            width=80,
+            width=75,
             height=30,
             fg_color=("#e2e8f0", "#262832"),
             text_color=("gray10", "#ffffff"),
@@ -272,14 +272,14 @@ class AjinView(ctk.CTkFrame):
         self.btn_refresh = ctk.CTkButton(
             bot_frame,
             text="Atualizar",
-            width=80,
+            width=75,
             height=30,
             fg_color="#0066cc",
             hover_color="#0052a3",
             font=ctk.CTkFont(size=11, weight="bold"),
             command=self._on_manual_refresh_clicked
         )
-        self.btn_refresh.pack(side="left", padx=(0, 14))
+        self.btn_refresh.pack(side="left", padx=(0, 10))
 
         # Informações de Horário e Timer
         self.lbl_timer_status = ctk.CTkLabel(
@@ -306,13 +306,13 @@ class AjinView(ctk.CTkFrame):
     def _add_noc_divider(self, parent):
         """Divisor horizontal sutil de 1px entre seções no padrão clean."""
         div = ctk.CTkFrame(parent, height=1, fg_color="#4f8ecc", corner_radius=0)
-        div.pack(fill="x", padx=14, pady=0)
+        div.pack(fill="x", padx=12, pady=1)
         return div
 
     def _create_noc_stat_section(self, parent, icon_img, val_str, label_str):
         """Cria uma seção de métrica clean: ícone à esquerda, número grande e rótulo à direita."""
         sec = ctk.CTkFrame(parent, fg_color="transparent")
-        sec.pack(fill="x", padx=10, pady=(5, 4))
+        sec.pack(fill="x", padx=10, pady=(6, 5))
 
         if icon_img:
             lbl_ico = ctk.CTkLabel(sec, image=icon_img, text="")
@@ -347,7 +347,7 @@ class AjinView(ctk.CTkFrame):
         # Painel lateral azul (#2870c2) com bordas arredondadas e responsividade
         self.sidebar_frame = ctk.CTkFrame(
             self,
-            width=265,
+            width=240,
             corner_radius=12,
             fg_color="#2870c2",
             border_width=0
@@ -365,40 +365,20 @@ class AjinView(ctk.CTkFrame):
         self._img_globe = self._load_noc_icon("noc_globe", (30, 31))
         self._img_db = self._load_noc_icon("noc_db", (26, 28))
 
-        # Barra Inferior Fixa (Sempre visível no rodapé do painel com cantos arredondados)
-        self.bot_strip = ctk.CTkFrame(self.sidebar_frame, height=34, fg_color="#1d538c", corner_radius=8)
-        self.bot_strip.pack(side="bottom", fill="x", padx=6, pady=(0, 6))
-
-        self.lbl_sidebar_time = ctk.CTkLabel(
-            self.bot_strip,
-            text="Hora: --:--:--",
-            font=ctk.CTkFont(size=11),
-            text_color="#ffffff"
-        )
-        self.lbl_sidebar_time.pack(side="left", padx=12, pady=4)
-
-        self.lbl_sidebar_refresh = ctk.CTkLabel(
-            self.bot_strip,
-            text="Refresh: 10s",
-            font=ctk.CTkFont(size=11, weight="bold"),
-            text_color="#ffffff"
-        )
-        self.lbl_sidebar_refresh.pack(side="right", padx=12, pady=4)
-
         # Área de Conteúdo Rolável Responsiva (Adapta-se a qualquer resolução de tela ou redimensionamento)
         self.scroll_noc = ctk.CTkScrollableFrame(
             self.sidebar_frame,
             fg_color="transparent",
-            corner_radius=0,
+            corner_radius=10,
             scrollbar_fg_color="transparent",
             scrollbar_button_color="#4f8ecc",
             scrollbar_button_hover_color="#63a4e6"
         )
         try:
-            self.scroll_noc._scrollbar.configure(width=5)
+            self.scroll_noc._scrollbar.configure(width=4)
         except Exception:
             pass
-        self.scroll_noc.pack(side="top", fill="both", expand=True, padx=2, pady=(4, 2))
+        self.scroll_noc.pack(side="top", fill="both", expand=True, padx=4, pady=4)
 
         # 1. Total
         self.lbl_total_val, _ = self._create_noc_stat_section(
@@ -426,7 +406,7 @@ class AjinView(ctk.CTkFrame):
 
         # 5. Portas PON
         sec_pon = ctk.CTkFrame(self.scroll_noc, fg_color="transparent")
-        sec_pon.pack(fill="x", padx=10, pady=(5, 4))
+        sec_pon.pack(fill="x", padx=10, pady=(6, 5))
 
         top_pon = ctk.CTkFrame(sec_pon, fg_color="transparent")
         top_pon.pack(fill="x", pady=(0, 4))
@@ -454,7 +434,7 @@ class AjinView(ctk.CTkFrame):
 
         # 6. Última Coleta
         sec_coleta = ctk.CTkFrame(self.scroll_noc, fg_color="transparent")
-        sec_coleta.pack(fill="x", padx=10, pady=(5, 4))
+        sec_coleta.pack(fill="x", padx=10, pady=(6, 5))
 
         if self._img_clock:
             lbl_col_ico = ctk.CTkLabel(sec_coleta, image=self._img_clock, text="")
@@ -492,90 +472,6 @@ class AjinView(ctk.CTkFrame):
         )
         lbl_col_sub.pack(anchor="e")
 
-        self._add_noc_divider(self.scroll_noc)
-
-        # 7. Servidor Coletor
-        sec_srv = ctk.CTkFrame(self.scroll_noc, fg_color="transparent")
-        sec_srv.pack(fill="x", padx=10, pady=(5, 4))
-
-        if self._img_globe:
-            lbl_srv_ico = ctk.CTkLabel(sec_srv, image=self._img_globe, text="")
-        else:
-            lbl_srv_ico = ctk.CTkLabel(sec_srv, text="🌐", font=ctk.CTkFont(size=20), text_color="#2fe091")
-        lbl_srv_ico.pack(side="left", anchor="center")
-
-        box_srv = ctk.CTkFrame(sec_srv, fg_color="transparent")
-        box_srv.pack(side="right", anchor="e")
-
-        self.lbl_server_stt = ctk.CTkLabel(
-            box_srv,
-            text="Ping OK",
-            font=ctk.CTkFont(size=15, weight="bold"),
-            text_color="#2fe091",
-            anchor="e"
-        )
-        self.lbl_server_stt.pack(anchor="e")
-
-        self.lbl_server_ip = ctk.CTkLabel(
-            box_srv,
-            text="192.168.190.187",
-            font=ctk.CTkFont(size=11),
-            text_color="#ffffff",
-            anchor="e"
-        )
-        self.lbl_server_ip.pack(anchor="e")
-
-        lbl_srv_sub = ctk.CTkLabel(
-            box_srv,
-            text="Servidor Coletor",
-            font=ctk.CTkFont(size=11, weight="bold"),
-            text_color="#ffffff",
-            anchor="e"
-        )
-        lbl_srv_sub.pack(anchor="e")
-
-        self._add_noc_divider(self.scroll_noc)
-
-        # 8. OLT Principal
-        sec_olt = ctk.CTkFrame(self.scroll_noc, fg_color="transparent")
-        sec_olt.pack(fill="x", padx=10, pady=(5, 4))
-
-        if self._img_db:
-            lbl_olt_ico = ctk.CTkLabel(sec_olt, image=self._img_db, text="")
-        else:
-            lbl_olt_ico = ctk.CTkLabel(sec_olt, text="💾", font=ctk.CTkFont(size=20), text_color="#ffffff")
-        lbl_olt_ico.pack(side="left", anchor="center")
-
-        box_olt = ctk.CTkFrame(sec_olt, fg_color="transparent")
-        box_olt.pack(side="right", anchor="e")
-
-        self.lbl_olt_model = ctk.CTkLabel(
-            box_olt,
-            text="C-Data FD1108S",
-            font=ctk.CTkFont(size=13, weight="bold"),
-            text_color="#ffffff",
-            anchor="e"
-        )
-        self.lbl_olt_model.pack(anchor="e")
-
-        self.lbl_olt_ip = ctk.CTkLabel(
-            box_olt,
-            text="192.168.1.100",
-            font=ctk.CTkFont(size=11),
-            text_color="#ffffff",
-            anchor="e"
-        )
-        self.lbl_olt_ip.pack(anchor="e")
-
-        lbl_olt_sub = ctk.CTkLabel(
-            box_olt,
-            text="OLT Principal",
-            font=ctk.CTkFont(size=11, weight="bold"),
-            text_color="#ffffff",
-            anchor="e"
-        )
-        lbl_olt_sub.pack(anchor="e")
-
         # Aliases para compatibilidade legada
         self.card_total = self.lbl_total_val
         self.card_online = self.lbl_status_online
@@ -584,6 +480,12 @@ class AjinView(ctk.CTkFrame):
         self.lbl_port_s1p1 = self.lbl_p1_val
         self.lbl_port_s2p1 = self.lbl_p2_val
         self.lbl_port_s2p2 = self.lbl_p3_val
+        self.lbl_server_stt = None
+        self.lbl_server_ip = None
+        self.lbl_olt_model = None
+        self.lbl_olt_ip = None
+        self.lbl_sidebar_time = None
+        self.lbl_sidebar_refresh = None
 
     def _create_pon_row(self, parent, name: str, default_val: str):
         row = ctk.CTkFrame(parent, fg_color="transparent")
@@ -648,27 +550,27 @@ class AjinView(ctk.CTkFrame):
         elif coleta_str and coleta_str != "-":
             self.lbl_coleta_time.configure(text=coleta_str)
 
-        # Status Hub e OLT
+        # Status Hub e OLT (se os widgets estiverem ativos)
         srv_info = data.get("server", {})
-        if isinstance(srv_info, dict):
+        if isinstance(srv_info, dict) and hasattr(self, "lbl_server_stt") and self.lbl_server_stt:
             if srv_info.get("online"):
                 self.lbl_server_stt.configure(text="Ping OK", text_color="#2fe091")
             else:
                 self.lbl_server_stt.configure(text="Sem Ping", text_color="#ff5252")
-            if srv_info.get("ip"):
+            if srv_info.get("ip") and self.lbl_server_ip:
                 self.lbl_server_ip.configure(text=str(srv_info.get("ip")))
 
         olt_info = data.get("olt", {})
-        if isinstance(olt_info, dict):
+        if isinstance(olt_info, dict) and hasattr(self, "lbl_olt_model") and self.lbl_olt_model:
             if olt_info.get("modelo"):
                 self.lbl_olt_model.configure(text=str(olt_info.get("modelo")))
-            if olt_info.get("ip"):
+            if olt_info.get("ip") and self.lbl_olt_ip:
                 self.lbl_olt_ip.configure(text=str(olt_info.get("ip")))
 
         # Botão de incidentes
         events_hist = data.get("events_history", [])
         active_probs = data.get("active_problems", offline)
-        self.btn_events.configure(text=f"⚠️ Incidentes & Eventos ({active_probs})")
+        self.btn_events.configure(text=f"⚠️ Incidentes ({active_probs})")
 
         # 2. Aplica filtros e renderiza linhas na tabela
         self._apply_filters()
@@ -744,7 +646,7 @@ class AjinView(ctk.CTkFrame):
             row_frame.pack_propagate(False)
 
             # Coluna 1: Nome (Ponto) + Badge 2P + Lápis ✏️
-            c1 = ctk.CTkFrame(row_frame, width=140, fg_color="transparent")
+            c1 = ctk.CTkFrame(row_frame, width=135, fg_color="transparent")
             c1.pack(side="left", padx=4)
             c1.pack_propagate(False)
 
@@ -764,7 +666,7 @@ class AjinView(ctk.CTkFrame):
             btn_edit_name.pack(side="left")
 
             # Coluna 2: Em Funcionamento (🔴 Não / 🟢 Sim)
-            c2 = ctk.CTkFrame(row_frame, width=145, fg_color="transparent")
+            c2 = ctk.CTkFrame(row_frame, width=135, fg_color="transparent")
             c2.pack(side="left", padx=4)
             c2.pack_propagate(False)
 
@@ -775,14 +677,14 @@ class AjinView(ctk.CTkFrame):
             lbl_stt.pack(side="left")
 
             # Coluna 3: Endereço / Serial (MAC)
-            c3 = ctk.CTkFrame(row_frame, width=130, fg_color="transparent")
+            c3 = ctk.CTkFrame(row_frame, width=125, fg_color="transparent")
             c3.pack(side="left", padx=4)
             c3.pack_propagate(False)
             lbl_ser = ctk.CTkLabel(c3, text=r.get("serial", "-"), font=ctk.CTkFont(family="Consolas", size=11), text_color=("gray20", "#c5cad6"))
             lbl_ser.pack(side="left")
 
             # Coluna 4: Descrição (Rua / Local) + Lápis ✏️
-            c4 = ctk.CTkFrame(row_frame, width=240, fg_color="transparent")
+            c4 = ctk.CTkFrame(row_frame, width=220, fg_color="transparent")
             c4.pack(side="left", padx=4)
             c4.pack_propagate(False)
 
@@ -801,7 +703,7 @@ class AjinView(ctk.CTkFrame):
             btn_edit_desc.pack(side="left")
 
             # Coluna 5: Fabricante
-            c5 = ctk.CTkFrame(row_frame, width=110, fg_color="transparent")
+            c5 = ctk.CTkFrame(row_frame, width=100, fg_color="transparent")
             c5.pack(side="left", padx=4)
             c5.pack_propagate(False)
 
@@ -815,7 +717,7 @@ class AjinView(ctk.CTkFrame):
             vendor_pill.pack(side="left")
 
             # Coluna 6: Tempo no Status (vermelho se offline)
-            c6 = ctk.CTkFrame(row_frame, width=120, fg_color="transparent")
+            c6 = ctk.CTkFrame(row_frame, width=110, fg_color="transparent")
             c6.pack(side="left", padx=4)
             c6.pack_propagate(False)
 
@@ -826,7 +728,7 @@ class AjinView(ctk.CTkFrame):
             lbl_upt.pack(side="left")
 
             # Coluna 7: Canal OLT
-            c7 = ctk.CTkFrame(row_frame, width=130, fg_color="transparent")
+            c7 = ctk.CTkFrame(row_frame, width=115, fg_color="transparent")
             c7.pack(side="left", padx=4)
             c7.pack_propagate(False)
 
@@ -835,7 +737,7 @@ class AjinView(ctk.CTkFrame):
             lbl_canal.pack(side="left")
 
             # Coluna 8: Ações ([🔍 Menu] e [🗑️])
-            c8 = ctk.CTkFrame(row_frame, width=100, fg_color="transparent")
+            c8 = ctk.CTkFrame(row_frame, width=90, fg_color="transparent")
             c8.pack(side="left", padx=4)
             c8.pack_propagate(False)
 
@@ -1097,14 +999,14 @@ class AjinView(ctk.CTkFrame):
                 self._refresh_countdown = 10
                 self.mgr.fetch_telemetry_async()
             self.lbl_timer_status.configure(text=f"Hora: {now_str} | Refresh: {self._refresh_countdown}s")
-            if hasattr(self, "lbl_sidebar_refresh"):
+            if getattr(self, "lbl_sidebar_refresh", None):
                 self.lbl_sidebar_refresh.configure(text=f"Refresh: {self._refresh_countdown}s")
         else:
             self.lbl_timer_status.configure(text=f"Hora: {now_str} | Refresh: Pausado")
-            if hasattr(self, "lbl_sidebar_refresh"):
+            if getattr(self, "lbl_sidebar_refresh", None):
                 self.lbl_sidebar_refresh.configure(text="Refresh: Pausado")
 
-        if hasattr(self, "lbl_sidebar_time"):
+        if getattr(self, "lbl_sidebar_time", None):
             self.lbl_sidebar_time.configure(text=f"Hora: {now_str}")
 
         self.after(1000, self._schedule_countdown)
