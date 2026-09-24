@@ -230,7 +230,8 @@ class AjinRowWidget:
         canal_txt = f"{r.get('port')}_{str(r.get('id')).zfill(3)}" if show_olt else "--"
         self.lbl_canal.configure(text=canal_txt)
 
-        self.frame.pack(fill="x", pady=1)
+        if not self.frame.winfo_ismapped():
+            self.frame.pack(fill="x", pady=1)
 
 
 class NocSidebarManager:
@@ -1114,7 +1115,8 @@ class AjinView(ctk.CTkFrame):
 
         # Oculta linhas excedentes do pool quando a lista filtrada for menor
         for extra in self._row_pool[num_rows:]:
-            extra.frame.pack_forget()
+            if extra.frame.winfo_ismapped():
+                extra.frame.pack_forget()
 
     # =========================================================================
     # DIÁLOGOS E MODAIS (EDIÇÃO, MENU, SCANNER, EVENTOS)

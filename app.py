@@ -34,8 +34,8 @@ ctk.set_default_color_theme("blue")
 CARD_WIDTH = 276
 CARD_HEIGHT = 180
 
-class ServerCard(ctk.CTkFrame):
-    """Componente de Card 100% no padrão visual e interativo do AnyDesk."""
+class ServerCard(ctk.CTkLabel):
+    """Componente de Card de Alta Performance no padrão visual e interativo do AnyDesk."""
 
     def __init__(
         self,
@@ -45,15 +45,6 @@ class ServerCard(ctk.CTkFrame):
         on_edit,
         initial_status: Optional[Tuple[bool, str]] = None
     ):
-        super().__init__(
-            parent,
-            width=CARD_WIDTH,
-            height=CARD_HEIGHT,
-            corner_radius=4,
-            fg_color="#181a20",
-            border_width=0,
-            cursor="hand2"
-        )
         self.server = server
         self.on_connect = on_connect
         self.on_edit = on_edit
@@ -61,10 +52,19 @@ class ServerCard(ctk.CTkFrame):
         self.is_fav = bool(server.get("favorite", False))
         self._is_hovering = False
 
-        self.pack_propagate(False)
-        self.grid_propagate(False)
+        self._load_images()
 
-        self._build_ui()
+        super().__init__(
+            parent,
+            text="",
+            image=self.img_normal,
+            width=CARD_WIDTH,
+            height=CARD_HEIGHT,
+            corner_radius=4,
+            fg_color="#181a20",
+            cursor="hand2"
+        )
+
         self._bind_events()
 
     def _load_images(self):
@@ -83,33 +83,18 @@ class ServerCard(ctk.CTkFrame):
         )
         self.img_hover = None  # Carregamento sob demanda (lazy) ao passar o mouse
 
-    def _build_ui(self):
-        # Imagem de fundo completa estilo AnyDesk (renderiza 100% dos ícones e textos sem caixas pretas)
-        self._load_images()
-        self.lbl_card = ctk.CTkLabel(
-            self,
-            text="",
-            image=self.img_normal,
-            width=CARD_WIDTH,
-            height=CARD_HEIGHT,
-            cursor="hand2"
-        )
-        self.lbl_card.place(x=0, y=0)
-
     def _bind_events(self):
-        clickable = [self, self.lbl_card]
-        for w in clickable:
-            w.bind("<Button-1>", self._on_card_click)
-            w.bind("<Button-3>", lambda e: self.on_edit(self.server))
-            w.bind("<Enter>", lambda e: self._set_hover(True))
-            w.bind("<Leave>", lambda e: self._set_hover(False))
+        self.bind("<Button-1>", self._on_card_click)
+        self.bind("<Button-3>", lambda e: self.on_edit(self.server))
+        self.bind("<Enter>", lambda e: self._set_hover(True))
+        self.bind("<Leave>", lambda e: self._set_hover(False))
 
     def _on_card_click(self, event):
         x = event.x
         y = event.y
 
-        w = self.lbl_card.winfo_width()
-        h = self.lbl_card.winfo_height()
+        w = self.winfo_width()
+        h = self.winfo_height()
         scale = ctk.ScalingTracker.get_widget_scaling(self)
         hit_w = int(48 * scale)
         hit_h = int(48 * scale)
@@ -142,7 +127,7 @@ class ServerCard(ctk.CTkFrame):
                 is_hover=True,
                 scope=scope
             )
-        self.lbl_card.configure(image=self.img_hover if is_hover else self.img_normal)
+        self.configure(image=self.img_hover if is_hover else self.img_normal)
 
     def _toggle_favorite(self):
         self.is_fav = not self.is_fav
@@ -167,7 +152,7 @@ class ServerCard(ctk.CTkFrame):
     def reload_thumbnail(self):
         """Atualiza a imagem do card na tela mantendo o estado de hover se ativo."""
         self._load_images()
-        self.lbl_card.configure(image=self.img_hover if self._is_hovering else self.img_normal)
+        self.configure(image=self.img_hover if self._is_hovering else self.img_normal)
 
 
 def get_resource_path(relative_path: str) -> Path:
@@ -238,41 +223,80 @@ def sync_windows_shortcuts_icon():
         pass
 
 
-def enable_windows_double_buffering(window):
+def setup_global_smooth_scroll(app):
     """
-    Habilita double-buffering nativo acelerado pelo DWM (Desktop Window Manager) do Windows.
-    Aplica WS_EX_COMPOSITED (0x02000000) e WS_CLIPCHILDREN (0x02000000) na janela Win32.
-    Isso forca o Windows a compor recursivamente todos os widgets filhos em um buffer unico de video (off-screen)
-    antes de desenhar na tela, eliminando o tearing, cintilacao (flicker) e visual embaralhado
-    ao rolar o scroll ou redimensionar a janela em todo o programa.
+    Substitui a rolagem bruta e sem controle do CustomTkinter por um despachante suave a 60 FPS (16ms).
+    Acumula rajadas de eventos de MouseWheel do Windows e sincroniza com o timer do Tkinter,
+    eliminando completamente o tearing, sobreposicoes e o aspecto 'embaralhado' durante a rolagem
+    em toda a aplicacao (Grade de Servidores, Ajin, Menus e Dialogos).
     """
     if sys.platform != "win32":
         return
-    try:
-        window.update_idletasks()
-        raw_hwnd = window.winfo_id()
-        if not raw_hwnd:
+
+    scroll_state = {
+        "target_canvas": None,
+        "delta": 0,
+        "is_shift": False,
+        "job": None
+    }
+
+    def _perform_scroll():
+        scroll_state["job"] = None
+        canvas = scroll_state["target_canvas"]
+        delta = scroll_state["delta"]
+        is_shift = scroll_state["is_shift"]
+        scroll_state["delta"] = 0
+        scroll_state["target_canvas"] = None
+        if not canvas:
+            return
+        try:
+            if canvas.winfo_exists():
+                units = -int(delta / 6)
+                if units != 0:
+                    if is_shift:
+                        if canvas.xview() != (0.0, 1.0):
+                            canvas.xview("scroll", units, "units")
+                    else:
+                        if canvas.yview() != (0.0, 1.0):
+                            canvas.yview("scroll", units, "units")
+        except Exception:
+            pass
+
+    def _on_smooth_mouse_wheel(event):
+        curr = event.widget
+        target_sf = None
+        while curr is not None:
+            if isinstance(curr, ctk.CTkScrollableFrame):
+                target_sf = curr
+                break
+            curr = getattr(curr, "master", None)
+
+        if not target_sf:
             return
 
-        GWL_STYLE = -16
-        GWL_EXSTYLE = -20
-        WS_CLIPCHILDREN = 0x02000000
-        WS_EX_COMPOSITED = 0x02000000
+        canvas = getattr(target_sf, "_parent_canvas", None)
+        if not canvas:
+            return
 
-        parent_hwnd = ctypes.windll.user32.GetParent(raw_hwnd)
-        target_hwnds = {raw_hwnd}
-        if parent_hwnd:
-            target_hwnds.add(parent_hwnd)
+        if scroll_state["target_canvas"] != canvas:
+            scroll_state["target_canvas"] = canvas
+            scroll_state["delta"] = 0
 
-        for hwnd in target_hwnds:
-            if hwnd:
-                style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_STYLE)
-                ex_style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
-                ctypes.windll.user32.SetWindowLongW(hwnd, GWL_STYLE, style | WS_CLIPCHILDREN)
-                ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex_style | WS_EX_COMPOSITED)
-        log.info(f"[RemoteXPTI] Double-buffering DWM (WS_EX_COMPOSITED) ativado com sucesso nos HWNDs {target_hwnds}.")
+        scroll_state["delta"] += event.delta
+        scroll_state["is_shift"] = bool(event.state & 0x1) or getattr(target_sf, "_shift_pressed", False)
+
+        if scroll_state["job"] is None:
+            try:
+                scroll_state["job"] = app.after(16, _perform_scroll)
+            except Exception:
+                pass
+        return "break"
+
+    try:
+        app.bind_all("<MouseWheel>", _on_smooth_mouse_wheel, add=False)
+        log.info("[RemoteXPTI] Despachante de rolagem suave a 60 FPS ativado globalmente.")
     except Exception as e:
-        log.warning(f"[RemoteXPTI] Falha ao ativar double-buffering DWM: {e}")
+        log.warning(f"[RemoteXPTI] Falha ao configurar scroll suave: {e}")
 
 
 class RemoteXPTIApp(ctk.CTk):
@@ -362,7 +386,7 @@ class RemoteXPTIApp(ctk.CTk):
         self.bind("<Button-1>", self._on_parent_click_dismiss, add="+")
         self.bind("<Escape>", lambda e: self.close_settings_drawer() if getattr(self, "_is_drawer_open", False) else None)
 
-        enable_windows_double_buffering(self)
+        setup_global_smooth_scroll(self)
 
         # Inicia o warmup em estágios progressivos
         self.after(30, self._start_staged_warmup)
@@ -455,7 +479,6 @@ class RemoteXPTIApp(ctk.CTk):
         self.deiconify()
         self.lift()
         self.focus_force()
-        enable_windows_double_buffering(self)
         self._check_column_recalculation()
         if hasattr(self, "splash_manager") and self.splash_manager:
             self.splash_manager.finish()
@@ -620,7 +643,6 @@ class RemoteXPTIApp(ctk.CTk):
         # 1. Modo Grade (AnyDesk Cards)
         self.scroll_frame = ctk.CTkScrollableFrame(self.content_area, fg_color="transparent")
         self.scroll_frame.grid(row=0, column=0, sticky="nsew")
-        self.scroll_frame.bind("<Configure>", self._on_scroll_frame_configure, add="+")
 
         self.empty_label = ctk.CTkLabel(
             self.scroll_frame,
@@ -895,36 +917,26 @@ class RemoteXPTIApp(ctk.CTk):
             return
         if getattr(self, "_resize_timer", None):
             self.after_cancel(self._resize_timer)
-        self._resize_timer = self.after(120, self._check_column_recalculation)
-
-    def _on_scroll_frame_configure(self, event=None):
-        if getattr(self, "_resize_timer", None):
-            self.after_cancel(self._resize_timer)
-        self._resize_timer = self.after(120, self._check_column_recalculation)
+        self._resize_timer = self.after(80, self._check_column_recalculation)
 
     def _calculate_columns(self) -> int:
         """
         Calcula o número de colunas ideal considerando o DPI Scaling do Windows.
-        Garante que cards fiquem próximos, bem distribuídos e responsivos ao maximizar.
+        Baseia-se estritamente na largura física do container visível (content_area),
+        evitando oscilações causadas pelo crescimento do frame interno de rolagem.
         """
         scale = ctk.ScalingTracker.get_widget_scaling(self)
-        slot_w_phys = (CARD_WIDTH + 8) * scale
+        slot_w_phys = (CARD_WIDTH + 10) * scale
 
-        win_w = self.winfo_width()
-        scroll_w = self.scroll_frame.winfo_width() if hasattr(self, "scroll_frame") else 0
+        avail_w = 0
+        if hasattr(self, "content_area") and self.content_area.winfo_exists():
+            avail_w = self.content_area.winfo_width()
+        if avail_w <= 200:
+            win_w = self.winfo_width()
+            avail_w = (win_w - (32 * scale)) if win_w > 200 else ((1100 - 32) * scale)
 
-        # Largura física real disponível para a grade de cards
-        if win_w > 200:
-            avail_w = win_w - (44 * scale)
-        elif scroll_w > 200:
-            avail_w = scroll_w - (24 * scale)
-        else:
-            avail_w = (1100 - 44) * scale
-
-        if scroll_w > 200 and (scroll_w - 24) > avail_w:
-            avail_w = scroll_w - 24
-
-        return max(1, int(avail_w // slot_w_phys))
+        usable_w = avail_w - int(24 * scale)
+        return max(1, int(usable_w // slot_w_phys))
 
     def _check_column_recalculation(self):
         w = self.winfo_width()
@@ -1381,13 +1393,13 @@ class RemoteXPTIApp(ctk.CTk):
             is_minimized = self.state() == "iconic"
         except Exception:
             is_minimized = False
-        delay = 45000 if is_minimized else 15000
+        delay = 90000 if is_minimized else 60000
         self._cloud_sync_timer = self.after(delay, self._schedule_cloud_sync)
 
     def _on_window_focus(self, event=None):
-        """Dispara verificação imediata na nuvem quando a janela ganha foco (ex: alt-tab)."""
+        """Dispara verificação na nuvem quando a janela ganha foco (máximo 1x por minuto)."""
         now = time.time()
-        if now - getattr(self, "_last_focus_sync", 0) > 6:
+        if now - getattr(self, "_last_focus_sync", 0) > 60:
             self._last_focus_sync = now
             if CloudSyncManager.is_configured():
                 threading.Thread(target=self._sync_servers_from_cloud, daemon=True).start()
