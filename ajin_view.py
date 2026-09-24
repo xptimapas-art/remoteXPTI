@@ -232,33 +232,23 @@ class AjinView(ctk.CTkFrame):
     # RODAPÉ DE CONTROLE E CHECKBOXES
     # =========================================================================
     def _build_bottom_bar(self):
-        bot_frame = ctk.CTkFrame(self.left_panel, height=38, fg_color="transparent")
+        bot_frame = ctk.CTkFrame(self.left_panel, height=36, fg_color="transparent")
         bot_frame.grid(row=2, column=0, sticky="ew", pady=(8, 0))
 
-        # Checkboxes
-        self.chk_offline_only = ctk.CTkCheckBox(bot_frame, text="Apenas offline", font=ctk.CTkFont(size=11), command=self._apply_filters)
-        self.chk_offline_only.pack(side="left", padx=(0, 8))
-
-        self.chk_show_cams = ctk.CTkCheckBox(bot_frame, text="Câmeras", font=ctk.CTkFont(size=11), command=self._apply_filters)
-        self.chk_show_cams.pack(side="left", padx=(0, 8))
-
-        self.chk_show_olt = ctk.CTkCheckBox(bot_frame, text="Canal OLT", font=ctk.CTkFont(size=11), command=self._apply_filters)
-        self.chk_show_olt.select()
-        self.chk_show_olt.pack(side="left", padx=(0, 8))
-
-        self.chk_autorefresh = ctk.CTkCheckBox(bot_frame, text="Auto-refresh", font=ctk.CTkFont(size=11), command=self._on_autorefresh_toggle)
-        self.chk_autorefresh.select()
-        self.chk_autorefresh.pack(side="left", padx=(0, 10))
-
         # Contador de dispositivos
-        self.lbl_counter = ctk.CTkLabel(bot_frame, text="0 de 0 dispositivos", font=ctk.CTkFont(size=11), text_color=("gray40", "#8e92a0"))
-        self.lbl_counter.pack(side="left", padx=(0, 10))
+        self.lbl_counter = ctk.CTkLabel(
+            bot_frame,
+            text="0 de 0 dispositivos",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color=("gray30", "#a6accd")
+        )
+        self.lbl_counter.pack(side="left", padx=(0, 14))
 
         # Botão Exportar CSV
         self.btn_export = ctk.CTkButton(
             bot_frame,
             text="Exportar",
-            width=75,
+            width=80,
             height=30,
             fg_color=("#e2e8f0", "#262832"),
             text_color=("gray10", "#ffffff"),
@@ -266,25 +256,25 @@ class AjinView(ctk.CTkFrame):
             font=ctk.CTkFont(size=11, weight="bold"),
             command=self._on_export_clicked
         )
-        self.btn_export.pack(side="left", padx=(0, 6))
+        self.btn_export.pack(side="left", padx=(0, 8))
 
         # Botão Atualizar Agora
         self.btn_refresh = ctk.CTkButton(
             bot_frame,
             text="Atualizar",
-            width=75,
+            width=80,
             height=30,
             fg_color="#0066cc",
             hover_color="#0052a3",
             font=ctk.CTkFont(size=11, weight="bold"),
             command=self._on_manual_refresh_clicked
         )
-        self.btn_refresh.pack(side="left", padx=(0, 10))
+        self.btn_refresh.pack(side="left", padx=(0, 14))
 
-        # Informações de Horário e Timer
+        # Informações de Horário
         self.lbl_timer_status = ctk.CTkLabel(
             bot_frame,
-            text="Hora: --:--:-- | Refresh: 10s",
+            text="Hora: --:--:--",
             font=ctk.CTkFont(size=11),
             text_color=("gray40", "#8e92a0")
         )
@@ -465,6 +455,25 @@ class AjinView(ctk.CTkFrame):
             anchor="e"
         )
         lbl_col_sub.pack(anchor="e")
+
+        # Switch de Auto-Refresh na Sidebar
+        row_refresh = ctk.CTkFrame(self.scroll_noc, fg_color="transparent")
+        row_refresh.pack(fill="x", padx=12, pady=(0, 4))
+
+        self.chk_autorefresh = ctk.CTkSwitch(
+            row_refresh,
+            text="Auto-refresh (10s)",
+            font=ctk.CTkFont(size=10, weight="bold"),
+            text_color="#ffffff",
+            progress_color="#2fe091",
+            button_color="#ffffff",
+            button_hover_color="#e0e0e0",
+            switch_width=32,
+            switch_height=16,
+            command=self._on_autorefresh_toggle
+        )
+        self.chk_autorefresh.select()
+        self.chk_autorefresh.pack(side="right")
 
         self._add_noc_divider(self.scroll_noc)
 
@@ -660,7 +669,7 @@ class AjinView(ctk.CTkFrame):
         query = self.entry_search.get().strip().lower()
         selected_pon = self.combo_pon.get()
         selected_status = self.combo_status.get()
-        offline_only = self.chk_offline_only.get()
+        offline_only = False
 
         filtered = []
         for r in self._raw_rows:
@@ -715,8 +724,8 @@ class AjinView(ctk.CTkFrame):
             rf.destroy()
         self._row_frames.clear()
 
-        show_cams = self.chk_show_cams.get()
-        show_olt = self.chk_show_olt.get()
+        show_cams = False
+        show_olt = True
 
         for idx, r in enumerate(self._filtered_rows):
             is_even = (idx % 2 == 0)
@@ -1092,6 +1101,10 @@ class AjinView(ctk.CTkFrame):
 
     def _on_autorefresh_toggle(self):
         self._auto_refresh_enabled = bool(self.chk_autorefresh.get())
+        if not self._auto_refresh_enabled:
+            self.chk_autorefresh.configure(text="Auto-refresh (Pausado)")
+        else:
+            self.chk_autorefresh.configure(text=f"Auto-refresh ({self._refresh_countdown}s)")
 
     def _schedule_countdown(self):
         """Atualiza o relógio da barra inferior e o contador do refresh a cada segundo."""
@@ -1101,15 +1114,13 @@ class AjinView(ctk.CTkFrame):
             if self._refresh_countdown <= 0:
                 self._refresh_countdown = 10
                 self.mgr.fetch_telemetry_async()
-            self.lbl_timer_status.configure(text=f"Hora: {now_str} | Refresh: {self._refresh_countdown}s")
-            if getattr(self, "lbl_sidebar_refresh", None):
-                self.lbl_sidebar_refresh.configure(text=f"Refresh: {self._refresh_countdown}s")
+            if hasattr(self, "chk_autorefresh") and self.chk_autorefresh:
+                self.chk_autorefresh.configure(text=f"Auto-refresh ({self._refresh_countdown}s)")
         else:
-            self.lbl_timer_status.configure(text=f"Hora: {now_str} | Refresh: Pausado")
-            if getattr(self, "lbl_sidebar_refresh", None):
-                self.lbl_sidebar_refresh.configure(text="Refresh: Pausado")
+            if hasattr(self, "chk_autorefresh") and self.chk_autorefresh:
+                self.chk_autorefresh.configure(text="Auto-refresh (Pausado)")
 
-        if getattr(self, "lbl_sidebar_time", None):
-            self.lbl_sidebar_time.configure(text=f"Hora: {now_str}")
+        if hasattr(self, "lbl_timer_status") and self.lbl_timer_status:
+            self.lbl_timer_status.configure(text=f"Hora: {now_str}")
 
         self.after(1000, self._schedule_countdown)
