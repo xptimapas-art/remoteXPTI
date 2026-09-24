@@ -91,9 +91,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             display: flex;
             align-items: center;
             gap: 10px;
-            background: rgba(22, 23, 29, 0.90);
-            backdrop-filter: blur(14px);
-            -webkit-backdrop-filter: blur(14px);
+            background: rgba(22, 23, 29, 0.97);
             padding: 8px 14px;
             border-radius: 8px;
             border: 1px solid rgba(255, 255, 255, 0.14);
@@ -165,9 +163,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             pointer-events: auto;
             width: 330px;
             max-width: 90vw;
-            background: rgba(18, 20, 26, 0.94);
-            backdrop-filter: blur(16px);
-            -webkit-backdrop-filter: blur(16px);
+            background: rgba(18, 20, 26, 0.98);
             border: 1px solid rgba(240, 68, 56, 0.35);
             border-radius: 10px;
             box-shadow: 0 10px 32px rgba(0, 0, 0, 0.65), 0 0 16px rgba(240, 68, 56, 0.12);
@@ -311,9 +307,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             transform: translateX(-50%);
             z-index: 1000;
             width: min(720px, 92%);
-            background: rgba(20, 22, 28, 0.94);
-            backdrop-filter: blur(14px);
-            -webkit-backdrop-filter: blur(14px);
+            background: rgba(20, 22, 28, 0.98);
             border: 1px solid rgba(255, 255, 255, 0.15);
             border-radius: 12px;
             padding: 14px 18px;
@@ -776,7 +770,12 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             "🌑 CartoDB Dark": cartoDark,
             "🌍 OpenStreetMap": osm
         };
-        L.control.layers(baseMaps, null, { position: 'topright' }).addTo(map);
+        const ajinLayer = L.layerGroup();
+        map.addLayer(ajinLayer);
+        const overlayMaps = {
+            "📡 Câmeras Ajin (Jurerê)": ajinLayer
+        };
+        L.control.layers(baseMaps, overlayMaps, { position: 'topright' }).addTo(map);
 
         function setMapLayer(type) {
             if (type === 'satellite') {
@@ -1112,7 +1111,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
         // Ticker local a cada 1s: avança contadores na tela suavemente ao vivo apenas se ativo
         setInterval(() => {
-            if (!isTabActive) return;
+            if (!isMapVisible || !isTabActive) return;
             if (activeIncidents.length > 0) {
                 activeIncidents.forEach(inc => {
                     inc.duration_seconds = (inc.duration_seconds || 0) + 1;
@@ -1121,15 +1120,67 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             }
         }, 1000);
 
+        let isMapVisible = true;
+        setInterval(async () => {
+            try {
+                const res = await fetch('/api/state');
+                const st = await res.json();
+                isMapVisible = (st.visible !== false);
+            } catch(e) {}
+        }, 2000);
+
+        async function loadAjinOnus() {
+            try {
+                const res = await fetch('/api/ajin_onus');
+                if (!res.ok) return;
+                const onus = await res.json();
+                ajinLayer.clearLayers();
+                onus.forEach((o, i) => {
+                    let lat = o.latitude;
+                    let lon = o.longitude;
+                    if (!lat || !lon) {
+                        const angle = (i / Math.max(1, onus.length)) * 2 * Math.PI;
+                        const radius = 0.0035 + (i % 6) * 0.0012;
+                        lat = -27.4385 + Math.sin(angle) * radius;
+                        lon = -48.4975 + Math.cos(angle) * (radius * 1.3);
+                    }
+                    const isOnline = (o.status === 'Online');
+                    const color = isOnline ? '#2ebd59' : '#f04438';
+                    const icon = L.divIcon({
+                        className: 'ajin-marker',
+                        html: `<div style="width:12px;height:12px;border-radius:50%;background:${color};border:2px solid #fff;box-shadow:0 0 6px ${color};cursor:pointer;"></div>`,
+                        iconSize: [12, 12],
+                        iconAnchor: [6, 6]
+                    });
+                    const marker = L.marker([lat, lon], { icon: icon });
+                    marker.bindTooltip(`<b>${o.name || 'Ponto'}</b><br><span style="color:#8e92a0">${o.description || ''}</span><br>Status: <b>${o.status}</b>`, {
+                        direction: 'top',
+                        className: 'leaflet-tooltip-dark'
+                    });
+                    marker.on('click', () => {
+                        showCard({
+                            id: o.id,
+                            name: `[Ajin] ${o.name || 'Ponto'} - ${o.description || ''}`,
+                            host: o.mac || o.port,
+                            port: o.onu_id,
+                            group: 'AJIN / Jurerê',
+                            online: isOnline
+                        });
+                    });
+                    ajinLayer.addLayer(marker);
+                });
+            } catch(e) {}
+        }
+
         // Polling de incidentes em segundo plano (a cada 6s)
         setInterval(() => {
-            if (isTabActive) loadIncidents();
+            if (isMapVisible && isTabActive) loadIncidents();
         }, 6000);
         loadIncidents();
 
         // Polling de Status Ping em segundo plano (a cada 6s)
         setInterval(async () => {
-            if (!isTabActive) return;
+            if (!isMapVisible || !isTabActive) return;
             try {
                 const res = await fetch('/api/status');
                 const statusMap = await res.json();
@@ -1151,7 +1202,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
         // Sincronização da lista de servidores (a cada 4s)
         setInterval(async () => {
-            if (!isTabActive) return;
+            if (!isMapVisible || !isTabActive) return;
             try {
                 const res = await fetch('/api/servers');
                 const text = await res.text();
@@ -1168,7 +1219,13 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             } catch (err) {}
         }, 4000);
 
+        // Polling de ONUs da Ajin a cada 10s
+        setInterval(() => {
+            if (isMapVisible && isTabActive) loadAjinOnus();
+        }, 10000);
+
         loadServers();
+        loadAjinOnus();
     </script>
 </body>
 </html>
@@ -1185,12 +1242,14 @@ class WebMapServer:
         on_connect_func: Callable[[str], None],
         on_edit_func: Callable[[str], None],
         get_incidents_func: Optional[Callable[[], list]] = None,
+        is_visible_func: Optional[Callable[[], bool]] = None,
     ):
         self.get_servers_func = get_servers_func
         self.get_status_func = get_status_func
         self.on_connect_func = on_connect_func
         self.on_edit_func = on_edit_func
         self.get_incidents_func = get_incidents_func
+        self.is_visible_func = is_visible_func
         self.httpd: Optional[socketserver.TCPServer] = None
         self.port = 0
         self._thread: Optional[threading.Thread] = None
@@ -1297,6 +1356,24 @@ class WebMapServer:
                     incidents = server_self.get_incidents_func() if server_self.get_incidents_func else []
                     self._send_json(incidents)
 
+                elif self.path == "/api/ajin_onus":
+                    try:
+                        from ajin_manager import AjinManager
+                        mgr = AjinManager()
+                        onus = mgr.get_onus()
+                        self._send_json(onus)
+                    except Exception:
+                        self._send_json([])
+
+                elif self.path == "/api/state":
+                    vis = True
+                    if server_self.is_visible_func:
+                        try:
+                            vis = bool(server_self.is_visible_func())
+                        except Exception:
+                            vis = True
+                    self._send_json({"visible": vis})
+
                 elif self.path.startswith("/api/connect"):
                     parsed = urllib.parse.urlparse(self.path)
                     params = urllib.parse.parse_qs(parsed.query)
@@ -1379,7 +1456,8 @@ class WebMapManager:
             get_status_func,
             on_connect_func,
             on_edit_func,
-            get_incidents_func
+            get_incidents_func,
+            is_visible_func=lambda: self._is_visible
         )
         self.edge_proc: Optional[subprocess.Popen] = None
         self.edge_hwnd: Optional[int] = None
