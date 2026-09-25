@@ -806,12 +806,10 @@ class RemoteXPTIApp(ctk.CTk):
         self.ajin_container = None
         self.ajin_view = None
 
-        # Inicia exibindo a grade por padrão
-        self.map_container.lower()
-        if hasattr(self.scroll_frame, "_parent_frame"):
-            self.scroll_frame._parent_frame.tkraise()
-        else:
-            self.scroll_frame.tkraise()
+        # Inicia exibindo a grade por padrão com isolamento de containers
+        self.map_container.grid_remove()
+        self.scroll_frame.grid(row=0, column=0, sticky="nsew")
+        self.scroll_frame.tkraise()
 
     def _build_statusbar(self):
         self.status_bar = ctk.CTkFrame(self, height=28, corner_radius=0, fg_color=("#eaecef", "#121318"))
@@ -1072,9 +1070,10 @@ class RemoteXPTIApp(ctk.CTk):
         except Exception:
             pass
 
-        if getattr(self, "_resize_timer", None):
-            self.after_cancel(self._resize_timer)
-        self._resize_timer = self.after(150, self._check_column_recalculation)
+        if getattr(self, "view_mode", "grade") == "grade":
+            if getattr(self, "_resize_timer", None):
+                self.after_cancel(self._resize_timer)
+            self._resize_timer = self.after(150, self._check_column_recalculation)
 
     def _calculate_columns(self) -> int:
         """
@@ -1205,37 +1204,40 @@ class RemoteXPTIApp(ctk.CTk):
         """Inicializa a visualização do Ajin sob demanda, poupando centenas de widgets no startup."""
         if self.ajin_container is None:
             log.info("[RemoteXPTI] Inicializando AjinView sob demanda...")
-            self.ajin_container = ctk.CTkFrame(self.content_area, fg_color="transparent")
+            self.ajin_container = ctk.CTkFrame(self.content_area, fg_color=("#f0f2f5", "#10121a"))
             self.ajin_container.grid(row=0, column=0, sticky="nsew")
             self.ajin_view = AjinView(self.ajin_container)
             self.ajin_view.pack(fill="both", expand=True)
 
     def _on_view_mode_changed(self, mode: str):
         log.info(f"[RemoteXPTI] Alternando modo de visualização para: {mode}")
-        if "ajin" in mode.lower():
+        m_lower = mode.lower()
+        if "ajin" in m_lower:
             self.view_mode = "ajin"
             if self.web_map:
                 self.web_map.hide()
-            self.map_container.lower()
-            if hasattr(self.scroll_frame, "_parent_frame"):
-                self.scroll_frame._parent_frame.lower()
-            else:
-                self.scroll_frame.lower()
+            if hasattr(self, "map_container"):
+                self.map_container.grid_remove()
+            if hasattr(self, "scroll_frame"):
+                self.scroll_frame.grid_remove()
+
             self._ensure_ajin_view()
-            self.ajin_container.grid()
+            self.ajin_container.grid(row=0, column=0, sticky="nsew")
             self.ajin_container.tkraise()
             if hasattr(self, "ajin_view") and self.ajin_view:
                 self.ajin_view.mgr.fetch_telemetry_async(force=True)
+                self.ajin_view._handle_table_resize()
             if getattr(self, "settings_drawer", None) and self.settings_drawer.winfo_exists() and self._is_drawer_open:
                 self.settings_drawer.lift()
-        elif "Mapa" in mode:
+
+        elif "mapa" in m_lower:
             self.view_mode = "mapa"
-            if self.ajin_container:
+            if hasattr(self, "ajin_container") and self.ajin_container:
                 self.ajin_container.grid_remove()
-            if hasattr(self.scroll_frame, "_parent_frame"):
-                self.scroll_frame._parent_frame.lower()
-            else:
-                self.scroll_frame.lower()
+            if hasattr(self, "scroll_frame"):
+                self.scroll_frame.grid_remove()
+
+            self.map_container.grid(row=0, column=0, sticky="nsew")
             self.map_container.tkraise()
             self.filter_servers()
             if self.web_map:
@@ -1244,20 +1246,23 @@ class RemoteXPTIApp(ctk.CTk):
                 else:
                     self.web_map.set_drawer_offset(0)
                 self.web_map.show()
+                self.web_map.resize()
             if getattr(self, "settings_drawer", None) and self.settings_drawer.winfo_exists() and self._is_drawer_open:
                 self.settings_drawer.lift()
+
         else:
             self.view_mode = "grade"
-            if self.ajin_container:
+            if hasattr(self, "ajin_container") and self.ajin_container:
                 self.ajin_container.grid_remove()
             if self.web_map:
                 self.web_map.set_drawer_offset(0)
                 self.web_map.hide()
-            self.map_container.lower()
-            if hasattr(self.scroll_frame, "_parent_frame"):
-                self.scroll_frame._parent_frame.tkraise()
-            else:
-                self.scroll_frame.tkraise()
+            if hasattr(self, "map_container"):
+                self.map_container.grid_remove()
+
+            self.scroll_frame.grid(row=0, column=0, sticky="nsew")
+            self.scroll_frame.tkraise()
+            self._check_column_recalculation()
             if getattr(self, "settings_drawer", None) and self.settings_drawer.winfo_exists() and self._is_drawer_open:
                 self.settings_drawer.lift()
             self.filter_servers()

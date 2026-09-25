@@ -1135,6 +1135,8 @@ class AjinView(ctk.CTkFrame):
         self._set_scroll_offset(self._scroll_offset + (delta * 2))
 
     def _on_table_resize(self, e=None):
+        if not self.winfo_ismapped():
+            return
         if self._resize_debounce_job:
             try:
                 self.after_cancel(self._resize_debounce_job)
