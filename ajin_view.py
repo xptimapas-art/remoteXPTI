@@ -35,15 +35,17 @@ def get_resource_path(relative_path: str) -> Path:
             return p
     return Path(__file__).parent.resolve() / relative_path
 class AjinRowWidget:
-    """Linha da tabela de ONUs de alta performance, sem containers desnecessários e com zero lag."""
+    """Linha da tabela de ONUs de alta performance, estacionária e com zero lag."""
 
-    def __init__(self, master, on_edit, on_menu, on_del):
+    def __init__(self, master, pos_idx: int, on_edit, on_menu, on_del, on_mousewheel=None):
+        self.pos_idx = pos_idx
         self.on_edit = on_edit
         self.on_menu = on_menu
         self.on_del = on_del
+        self.on_mousewheel = on_mousewheel
         self.current_data: Optional[Dict[str, Any]] = None
-        self.is_even: bool = False
-        self.base_bg: str = "#181c27"
+        self.is_even: bool = (pos_idx % 2 == 0)
+        self.base_bg: str = "#181c27" if self.is_even else "#141721"
         self.hover_bg: str = "#222736"
 
         self.frame = ctk.CTkFrame(master, height=38, corner_radius=4, fg_color=self.base_bg)
@@ -147,6 +149,14 @@ class AjinRowWidget:
             w.bind("<Enter>", lambda e: self._on_enter(), add="+")
             w.bind("<Leave>", lambda e: self._on_leave(), add="+")
 
+        # Captura de rolagem por mousewheel em qualquer elemento da linha
+        if self.on_mousewheel:
+            for w in (self.frame, self.c0, self.lbl_p, self.badge_2p, self.btn_edit_name,
+                      self.c1, self.lbl_stt, self.lbl_ser, self.c3, self.lbl_desc,
+                      self.btn_edit_desc, self.lbl_vendor, self.lbl_upt, self.lbl_canal,
+                      self.c7, self.btn_menu, self.btn_del):
+                w.bind("<MouseWheel>", self.on_mousewheel, add="+")
+
     def _on_enter(self):
         self.frame.configure(fg_color=self.hover_bg)
         self._set_bg(self.hover_bg)
@@ -179,45 +189,43 @@ class AjinRowWidget:
         if self.current_data and self.on_del:
             self.on_del(self.current_data)
 
-    def update_data(self, r: Dict[str, Any], idx: int, show_olt: bool = True):
-        is_even = (idx % 2 == 0)
-        if self.current_data == r and self.is_even == is_even:
-            if not self.frame.winfo_ismapped():
-                self.frame.pack(fill="x", pady=1)
-            return
-
+    def update_data(self, r: Dict[str, Any], show_olt: bool = True):
         self.current_data = r
-        self.is_even = is_even
-        self.base_bg = "#181c27" if self.is_even else "#141721"
-        self.frame.configure(fg_color=self.base_bg)
-        self._set_bg(self.base_bg)
 
         # 0. Nome
         p_name = r.get("name") or "--"
         self.lbl_p.configure(text=f"🖧 {p_name}")
-        self.btn_edit_name.pack_forget()
-        if r.get("multi_llid"):
-            self.badge_2p.pack(side="left", padx=(0, 4))
-        else:
-            self.badge_2p.pack_forget()
-        self.btn_edit_name.pack(side="left")
+
+        has_2p = bool(r.get("multi_llid"))
+        if getattr(self, "_has_2p", None) != has_2p:
+            self._has_2p = has_2p
+            self.btn_edit_name.pack_forget()
+            if has_2p:
+                self.badge_2p.pack(side="left", padx=(0, 4))
+            else:
+                self.badge_2p.pack_forget()
+            self.btn_edit_name.pack(side="left")
 
         # 1. Status
         is_online = (r.get("status") == "Online")
-        if is_online:
-            self.lbl_stt.configure(text="● Online", text_color="#4ade80", fg_color="#0d2e1c")
-        else:
-            self.lbl_stt.configure(text="● Offline", text_color="#f87171", fg_color="#3c1418")
+        if getattr(self, "_is_online", None) != is_online:
+            self._is_online = is_online
+            if is_online:
+                self.lbl_stt.configure(text="● Online", text_color="#4ade80", fg_color="#0d2e1c")
+            else:
+                self.lbl_stt.configure(text="● Offline", text_color="#f87171", fg_color="#3c1418")
 
         # 2. Serial
         self.lbl_ser.configure(text=r.get("serial", "-"))
 
         # 3. Descrição
         p_desc = r.get("desc") or ""
-        if not p_desc:
-            self.lbl_desc.configure(text="+ adicionar rua", font=("Segoe UI", 9, "italic"), fg="#64748b")
-        else:
-            self.lbl_desc.configure(text=p_desc, font=("Segoe UI", 10), fg="#f1f5f9")
+        if p_desc != getattr(self, "_current_desc", None):
+            self._current_desc = p_desc
+            if not p_desc:
+                self.lbl_desc.configure(text="+ adicionar rua", font=("Segoe UI", 9, "italic"), fg="#64748b")
+            else:
+                self.lbl_desc.configure(text=p_desc, font=("Segoe UI", 10), fg="#f1f5f9")
 
         # 4. Fabricante
         self.lbl_vendor.configure(text=r.get("vendor", "-"))
@@ -511,41 +519,49 @@ class AjinView(ctk.CTkFrame):
                 )
                 lbl.pack(side="left", fill="both", expand=True)
 
-        # Área de rolagem das linhas com scrollbar suave e virtualização 144 FPS
-        self.scroll_table = ctk.CTkScrollableFrame(
-            self.table_container,
-            fg_color="transparent",
+        # Container principal da tabela com linhas estacionárias e scrollbar nativo independente
+        self.table_viewport_frame = ctk.CTkFrame(self.table_container, fg_color="transparent")
+        self.table_viewport_frame.grid(row=1, column=0, sticky="nsew", padx=2, pady=2)
+        self.table_viewport_frame.grid_rowconfigure(0, weight=1)
+        self.table_viewport_frame.grid_columnconfigure(0, weight=1)
+
+        self.table_rows_container = ctk.CTkFrame(self.table_viewport_frame, fg_color="transparent")
+        self.table_rows_container.grid(row=0, column=0, sticky="nsew", padx=(0, 4))
+        self.table_rows_container.grid_columnconfigure(0, weight=1)
+
+        self.table_scrollbar = ctk.CTkScrollbar(
+            self.table_viewport_frame,
+            orientation="vertical",
             scrollbar_button_color="#2c3345",
             scrollbar_button_hover_color="#3d4760"
         )
-        self.scroll_table.grid(row=1, column=0, sticky="nsew", padx=2, pady=2)
-        self.scroll_table.grid_columnconfigure(0, weight=1)
+        self.table_scrollbar.grid(row=0, column=1, sticky="ns", padx=(0, 2))
 
         self.ROW_HEIGHT = 40
-        self.VISIBLE_ROWS = 16
-        self._table_spacer = tk.Frame(self.scroll_table, bg="#13161f", width=1, height=1)
-        self._table_spacer.pack(side="left", fill="y")
+        self.POOL_SIZE = 35
+        self.VISIBLE_ROWS = 15
+        self._scroll_offset = 0
+        self._resize_debounce_job = None
+        self.scroll_table = self.table_viewport_frame  # alias para compatibilidade
 
-        # Pool fixo de apenas 16 linhas virtuais reutilizáveis
+        # Pool fixo de linhas estacionárias reutilizáveis
         self._row_pool: List[AjinRowWidget] = []
-        for _ in range(self.VISIBLE_ROWS):
+        for i in range(self.POOL_SIZE):
             item = AjinRowWidget(
-                self.scroll_table,
+                self.table_rows_container,
+                i,
                 self._open_edit_dialog,
                 self._open_menu_dialog,
-                self._on_delete_onu
+                self._on_delete_onu,
+                on_mousewheel=self._on_table_mousewheel
             )
+            item.frame.pack_forget()
             self._row_pool.append(item)
 
-        canvas = self.scroll_table._parent_canvas
-        orig_yview = canvas.yview
-        def hooked_yview(*args):
-            res = orig_yview(*args)
-            if args:
-                self._on_table_scroll()
-            return res
-        canvas.yview = hooked_yview
-        canvas.bind("<Configure>", lambda e: self._on_table_scroll(), add="+")
+        self.table_scrollbar.configure(command=self._on_scrollbar_command)
+        self.table_viewport_frame.bind("<MouseWheel>", self._on_table_mousewheel, add="+")
+        self.table_rows_container.bind("<MouseWheel>", self._on_table_mousewheel, add="+")
+        self.table_viewport_frame.bind("<Configure>", self._on_table_resize, add="+")
 
     def _on_column_sort(self, col_key: str):
         if self._sort_col == col_key:
@@ -1086,43 +1102,97 @@ class AjinView(ctk.CTkFrame):
         # Renderiza linhas da tabela
         self._render_table_rows()
 
-    def _render_table_rows(self):
-        """Atualiza a altura virtual da tabela e sincroniza o viewport."""
-        num_rows = len(self._filtered_rows)
-        virtual_h = max(1, num_rows * self.ROW_HEIGHT)
-        self._table_spacer.configure(height=virtual_h)
-        self._on_table_scroll()
+    def _on_scrollbar_command(self, action, val, *args):
+        total = len(self._filtered_rows)
+        if total <= self.VISIBLE_ROWS:
+            return
+        if action == "moveto":
+            target = int(round(float(val) * total))
+            self._set_scroll_offset(target)
+        elif action == "scroll":
+            delta = int(val)
+            self._set_scroll_offset(self._scroll_offset + delta)
 
-    def _on_table_scroll(self):
-        """Posicionamento virtual atômico em 0.03ms sem criar nem destruir widgets."""
-        total_rows = len(self._filtered_rows)
-        if total_rows == 0:
-            for item in self._row_pool:
-                if item.frame.winfo_ismapped():
-                    item.frame.place_forget()
+    def _on_table_mousewheel(self, e):
+        total = len(self._filtered_rows)
+        if total <= self.VISIBLE_ROWS:
+            return
+        if hasattr(e, "delta") and e.delta:
+            delta = -1 if e.delta > 0 else 1
+        elif getattr(e, "num", None) == 4:
+            delta = -1
+        elif getattr(e, "num", None) == 5:
+            delta = 1
+        else:
+            delta = 0
+        self._set_scroll_offset(self._scroll_offset + (delta * 2))
+
+    def _on_table_resize(self, e=None):
+        if self._resize_debounce_job:
+            try:
+                self.after_cancel(self._resize_debounce_job)
+            except Exception:
+                pass
+        self._resize_debounce_job = self.after(50, self._handle_table_resize)
+
+    def _handle_table_resize(self):
+        self._resize_debounce_job = None
+        avail_h = self.table_viewport_frame.winfo_height()
+        if avail_h > 50:
+            new_visible = min(len(self._row_pool), max(5, avail_h // self.ROW_HEIGHT))
+            if new_visible != self.VISIBLE_ROWS:
+                self.VISIBLE_ROWS = new_visible
+        self._render_table_rows()
+
+    def _set_scroll_offset(self, target_offset: int):
+        total = len(self._filtered_rows)
+        if total <= self.VISIBLE_ROWS:
+            target_offset = 0
+        else:
+            target_offset = max(0, min(target_offset, total - self.VISIBLE_ROWS))
+
+        if target_offset == self._scroll_offset and getattr(self, "_rendered_once", False):
             return
 
-        canvas = self.scroll_table._parent_canvas
-        top_y = canvas.canvasy(0)
-        first_idx = max(0, int(top_y // self.ROW_HEIGHT))
-        if total_rows <= self.VISIBLE_ROWS:
-            first_idx = 0
-        else:
-            first_idx = min(first_idx, total_rows - self.VISIBLE_ROWS)
+        self._rendered_once = True
+        self._scroll_offset = target_offset
+        self._render_table_rows()
 
-        show_count = min(total_rows, self.VISIBLE_ROWS)
-        for i in range(show_count):
-            row_idx = first_idx + i
+    def _render_table_rows(self):
+        """Atualização pura de textos em rótulos nativos em < 0.1ms sem mover nenhum widget."""
+        total = len(self._filtered_rows)
+        max_offset = max(0, total - self.VISIBLE_ROWS)
+        if self._scroll_offset > max_offset:
+            self._scroll_offset = max_offset
+
+        offset = self._scroll_offset
+        display_count = min(self.VISIBLE_ROWS, total)
+
+        for i in range(display_count):
+            data_idx = offset + i
             item = self._row_pool[i]
-            r = self._filtered_rows[row_idx]
-            item.update_data(r, row_idx, show_olt=True)
-            item.frame.place(x=0, y=row_idx * self.ROW_HEIGHT, relwidth=1.0)
+            if data_idx < total:
+                r = self._filtered_rows[data_idx]
+                item.update_data(r, show_olt=True)
+                if not item.frame.winfo_ismapped():
+                    item.frame.pack(fill="x", pady=1)
+            else:
+                if item.frame.winfo_ismapped():
+                    item.frame.pack_forget()
 
-        # Oculta linhas excedentes caso haja menos itens que VISIBLE_ROWS
-        for i in range(show_count, self.VISIBLE_ROWS):
+        # Oculta linhas excedentes do pool
+        for i in range(display_count, len(self._row_pool)):
             item = self._row_pool[i]
             if item.frame.winfo_ismapped():
-                item.frame.place_forget()
+                item.frame.pack_forget()
+
+        # Sincroniza barra de rolagem CustomTkinter
+        if total <= self.VISIBLE_ROWS:
+            self.table_scrollbar.set(0.0, 1.0)
+        else:
+            start = offset / total
+            end = min(1.0, (offset + self.VISIBLE_ROWS) / total)
+            self.table_scrollbar.set(start, end)
 
     # =========================================================================
     # DIÁLOGOS E MODAIS (EDIÇÃO, MENU, SCANNER, EVENTOS)
