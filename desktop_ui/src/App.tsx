@@ -227,7 +227,12 @@ export const App: React.FC = () => {
       {/* Top Header Barra idêntica à referência original */}
       <TitleBar
         currentTab={currentTab}
-        setCurrentTab={setCurrentTab}
+        setCurrentTab={(tab) => {
+          if (tab === 'map') {
+            setMapTargetLocation(null);
+          }
+          setCurrentTab(tab);
+        }}
         searchTerm={searchTerm}
         setSearchTerm={setSearchTerm}
         selectedGroup={selectedGroup}
@@ -258,6 +263,9 @@ export const App: React.FC = () => {
             onus={telemetry.rows}
             onConnect={handleConnect}
             targetLocation={mapTargetLocation}
+            onTargetLocationHandled={() => {
+              setMapTargetLocation(null);
+            }}
             onEditOnu={() => {
               setCurrentTab('ajin');
             }}

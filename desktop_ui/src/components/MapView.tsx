@@ -32,6 +32,7 @@ interface MapViewProps {
   onConnect: (serverId: string) => void;
   targetLocation?: { lat: number; lon: number; zoom?: number; id?: string; itemType?: 'server' | 'onu'; onu?: ONUItem } | null;
   onEditOnu?: (onu: ONUItem) => void;
+  onTargetLocationHandled?: () => void;
 }
 
 export const MapView: React.FC<MapViewProps> = ({
@@ -40,6 +41,7 @@ export const MapView: React.FC<MapViewProps> = ({
   onConnect,
   targetLocation,
   onEditOnu,
+  onTargetLocationHandled,
 }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
@@ -53,6 +55,10 @@ export const MapView: React.FC<MapViewProps> = ({
   const [showOnus, setShowOnus] = useState(true);
   const [selectedServer, setSelectedServer] = useState<Server | null>(null);
   const [selectedOnu, setSelectedOnu] = useState<ONUItem | null>(null);
+
+  const lastTargetKeyRef = useRef<string | null>(
+    targetLocation ? `${targetLocation.lat}_${targetLocation.lon}_${targetLocation.itemType || ''}_${targetLocation.id || ''}` : null
+  );
 
   // Formata duração do downtime exatamente como na referência: 14d 22h, 10d 7h
   const formatLossDuration = (sec: number) => {
@@ -93,10 +99,22 @@ export const MapView: React.FC<MapViewProps> = ({
     if (!mapContainerRef.current) return;
 
     if (!mapInstanceRef.current) {
+      // Se houver localização alvo já solicitada ao abrir o mapa, inicializa já centrado nela
+      const initialCenter: [number, number] = targetLocation
+        ? [Number(targetLocation.lat), Number(targetLocation.lon)]
+        : [-27.2423, -50.2189];
+      const initialZoom = targetLocation ? (targetLocation.zoom || 16) : 8;
+
       const map = L.map(mapContainerRef.current, {
-        center: [-27.2423, -50.2189],
-        zoom: 8,
-        zoomControl: false, // Usaremos nosso controle estilizado idêntico
+        center: initialCenter,
+        zoom: initialZoom,
+        zoomControl: false,
+      });
+
+      // Clique em área vazia do mapa fecha cards abertos e libera seleção
+      map.on('click', () => {
+        setSelectedServer(null);
+        setSelectedOnu(null);
       });
 
       // Satélite Real Oficial Google Híbrido
@@ -113,15 +131,27 @@ export const MapView: React.FC<MapViewProps> = ({
       markersLayerRef.current = L.layerGroup().addTo(map);
       mapInstanceRef.current = map;
 
+      if (targetLocation?.onu) {
+        setSelectedOnu(targetLocation.onu);
+        setSelectedServer(null);
+      }
+
       setTimeout(() => {
-        map.invalidateSize();
+        if (mapInstanceRef.current) {
+          mapInstanceRef.current.invalidateSize();
+        }
       }, 150);
     }
 
-    const map = mapInstanceRef.current;
-    if (map) {
-      map.invalidateSize();
-    }
+    // Cleanup completo do Leaflet ao desmontar a aba
+    return () => {
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.remove();
+        mapInstanceRef.current = null;
+        currentTileLayerRef.current = null;
+        markersLayerRef.current = null;
+      }
+    };
   }, []);
 
   // Troca de Camadas
@@ -163,12 +193,19 @@ export const MapView: React.FC<MapViewProps> = ({
     currentTileLayerRef.current = newLayer;
   }, [activeLayer]);
 
-  // Navegação e foco automático quando uma localização alvo é solicitada
+  // Navegação e foco suave quando uma localização alvo é solicitada
   useEffect(() => {
     if (!targetLocation || !mapInstanceRef.current) return;
-    mapInstanceRef.current.flyTo([targetLocation.lat, targetLocation.lon], targetLocation.zoom || 16, {
-      duration: 1.2,
+    const targetKey = `${targetLocation.lat}_${targetLocation.lon}_${targetLocation.itemType || ''}_${targetLocation.id || ''}`;
+    if (lastTargetKeyRef.current === targetKey) return;
+    lastTargetKeyRef.current = targetKey;
+
+    const map = mapInstanceRef.current;
+    map.stop();
+    map.flyTo([Number(targetLocation.lat), Number(targetLocation.lon)], targetLocation.zoom || 16, {
+      duration: 1.0,
     });
+
     if (targetLocation.onu) {
       setSelectedOnu(targetLocation.onu);
       setSelectedServer(null);
@@ -179,7 +216,9 @@ export const MapView: React.FC<MapViewProps> = ({
         setSelectedOnu(null);
       }
     }
-  }, [targetLocation, servers]);
+
+    onTargetLocationHandled?.();
+  }, [targetLocation]);
 
   // Marcadores em Alfinete de Alta Definição com Halo Pulsante (Servidores e ONUs)
   useEffect(() => {
@@ -279,13 +318,19 @@ export const MapView: React.FC<MapViewProps> = ({
 
   const handleCenterSC = () => {
     if (mapInstanceRef.current) {
-      mapInstanceRef.current.flyTo([-27.2423, -50.2189], 8, { duration: 1.2 });
+      mapInstanceRef.current.stop();
+      mapInstanceRef.current.flyTo([-27.2423, -50.2189], 8, { duration: 1.0 });
     }
+    setSelectedServer(null);
+    setSelectedOnu(null);
+    lastTargetKeyRef.current = null;
+    onTargetLocationHandled?.();
   };
 
   const handleIncidentClick = (inc: Incident) => {
     if (inc.latitude && inc.longitude && mapInstanceRef.current) {
-      mapInstanceRef.current.flyTo([inc.latitude, inc.longitude], 13, { duration: 1.0 });
+      mapInstanceRef.current.stop();
+      mapInstanceRef.current.flyTo([Number(inc.latitude), Number(inc.longitude)], 13, { duration: 1.0 });
     }
     const srv = servers.find((s) => s.id === inc.id) || {
       id: inc.id,
@@ -296,6 +341,9 @@ export const MapView: React.FC<MapViewProps> = ({
       longitude: inc.longitude,
     };
     setSelectedServer(srv);
+    setSelectedOnu(null);
+    lastTargetKeyRef.current = null;
+    onTargetLocationHandled?.();
   };
 
   const cycleLayer = () => {
