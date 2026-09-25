@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { Play, Globe, Clock, Server } from 'lucide-react';
+import { Monitor, Star } from 'lucide-react';
 
 interface ServerItem {
   id: string;
@@ -11,6 +11,7 @@ interface ServerItem {
   last_connected?: string;
   latitude?: number;
   longitude?: number;
+  favorite?: boolean;
 }
 
 interface ServersViewProps {
@@ -18,6 +19,25 @@ interface ServersViewProps {
   searchTerm: string;
   selectedGroup: string;
   onConnect: (serverId: string) => void;
+}
+
+const PALETTES = [
+  'linear-gradient(135deg, #204682 0%, #152c52 100%)', // AnyDesk Classic Blue
+  'linear-gradient(135deg, #282c36 0%, #181a20 100%)', // Dark Graphite
+  'linear-gradient(135deg, #2d5037 0%, #1a3021 100%)', // Forest Green
+  'linear-gradient(135deg, #7d552d 0%, #4a321a 100%)', // Warm Amber
+  'linear-gradient(135deg, #7d2d34 0%, #4a1a1f 100%)', // Crimson Ruby
+  'linear-gradient(135deg, #37326e 0%, #211e42 100%)', // Royal Indigo
+  'linear-gradient(135deg, #235569 0%, #15333f 100%)', // Teal Cyan
+];
+
+function getPaletteForId(id: string): string {
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) {
+    hash = (hash << 5) - hash + id.charCodeAt(i);
+    hash |= 0;
+  }
+  return PALETTES[Math.abs(hash) % PALETTES.length];
 }
 
 export const ServersView: React.FC<ServersViewProps> = ({
@@ -61,48 +81,37 @@ export const ServersView: React.FC<ServersViewProps> = ({
         )}
       </div>
 
-      {/* Grid de Cards dos Servidores com dimensões fixas no padrão AnyDesk */}
+      {/* Grid de Cards dos Servidores com padrão AnyDesk foto cheia */}
       <div
         className="flex-1 overflow-y-auto px-5 pb-6"
         style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
-          gridAutoRows: '200px',
+          gridAutoRows: '180px',
           gap: '16px',
         }}
       >
-        {filteredServers.map((s) => (
-          <div
-            key={s.id}
-            onClick={() => onConnect(s.id)}
-            style={{
-              height: '200px',
-              backgroundColor: '#16171d',
-              border: '1px solid #2e323e',
-              borderRadius: '12px',
-              overflow: 'hidden',
-              display: 'flex',
-              flexDirection: 'column',
-              cursor: 'pointer',
-              transition: 'all 0.2s ease',
-              boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
-            }}
-            className="hover:border-[#0066cc] hover:-translate-y-1 hover:shadow-xl group"
-          >
-            {/* Top Banner / Preview AnyDesk */}
+        {filteredServers.map((s) => {
+          const bgGradient = getPaletteForId(s.id);
+
+          return (
             <div
+              key={s.id}
+              onClick={() => onConnect(s.id)}
               style={{
-                height: '112px',
+                height: '180px',
                 position: 'relative',
-                background: 'linear-gradient(135deg, #1d2535 0%, #151822 50%, #0e1017 100%)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                borderBottom: '1px solid #262832',
+                borderRadius: '8px',
                 overflow: 'hidden',
+                cursor: 'pointer',
+                boxShadow: '0 4px 14px rgba(0, 0, 0, 0.45)',
+                border: '1.5px solid #262933',
+                transition: 'all 0.18s cubic-bezier(0.4, 0, 0.2, 1)',
+                background: bgGradient,
               }}
+              className="hover:border-[#0082f0] hover:scale-[1.02] hover:shadow-2xl group select-none"
             >
-              {/* Miniatura do servidor se existir */}
+              {/* Foto Cheia (100% da área do Card) */}
               <img
                 src={`http://127.0.0.1:8765/thumbnails/${s.id}.png`}
                 alt=""
@@ -112,179 +121,213 @@ export const ServersView: React.FC<ServersViewProps> = ({
                   width: '100%',
                   height: '100%',
                   objectFit: 'cover',
-                  opacity: 0.8,
+                  zIndex: 1,
+                  transition: 'transform 0.3s ease',
                 }}
+                className="group-hover:scale-105"
                 onError={(e) => {
                   (e.target as HTMLElement).style.display = 'none';
                 }}
               />
 
-              {/* Tag de Grupo (Canto Superior Esquerdo) */}
-              <span
+              {/* Ondas AnyDesk em SVG caso não haja print capturado */}
+              <svg
                 style={{
                   position: 'absolute',
-                  top: '8px',
-                  left: '8px',
-                  fontSize: '9px',
-                  fontWeight: 'bold',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.05em',
-                  padding: '2px 8px',
-                  borderRadius: '4px',
-                  backgroundColor: 'rgba(0, 0, 0, 0.75)',
-                  color: '#60a5fa',
-                  border: '1px solid rgba(59, 130, 246, 0.3)',
-                  zIndex: 2,
+                  inset: 0,
+                  width: '100%',
+                  height: '100%',
+                  opacity: 0.22,
+                  zIndex: 0,
+                  pointerEvents: 'none',
                 }}
+                viewBox="0 0 276 180"
+                preserveAspectRatio="none"
               >
-                {s.group || 'BEMTEVI'}
-              </span>
-
-              {/* Status Online (Canto Superior Direito) */}
-              <span
-                style={{
-                  position: 'absolute',
-                  top: '8px',
-                  right: '8px',
-                  fontSize: '10px',
-                  fontWeight: '600',
-                  padding: '2px 8px',
-                  borderRadius: '4px',
-                  backgroundColor: 'rgba(0, 0, 0, 0.75)',
-                  color: '#34d399',
-                  border: '1px solid rgba(16, 185, 129, 0.3)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '4px',
-                  zIndex: 2,
-                }}
-              >
-                <span
-                  style={{
-                    width: '6px',
-                    height: '6px',
-                    borderRadius: '50%',
-                    backgroundColor: '#34d399',
-                  }}
+                <path
+                  d="M-20,135 C50,60 170,195 300,90 L300,180 L-20,180 Z"
+                  fill="white"
+                  opacity="0.35"
                 />
-                Online
-              </span>
+                <path
+                  d="M-20,155 C70,95 190,215 300,120 L300,180 L-20,180 Z"
+                  fill="white"
+                  opacity="0.25"
+                />
+              </svg>
 
-              {/* Ícone Central de Servidor */}
+              {/* Gradiente Escuro Inferior para máxima legibilidade do nome e IP sobre a foto */}
               <div
                 style={{
-                  width: '44px',
-                  height: '44px',
-                  borderRadius: '10px',
-                  backgroundColor: 'rgba(0, 102, 204, 0.15)',
-                  border: '1px solid rgba(0, 102, 204, 0.3)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: '#60a5fa',
-                  zIndex: 1,
+                  position: 'absolute',
+                  inset: 0,
+                  background:
+                    'linear-gradient(to top, rgba(10, 12, 16, 0.94) 0%, rgba(10, 12, 16, 0.72) 42%, rgba(10, 12, 16, 0.12) 72%, transparent 100%)',
+                  zIndex: 2,
+                  pointerEvents: 'none',
                 }}
-                className="group-hover:scale-110 transition-transform"
-              >
-                <Server style={{ width: '22px', height: '22px' }} />
-              </div>
-            </div>
+              />
 
-            {/* Bottom Info & Connect Button */}
-            <div
-              style={{
-                height: '88px',
-                padding: '10px 14px',
-                display: 'flex',
-                flexDirection: 'column',
-                justifyContent: 'space-between',
-              }}
-            >
-              <div>
-                <h3
-                  style={{
-                    fontSize: '13px',
-                    fontWeight: 'bold',
-                    color: '#ffffff',
-                    margin: 0,
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  }}
-                  className="group-hover:text-blue-400 transition-colors"
-                >
-                  {s.name}
-                </h3>
-                <div
-                  style={{
-                    fontSize: '11px',
-                    fontFamily: 'monospace',
-                    color: '#94a3b8',
-                    marginTop: '2px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                  }}
-                >
-                  <Globe style={{ width: '12px', height: '12px', color: '#64748b' }} />
-                  <span>
-                    {s.host}:{s.port || 3389}
-                  </span>
-                </div>
-              </div>
-
-              {/* Rodapé com Conectar */}
+              {/* Canto Superior: Status LED + Tag do Grupo à esquerda, Estrela à direita */}
               <div
                 style={{
+                  position: 'absolute',
+                  top: '10px',
+                  left: '12px',
+                  right: '12px',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'space-between',
-                  paddingTop: '6px',
-                  borderTop: '1px solid #262832',
+                  zIndex: 3,
                 }}
               >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  {/* Status LED Redondo com Glow AnyDesk */}
+                  <span
+                    style={{
+                      width: '10px',
+                      height: '10px',
+                      borderRadius: '50%',
+                      backgroundColor: '#22c55e',
+                      boxShadow: '0 0 8px rgba(34, 197, 94, 0.9)',
+                      border: '1.5px solid rgba(255, 255, 255, 0.85)',
+                      display: 'inline-block',
+                    }}
+                  />
+
+                  {/* Pílula do Grupo */}
+                  <span
+                    style={{
+                      fontSize: '9px',
+                      fontWeight: 700,
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.04em',
+                      padding: '2px 8px',
+                      borderRadius: '4px',
+                      backgroundColor: 'rgba(0, 0, 0, 0.65)',
+                      color: '#93c5fd',
+                      border: '1px solid rgba(59, 130, 246, 0.35)',
+                      backdropFilter: 'blur(4px)',
+                    }}
+                  >
+                    {s.group || 'BEMTEVI'}
+                  </span>
+                </div>
+
+                {/* Estrela de Favorito */}
                 <span
                   style={{
-                    fontSize: '10px',
-                    color: '#64748b',
+                    color: '#facc15',
+                    opacity: 0.85,
                     display: 'flex',
                     alignItems: 'center',
-                    gap: '4px',
                   }}
+                  className="group-hover:opacity-100 group-hover:scale-110 transition-all"
                 >
-                  <Clock style={{ width: '11px', height: '11px' }} />
-                  {s.last_connected ? 'Conectado recente' : 'Pronto'}
+                  <Star style={{ width: '15px', height: '15px', fill: s.favorite ? '#facc15' : 'none', stroke: '#facc15' }} />
                 </span>
-
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onConnect(s.id);
-                  }}
-                  style={{
-                    backgroundColor: '#0066cc',
-                    color: '#ffffff',
-                    border: 'none',
-                    borderRadius: '6px',
-                    padding: '4px 10px',
-                    fontSize: '11px',
-                    fontWeight: 'bold',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '5px',
-                    cursor: 'pointer',
-                    boxShadow: '0 2px 6px rgba(0, 102, 204, 0.4)',
-                  }}
-                  className="hover:bg-[#0052a3] active:scale-95 transition-all"
-                >
-                  <Play style={{ width: '11px', height: '11px', fill: 'currentColor' }} />
-                  <span>Conectar</span>
-                </button>
               </div>
+
+              {/* Canto Inferior: Ícone de Monitor + Nome em Negrito + IP à esquerda, Menu 3 pontos à direita */}
+              <div
+                style={{
+                  position: 'absolute',
+                  bottom: '12px',
+                  left: '12px',
+                  right: '12px',
+                  display: 'flex',
+                  alignItems: 'flex-end',
+                  justifyContent: 'space-between',
+                  zIndex: 3,
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+                  {/* Ícone de Monitor Estilizado AnyDesk */}
+                  <div
+                    style={{
+                      width: '30px',
+                      height: '22px',
+                      borderRadius: '4px',
+                      border: '1.5px solid rgba(255, 255, 255, 0.9)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      backgroundColor: 'rgba(0, 0, 0, 0.45)',
+                      flexShrink: 0,
+                    }}
+                  >
+                    <Monitor style={{ width: '15px', height: '15px', color: '#ffffff' }} />
+                  </div>
+
+                  {/* Textos: Nome do Servidor e Host */}
+                  <div style={{ minWidth: 0 }}>
+                    <h3
+                      style={{
+                        fontSize: '13px',
+                        fontWeight: 700,
+                        color: '#ffffff',
+                        margin: 0,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        lineHeight: 1.25,
+                      }}
+                      className="group-hover:text-blue-300 transition-colors"
+                    >
+                      {s.name}
+                    </h3>
+                    <div
+                      style={{
+                        fontSize: '11px',
+                        fontFamily: 'monospace',
+                        color: '#cbd5e1',
+                        marginTop: '2px',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {s.host}:{s.port || 3389}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Três Pontos Verticais AnyDesk ⋮ */}
+                <div
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '2.5px',
+                    padding: '3px',
+                    opacity: 0.65,
+                    flexShrink: 0,
+                  }}
+                  className="group-hover:opacity-100 transition-opacity"
+                >
+                  <span style={{ width: '3px', height: '3px', borderRadius: '50%', backgroundColor: '#ffffff' }} />
+                  <span style={{ width: '3px', height: '3px', borderRadius: '50%', backgroundColor: '#ffffff' }} />
+                  <span style={{ width: '3px', height: '3px', borderRadius: '50%', backgroundColor: '#ffffff' }} />
+                </div>
+              </div>
+
+              {/* Borda Inferior Luminosa AnyDesk Blue no Hover */}
+              <div
+                style={{
+                  position: 'absolute',
+                  bottom: 0,
+                  left: 0,
+                  right: 0,
+                  height: '3px',
+                  backgroundColor: '#0082f0',
+                  opacity: 0,
+                  zIndex: 4,
+                  transition: 'opacity 0.2s ease',
+                }}
+                className="group-hover:!opacity-100"
+              />
             </div>
-          </div>
-        ))}
+          );
+        })}
 
         {filteredServers.length === 0 && (
           <div
@@ -299,7 +342,7 @@ export const ServersView: React.FC<ServersViewProps> = ({
               color: '#64748b',
             }}
           >
-            <Server style={{ width: '40px', height: '40px', strokeWidth: 1.5, color: '#475569' }} />
+            <Monitor style={{ width: '40px', height: '40px', strokeWidth: 1.5, color: '#475569' }} />
             <p style={{ marginTop: '12px', fontSize: '14px', fontWeight: '600', color: '#94a3b8' }}>
               Nenhum servidor encontrado
             </p>
