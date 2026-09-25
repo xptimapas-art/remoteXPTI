@@ -299,6 +299,150 @@ def setup_global_smooth_scroll(app):
         log.warning(f"[RemoteXPTI] Falha ao configurar scroll suave: {e}")
 
 
+def setup_win32_drag_optimizer(app):
+    """
+    Subclassing nativo Win32 (64-bit seguro) do procedimento de janela (WndProc)
+    do frame de topo do Windows.
+    
+    Isola 100% o loop modal de movimentação do mouse do Windows (SC_MOVE) do Tkinter.
+    Durante o arrasto da janela (WM_ENTERSIZEMOVE até WM_EXITSIZEMOVE), filtra e desvia
+    rajadas de mensagens de alta frequência (mouses de 500Hz/1000Hz) diretamente para o DefWindowProc,
+    permitindo que o DWM do Windows mova a textura da janela a 144Hz/240Hz com aceleração pura de hardware
+    sem que o Tkinter gere eventos virtuais, recalcule layouts ou sature a fila de mensagens do mouse.
+    """
+    if sys.platform != "win32":
+        return
+
+    try:
+        user32 = ctypes.windll.user32
+
+        LRESULT = ctypes.c_int64
+        WPARAM = ctypes.c_uint64
+        LPARAM = ctypes.c_int64
+        HWND = ctypes.c_void_p
+        UINT = ctypes.c_uint
+
+        WNDPROC = ctypes.WINFUNCTYPE(LRESULT, HWND, UINT, WPARAM, LPARAM)
+
+        user32.SetWindowLongPtrW.argtypes = [HWND, ctypes.c_int, ctypes.c_void_p]
+        user32.SetWindowLongPtrW.restype = ctypes.c_void_p
+
+        user32.CallWindowProcW.argtypes = [ctypes.c_void_p, HWND, UINT, WPARAM, LPARAM]
+        user32.CallWindowProcW.restype = LRESULT
+
+        user32.DefWindowProcW.argtypes = [HWND, UINT, WPARAM, LPARAM]
+        user32.DefWindowProcW.restype = LRESULT
+
+        GWLP_WNDPROC = -4
+        WM_ENTERSIZEMOVE = 0x0231
+        WM_EXITSIZEMOVE = 0x0232
+        WM_WINDOWPOSCHANGING = 0x0046
+        WM_WINDOWPOSCHANGED = 0x0047
+        WM_MOVE = 0x0003
+        WM_MOVING = 0x0216
+        SWP_NOSIZE = 0x0001
+        SWP_NOZORDER = 0x0004
+        SWP_NOACTIVATE = 0x0010
+
+        class WINDOWPOS(ctypes.Structure):
+            _fields_ = [
+                ("hwnd", HWND),
+                ("hwndInsertAfter", HWND),
+                ("x", ctypes.c_int),
+                ("y", ctypes.c_int),
+                ("cx", ctypes.c_int),
+                ("cy", ctypes.c_int),
+                ("flags", ctypes.c_uint),
+            ]
+
+        class RECT(ctypes.Structure):
+            _fields_ = [
+                ("left", ctypes.c_long),
+                ("top", ctypes.c_long),
+                ("right", ctypes.c_long),
+                ("bottom", ctypes.c_long),
+            ]
+
+        frame_hwnd = int(app.wm_frame(), 16)
+        client_hwnd = app.winfo_id()
+
+        state = {
+            "in_drag": False,
+            "old_frame_proc": None,
+            "old_client_proc": None,
+            "c_proc": None
+        }
+
+        def smooth_wndproc(hwnd, msg, wp, lp):
+            if msg == WM_ENTERSIZEMOVE:
+                state["in_drag"] = True
+            elif msg == WM_EXITSIZEMOVE:
+                state["in_drag"] = False
+                old_p = state["old_frame_proc"] if hwnd == frame_hwnd else state["old_client_proc"]
+                if old_p and hwnd == frame_hwnd:
+                    try:
+                        rect = RECT()
+                        user32.GetWindowRect(frame_hwnd, ctypes.byref(rect))
+                        wp_final = WINDOWPOS()
+                        wp_final.hwnd = frame_hwnd
+                        wp_final.hwndInsertAfter = None
+                        wp_final.x = rect.left
+                        wp_final.y = rect.top
+                        wp_final.cx = rect.right - rect.left
+                        wp_final.cy = rect.bottom - rect.top
+                        wp_final.flags = SWP_NOZORDER | SWP_NOACTIVATE
+                        user32.CallWindowProcW(old_p, frame_hwnd, WM_WINDOWPOSCHANGED, 0, ctypes.addressof(wp_final))
+                    except Exception:
+                        pass
+                res = 0
+                if old_p:
+                    res = user32.CallWindowProcW(old_p, hwnd, msg, wp, lp)
+                try:
+                    app.after(10, app._check_column_recalculation)
+                except Exception:
+                    pass
+                return res
+            elif state["in_drag"]:
+                if msg in (WM_MOVE, WM_MOVING):
+                    return 0
+                elif msg == WM_WINDOWPOSCHANGED and lp:
+                    try:
+                        wp_struct = WINDOWPOS.from_address(lp)
+                        if wp_struct.flags & SWP_NOSIZE:
+                            return user32.DefWindowProcW(hwnd, msg, wp, lp)
+                    except Exception:
+                        pass
+
+            old_p = state["old_frame_proc"] if hwnd == frame_hwnd else state["old_client_proc"]
+            if old_p:
+                return user32.CallWindowProcW(old_p, hwnd, msg, wp, lp)
+            return user32.DefWindowProcW(hwnd, msg, wp, lp)
+
+        state["c_proc"] = WNDPROC(smooth_wndproc)
+        state["old_frame_proc"] = user32.SetWindowLongPtrW(
+            frame_hwnd, GWLP_WNDPROC, ctypes.cast(state["c_proc"], ctypes.c_void_p)
+        )
+        if client_hwnd and client_hwnd != frame_hwnd:
+            state["old_client_proc"] = user32.SetWindowLongPtrW(
+                client_hwnd, GWLP_WNDPROC, ctypes.cast(state["c_proc"], ctypes.c_void_p)
+            )
+
+        log.info("[RemoteXPTI] Otimizador nativo de arrasto Win32 ativado com sucesso.")
+
+        def cleanup():
+            try:
+                if state["old_frame_proc"]:
+                    user32.SetWindowLongPtrW(frame_hwnd, GWLP_WNDPROC, state["old_frame_proc"])
+                if state["old_client_proc"]:
+                    user32.SetWindowLongPtrW(client_hwnd, GWLP_WNDPROC, state["old_client_proc"])
+            except Exception:
+                pass
+
+        app._win32_drag_cleanup = cleanup
+    except Exception as e:
+        log.warning(f"[RemoteXPTI] Falha ao configurar Win32DragOptimizer: {e}")
+
+
 class RemoteXPTIApp(ctk.CTk):
     """Janela principal da aplicação RemoteXPTI."""
 
@@ -483,6 +627,7 @@ class RemoteXPTIApp(ctk.CTk):
         self.lift()
         self.focus_force()
         self._check_column_recalculation()
+        setup_win32_drag_optimizer(self)
         if hasattr(self, "splash_manager") and self.splash_manager:
             self.splash_manager.finish()
         log.info("[RemoteXPTI] Splash finalizada com sucesso. Janela principal revelada.")
@@ -1028,6 +1173,11 @@ class RemoteXPTIApp(ctk.CTk):
                 self._status_executor.shutdown(wait=False)
         except Exception as e:
             log.warning(f"[RemoteXPTI] Erro ao desligar executor de status: {e}")
+        if hasattr(self, "_win32_drag_cleanup") and self._win32_drag_cleanup:
+            try:
+                self._win32_drag_cleanup()
+            except Exception:
+                pass
         self.destroy()
         log.info("[RemoteXPTI] Aplicação finalizada.")
 

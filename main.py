@@ -21,6 +21,8 @@ def enable_high_dpi_awareness():
 
 def main():
     enable_high_dpi_awareness()
+    import customtkinter as ctk
+    ctk.deactivate_automatic_dpi_awareness()
     from logger import log, log_system_diagnostics, hook_tkinter_exceptions
     from version import CURRENT_VERSION
     log_system_diagnostics(CURRENT_VERSION)
