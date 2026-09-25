@@ -450,7 +450,7 @@ class RemoteXPTIApp(ctk.CTk):
 
         self.title("RemoteXPTI - RDP Quick Launcher")
         self.geometry("1100x720")
-        self.minsize(700, 480)
+        self.minsize(860, 520)
 
         # Centraliza a janela principal no monitor para quando for exibida
         try:
