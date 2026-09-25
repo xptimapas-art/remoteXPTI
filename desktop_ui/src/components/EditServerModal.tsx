@@ -29,6 +29,8 @@ export const EditServerModal: React.FC<EditServerModalProps> = ({
   const [fullscreen, setFullscreen] = useState(true);
   const [adminMode, setAdminMode] = useState(false);
   const [multimon, setMultimon] = useState(false);
+  const [latitude, setLatitude] = useState<string>('');
+  const [longitude, setLongitude] = useState<string>('');
 
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -59,6 +61,8 @@ export const EditServerModal: React.FC<EditServerModalProps> = ({
         setFullscreen(data.fullscreen !== false);
         setAdminMode(Boolean(data.admin_mode));
         setMultimon(Boolean(data.multimon));
+        setLatitude(data.latitude !== undefined && data.latitude !== null ? String(data.latitude) : '');
+        setLongitude(data.longitude !== undefined && data.longitude !== null ? String(data.longitude) : '');
       })
       .catch((err) => {
         setError(err.message || 'Erro ao carregar dados');
@@ -95,6 +99,8 @@ export const EditServerModal: React.FC<EditServerModalProps> = ({
           fullscreen,
           admin_mode: adminMode,
           multimon,
+          latitude: latitude.trim() ? parseFloat(latitude) : null,
+          longitude: longitude.trim() ? parseFloat(longitude) : null,
         }),
       });
 
@@ -266,6 +272,34 @@ export const EditServerModal: React.FC<EditServerModalProps> = ({
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
                   className="w-full bg-[#1f2129] border border-[#2e323e] focus:border-[#0066cc] rounded-lg px-3 py-2 text-white outline-none resize-none"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-slate-300 font-semibold flex items-center justify-between">
+                  <span>Latitude</span>
+                  <span className="text-[10px] text-[#8e92a0]">Opcional (Mapa)</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="Ex: -27.1394"
+                  value={latitude}
+                  onChange={(e) => setLatitude(e.target.value)}
+                  className="w-full bg-[#1f2129] border border-[#2e323e] focus:border-[#0066cc] rounded-lg px-3 py-2 text-white outline-none font-mono text-xs"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-slate-300 font-semibold flex items-center justify-between">
+                  <span>Longitude</span>
+                  <span className="text-[10px] text-[#8e92a0]">Opcional (Mapa)</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="Ex: -48.5144"
+                  value={longitude}
+                  onChange={(e) => setLongitude(e.target.value)}
+                  className="w-full bg-[#1f2129] border border-[#2e323e] focus:border-[#0066cc] rounded-lg px-3 py-2 text-white outline-none font-mono text-xs"
                 />
               </div>
             </div>

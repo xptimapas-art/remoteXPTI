@@ -2,7 +2,6 @@ import React, { useState, useMemo } from 'react';
 import {
   Search,
   RefreshCw,
-  Camera,
   Download,
   AlertTriangle,
   Radio,
@@ -50,6 +49,20 @@ interface AjinViewProps {
   onSaveLabel: (port: string, onuId: string, name: string, desc: string) => void;
 }
 
+function parseColetaTimestamp(val?: string, defaultTime?: string): { time: string; date: string } {
+  if (!val) return { time: defaultTime || '--:--:--', date: 'Hoje' };
+  const cleaned = val.replace(/às/gi, ' ').trim();
+  const parts = cleaned.split(/\s+/);
+  if (parts.length >= 2) {
+    return { date: parts[0], time: parts[1] };
+  }
+  if (parts.length === 1) {
+    if (parts[0].includes(':')) return { date: '', time: parts[0] };
+    return { date: parts[0], time: defaultTime || '--:--:--' };
+  }
+  return { date: val, time: defaultTime || '--:--:--' };
+}
+
 export const AjinView: React.FC<AjinViewProps> = ({
   telemetry,
   countdown,
@@ -68,6 +81,37 @@ export const AjinView: React.FC<AjinViewProps> = ({
   const [editingItem, setEditingItem] = useState<ONUItem | null>(null);
   const [editName, setEditName] = useState('');
   const [editDesc, setEditDesc] = useState('');
+
+  const handleExportCSV = () => {
+    const headers = ['Status', 'ONU / Ponto', 'MAC / Serial', 'Descrição (Rua / Local)', 'Fabricante', 'Sinal / Uptime', 'Canal OLT'];
+    const rows = filteredRows.map((r) => [
+      r.status,
+      r.name || `Ponto ${r.id}`,
+      r.serial || '',
+      `"${(r.desc || '').replace(/"/g, '""')}"`,
+      r.vendor || '',
+      r.signal || r.uptime || '',
+      r.port || '',
+    ]);
+
+    const csvContent = 'data:text/csv;charset=utf-8,\uFEFF' + [headers.join(';'), ...rows.map((e) => e.join(';'))].join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    const today = new Date().toISOString().slice(0, 10);
+    link.setAttribute('download', `ajin_telemetria_${today}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleToggleIncidents = () => {
+    if (selectedStatus === 'Fora de Funcionamento (Offline)') {
+      setSelectedStatus('Todos os Status');
+    } else {
+      setSelectedStatus('Fora de Funcionamento (Offline)');
+    }
+  };
 
   // Filtragem e Ordenação de Alta Performance
   const filteredRows = useMemo(() => {
@@ -172,25 +216,33 @@ export const AjinView: React.FC<AjinViewProps> = ({
           <div className="flex items-center gap-2">
             <button
               onClick={onRefresh}
-              className="px-2.5 py-1.5 bg-[#21262d] hover:bg-[#30363d] border border-[#30363d] text-slate-200 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors"
+              title="Forçar nova coleta na OLT"
+              className="px-2.5 py-1.5 bg-[#21262d] hover:bg-[#30363d] border border-[#30363d] text-slate-200 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
             >
               <RefreshCw className="w-3.5 h-3.5 text-blue-400" />
               <span>Atualizar</span>
             </button>
 
-            <button className="px-2.5 py-1.5 bg-[#21262d] hover:bg-[#30363d] border border-[#30363d] text-slate-200 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors">
-              <Camera className="w-3.5 h-3.5 text-sky-400" />
-              <span>Câmeras</span>
-            </button>
-
-            <button className="px-2.5 py-1.5 bg-[#21262d] hover:bg-[#30363d] border border-[#30363d] text-slate-200 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors">
-              <Download className="w-3.5 h-3.5 text-emerald-400" />
-              <span>CSV</span>
-            </button>
-
-            <button className="px-2.5 py-1.5 bg-[#21262d] hover:bg-[#30363d] border border-[#30363d] text-slate-200 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors">
+            <button
+              onClick={handleToggleIncidents}
+              title="Filtrar apenas ONUs offline em falha"
+              className={`px-2.5 py-1.5 border rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer ${
+                selectedStatus === 'Fora de Funcionamento (Offline)'
+                  ? 'bg-amber-950/70 border-amber-500/60 text-amber-300'
+                  : 'bg-[#21262d] hover:bg-[#30363d] border-[#30363d] text-slate-200'
+              }`}
+            >
               <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
-              <span>Incidentes</span>
+              <span>Incidentes {telemetry.offline > 0 ? `(${telemetry.offline})` : ''}</span>
+            </button>
+
+            <button
+              onClick={handleExportCSV}
+              title="Baixar planilha CSV com as ONUs filtradas"
+              className="px-2.5 py-1.5 bg-[#21262d] hover:bg-[#30363d] border border-[#30363d] text-slate-200 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
+            >
+              <Download className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Exportar CSV</span>
             </button>
           </div>
         </div>
@@ -356,14 +408,6 @@ export const AjinView: React.FC<AjinViewProps> = ({
             </div>
           </div>
 
-          {/* 4. Câmeras Mapeadas */}
-          <div className="p-4 flex items-center justify-between hover:bg-[#307cd1] transition-colors">
-            <Camera className="w-8 h-8 opacity-90" />
-            <div className="text-right">
-              <div className="text-3xl font-extrabold tracking-tight">{telemetry.total_cameras || 64}</div>
-              <div className="text-xs font-bold uppercase tracking-wider opacity-90">Câmeras Mapeadas</div>
-            </div>
-          </div>
 
           {/* 5. Portas PON */}
           <div className="p-4 hover:bg-[#307cd1] transition-colors">
@@ -387,22 +431,29 @@ export const AjinView: React.FC<AjinViewProps> = ({
             </div>
           </div>
 
-          {/* 6. Última Coleta */}
-          <div className="p-4 flex items-center justify-between hover:bg-[#307cd1] transition-colors">
-            <Clock className="w-7 h-7 opacity-90" />
-            <div className="text-right">
-              <div className="text-base font-bold font-mono">{telemetry.coleta_formatted?.split(' ')[1] || currentTime}</div>
-              <div className="text-[11px] opacity-80">{telemetry.coleta_formatted?.split(' ')[0] || '25/09/2026'}</div>
-              <div className="text-[10px] font-bold uppercase tracking-wider opacity-90">Última Coleta</div>
-            </div>
-          </div>
+          {/* 5. Última Coleta */}
+          {(() => {
+            const coleta = parseColetaTimestamp(telemetry.coleta_formatted, currentTime);
+            return (
+              <div className="p-4 flex items-center justify-between hover:bg-[#307cd1] transition-colors">
+                <Clock className="w-7 h-7 opacity-90" />
+                <div className="text-right">
+                  <div className="text-base font-bold font-mono tracking-tight">{coleta.time}</div>
+                  {coleta.date && <div className="text-[11px] opacity-80 mt-0.5">{coleta.date}</div>}
+                  <div className="text-[10px] font-bold uppercase tracking-wider opacity-90 mt-0.5">Última Coleta</div>
+                </div>
+              </div>
+            );
+          })()}
 
-          {/* 7. Servidor Coletor */}
+          {/* 6. Servidor Coletor */}
           <div className="p-4 flex items-center justify-between hover:bg-[#307cd1] transition-colors">
-            <Globe className="w-7 h-7 text-emerald-300" />
+            <Globe className={`w-7 h-7 ${telemetry.server?.online !== false ? 'text-emerald-300' : 'text-rose-300'}`} />
             <div className="text-right">
-              <div className="text-xs font-bold text-emerald-300">Ping OK</div>
-              <div className="text-[11px] font-mono opacity-90">192.168.190.187</div>
+              <div className={`text-xs font-bold ${telemetry.server?.online !== false ? 'text-emerald-300' : 'text-rose-300'}`}>
+                {telemetry.server?.online !== false ? 'Ping OK' : 'Sem Resposta'}
+              </div>
+              <div className="text-[11px] font-mono opacity-90">{telemetry.server?.ip || '192.168.190.187'}</div>
               <div className="text-[10px] font-bold uppercase tracking-wider opacity-90">Servidor Coletor</div>
             </div>
           </div>

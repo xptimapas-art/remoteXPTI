@@ -145,6 +145,17 @@ export const App: React.FC = () => {
     }
   };
 
+  const handleToggleFavorite = async (serverId: string) => {
+    try {
+      setServers((prev) =>
+        prev.map((s) => (s.id === serverId ? { ...s, favorite: !s.favorite } : s))
+      );
+      await fetch(`${API_BASE}/api/servers/${serverId}/favorite`, { method: 'POST' });
+    } catch (e) {
+      console.error('Erro ao alternar favorito:', e);
+    }
+  };
+
   const handleGlobalRefresh = async () => {
     try {
       await fetch(`${API_BASE}/api/refresh_all`, { method: 'POST' });
@@ -202,6 +213,7 @@ export const App: React.FC = () => {
             selectedGroup={selectedGroup}
             onConnect={handleConnect}
             onEdit={(id) => setEditingServerId(id)}
+            onToggleFavorite={handleToggleFavorite}
           />
         )}
 

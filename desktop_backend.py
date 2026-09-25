@@ -334,6 +334,15 @@ def update_server(server_id: str, req: UpdateServerRequest):
 
     return {"status": "updated", "server": updated}
 
+@app.post("/api/servers/{server_id}/favorite")
+def toggle_favorite(server_id: str):
+    srv = storage_mgr.get_server(server_id)
+    if not srv:
+        raise HTTPException(status_code=404, detail="Servidor não encontrado")
+    srv["favorite"] = not bool(srv.get("favorite", False))
+    storage_mgr.save()
+    return {"status": "ok", "favorite": srv["favorite"]}
+
 @app.delete("/api/servers/{server_id}")
 def delete_server(server_id: str):
     srv = storage_mgr.get_server(server_id)

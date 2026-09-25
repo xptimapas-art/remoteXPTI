@@ -24,6 +24,7 @@ interface ServersViewProps {
   selectedGroup: string;
   onConnect: (serverId: string) => void;
   onEdit: (serverId: string) => void;
+  onToggleFavorite?: (serverId: string) => void;
 }
 
 const PALETTES = [
@@ -66,6 +67,7 @@ export const ServersView: React.FC<ServersViewProps> = ({
   selectedGroup,
   onConnect,
   onEdit,
+  onToggleFavorite,
 }) => {
   const filteredServers = useMemo(() => {
     const term = searchTerm.toLowerCase().trim();
@@ -279,18 +281,31 @@ export const ServersView: React.FC<ServersViewProps> = ({
                 </div>
 
                 {/* Estrela de Favorito */}
-                <span
+                <button
+                  type="button"
+                  title={s.favorite ? 'Remover dos favoritos' : 'Adicionar aos favoritos'}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onToggleFavorite?.(s.id);
+                  }}
                   style={{
+                    background: 'transparent',
+                    border: 'none',
+                    cursor: 'pointer',
                     color: '#facc15',
-                    opacity: 0.85,
+                    opacity: s.favorite ? 1 : 0.65,
                     display: 'flex',
                     alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: '4px',
+                    borderRadius: '4px',
                     flexShrink: 0,
+                    transition: 'all 0.15s ease',
                   }}
-                  className="group-hover:opacity-100 group-hover:scale-110 transition-all"
+                  className="hover:!opacity-100 hover:scale-125 active:scale-95"
                 >
                   <Star style={{ width: '15px', height: '15px', fill: s.favorite ? '#facc15' : 'none', stroke: '#facc15' }} />
-                </span>
+                </button>
               </div>
 
               {/* Canto Inferior: Ícone de Monitor + Nome em Negrito + IP à esquerda, Menu 3 pontos à direita */}
