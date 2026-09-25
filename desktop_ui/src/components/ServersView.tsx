@@ -12,6 +12,10 @@ interface ServerItem {
   latitude?: number;
   longitude?: number;
   favorite?: boolean;
+  is_online?: boolean;
+  status_msg?: string;
+  offline_since?: number | null;
+  duration_seconds?: number;
 }
 
 interface ServersViewProps {
@@ -31,6 +35,21 @@ const PALETTES = [
   'linear-gradient(135deg, #37326e 0%, #211e42 100%)', // Royal Indigo
   'linear-gradient(135deg, #235569 0%, #15333f 100%)', // Teal Cyan
 ];
+
+function formatLossDuration(sec?: number): string {
+  if (!sec || sec <= 0) return 'OFFLINE';
+  sec = Math.max(0, Math.floor(sec));
+  if (sec < 60) return `${sec}s`;
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  if (m < 60) return `${m}m ${s < 10 ? '0' : ''}${s}s`;
+  const h = Math.floor(m / 60);
+  const remM = m % 60;
+  if (h < 24) return `${h}h ${remM < 10 ? '0' : ''}${remM}m`;
+  const d = Math.floor(h / 24);
+  const remH = h % 24;
+  return `${d}d ${remH}h`;
+}
 
 function getPaletteForId(id: string): string {
   let hash = 0;
@@ -73,9 +92,17 @@ export const ServersView: React.FC<ServersViewProps> = ({
     <div className="flex-1 flex flex-col bg-[#0d1117] overflow-hidden select-none">
       {/* Sub-header de contagem */}
       <div className="flex items-center justify-between px-5 pt-3 pb-2 text-xs text-slate-400 shrink-0">
-        <span className="font-semibold text-slate-300">
-          Grade de Acesso RDP • {filteredServers.length} de {servers.length} servidores
-        </span>
+        <div className="flex items-center gap-2.5">
+          <span className="font-semibold text-slate-300">
+            Grade de Acesso RDP • {filteredServers.length} de {servers.length} servidores
+          </span>
+          {servers.some((s) => s.is_online === false) && (
+            <span className="px-2 py-0.5 rounded bg-red-950/70 text-red-300 border border-red-800/60 text-[11px] font-medium flex items-center gap-1.5 animate-pulse">
+              <span className="w-2 h-2 rounded-full bg-red-500 inline-block shadow-[0_0_6px_rgba(239,68,68,0.9)]" />
+              {servers.filter((s) => s.is_online === false).length} em falha (LOSS)
+            </span>
+          )}
+        </div>
         {selectedGroup && selectedGroup !== 'Todos os Grupos' && (
           <span className="px-2.5 py-0.5 rounded bg-blue-900/50 text-blue-300 border border-blue-700/50 text-[11px] font-medium">
             Filtro: {selectedGroup}
@@ -95,6 +122,7 @@ export const ServersView: React.FC<ServersViewProps> = ({
       >
         {filteredServers.map((s) => {
           const bgGradient = getPaletteForId(s.id);
+          const isOffline = s.is_online === false;
 
           return (
             <div
@@ -111,11 +139,11 @@ export const ServersView: React.FC<ServersViewProps> = ({
                 overflow: 'hidden',
                 cursor: 'pointer',
                 boxShadow: '0 4px 14px rgba(0, 0, 0, 0.45)',
-                border: '1.5px solid #262933',
+                border: isOffline ? '1.5px solid rgba(239, 68, 68, 0.55)' : '1.5px solid #262933',
                 transition: 'all 0.18s cubic-bezier(0.4, 0, 0.2, 1)',
                 background: bgGradient,
               }}
-              className="hover:border-[#0082f0] hover:scale-[1.02] hover:shadow-2xl group select-none"
+              className={`${isOffline ? 'hover:border-[#ef4444]' : 'hover:border-[#0082f0]'} hover:scale-[1.02] hover:shadow-2xl group select-none`}
             >
               {/* Foto Cheia (100% da área do Card) */}
               <img
@@ -174,7 +202,7 @@ export const ServersView: React.FC<ServersViewProps> = ({
                 }}
               />
 
-              {/* Canto Superior: Status LED + Tag do Grupo à esquerda, Estrela à direita */}
+              {/* Canto Superior: Status LED + Tag do Grupo + LOSS badge à esquerda, Estrela à direita */}
               <div
                 style={{
                   position: 'absolute',
@@ -187,18 +215,21 @@ export const ServersView: React.FC<ServersViewProps> = ({
                   zIndex: 3,
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  {/* Status LED Redondo com Glow AnyDesk */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+                  {/* Status LED Redondo com Glow AnyDesk (Verde Online / Vermelho Pulsante Offline) */}
                   <span
+                    title={isOffline ? `Offline: ${s.status_msg || 'Porta fechada/filtrada'}` : 'Online'}
                     style={{
                       width: '10px',
                       height: '10px',
                       borderRadius: '50%',
-                      backgroundColor: '#22c55e',
-                      boxShadow: '0 0 8px rgba(34, 197, 94, 0.9)',
+                      backgroundColor: isOffline ? '#ef4444' : '#22c55e',
+                      boxShadow: isOffline ? '0 0 10px rgba(239, 68, 68, 0.95)' : '0 0 8px rgba(34, 197, 94, 0.9)',
                       border: '1.5px solid rgba(255, 255, 255, 0.85)',
                       display: 'inline-block',
+                      flexShrink: 0,
                     }}
+                    className={isOffline ? 'animate-pulse' : ''}
                   />
 
                   {/* Pílula do Grupo */}
@@ -214,10 +245,37 @@ export const ServersView: React.FC<ServersViewProps> = ({
                       color: '#93c5fd',
                       border: '1px solid rgba(59, 130, 246, 0.35)',
                       backdropFilter: 'blur(4px)',
+                      whiteSpace: 'nowrap',
                     }}
                   >
                     {s.group || 'BEMTEVI'}
                   </span>
+
+                  {/* Badge de LOSS em Destaque Vermelho quando Offline */}
+                  {isOffline && (
+                    <span
+                      title={`Offline há ${formatLossDuration(s.duration_seconds)} (${s.status_msg || ''})`}
+                      style={{
+                        fontSize: '9px',
+                        fontWeight: 700,
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.04em',
+                        padding: '2px 7px',
+                        borderRadius: '4px',
+                        backgroundColor: 'rgba(153, 27, 27, 0.88)',
+                        color: '#fef2f2',
+                        border: '1px solid rgba(248, 113, 113, 0.7)',
+                        backdropFilter: 'blur(4px)',
+                        boxShadow: '0 2px 6px rgba(185, 28, 28, 0.4)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      ⚠️ LOSS {formatLossDuration(s.duration_seconds)}
+                    </span>
+                  )}
                 </div>
 
                 {/* Estrela de Favorito */}
@@ -227,6 +285,7 @@ export const ServersView: React.FC<ServersViewProps> = ({
                     opacity: 0.85,
                     display: 'flex',
                     alignItems: 'center',
+                    flexShrink: 0,
                   }}
                   className="group-hover:opacity-100 group-hover:scale-110 transition-all"
                 >
@@ -329,7 +388,7 @@ export const ServersView: React.FC<ServersViewProps> = ({
                 </button>
               </div>
 
-              {/* Borda Inferior Luminosa AnyDesk Blue no Hover */}
+              {/* Borda Inferior Luminosa AnyDesk no Hover (Azul se Online, Vermelha se Offline) */}
               <div
                 style={{
                   position: 'absolute',
@@ -337,7 +396,7 @@ export const ServersView: React.FC<ServersViewProps> = ({
                   left: 0,
                   right: 0,
                   height: '3px',
-                  backgroundColor: '#0082f0',
+                  backgroundColor: isOffline ? '#ef4444' : '#0082f0',
                   opacity: 0,
                   zIndex: 4,
                   transition: 'opacity 0.2s ease',

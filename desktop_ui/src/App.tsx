@@ -98,6 +98,8 @@ export const App: React.FC = () => {
           } else if (msg.type === 'tick') {
             if (msg.time) setCurrentTime(msg.time);
             if (typeof msg.countdown === 'number') setCountdown(msg.countdown);
+          } else if (msg.type === 'servers_status_updated') {
+            loadServers();
           }
         } catch (e) {
           console.error('Falha ao processar mensagem do WebSocket:', e);
@@ -111,7 +113,13 @@ export const App: React.FC = () => {
 
     connectWebSocket();
 
+    // Polling de segurança a cada 15 segundos para manter contadores de LOSS atualizados
+    const srvInterval = setInterval(() => {
+      loadServers();
+    }, 15000);
+
     return () => {
+      clearInterval(srvInterval);
       wsRef.current?.close();
     };
   }, []);

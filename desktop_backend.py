@@ -4,13 +4,14 @@ Fornece APIs de alta velocidade e streaming em tempo real para a interface React
 """
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 import json
 import os
 from pathlib import Path
 import threading
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -63,20 +64,95 @@ class ConnectionManager:
                 self.disconnect(connection)
 
 ws_manager = ConnectionManager()
+main_event_loop = None
+
+def broadcast_ws(message: dict):
+    global main_event_loop
+    if main_event_loop and main_event_loop.is_running():
+        try:
+            asyncio.run_coroutine_threadsafe(ws_manager.broadcast(message), main_event_loop)
+        except Exception:
+            pass
+
+@app.on_event("startup")
+async def on_startup():
+    global main_event_loop
+    main_event_loop = asyncio.get_running_loop()
+    threading.Thread(target=check_all_servers_status, daemon=True).start()
 
 # Callback do AjinManager para notificar o WebSocket
 def _on_ajin_updated():
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            asyncio.run_coroutine_threadsafe(
-                ws_manager.broadcast({"type": "telemetry_update", "data": ajin_mgr.get_data()}),
-                loop
-            )
-    except Exception:
-        pass
+    broadcast_ws({"type": "telemetry_update", "data": ajin_mgr.get_data()})
 
 ajin_mgr.add_listener(_on_ajin_updated)
+
+# Cache de status e rastreamento de downtime de servidores
+server_status_cache: Dict[str, Dict[str, Any]] = {}
+server_downtime: Dict[str, float] = {}
+
+def _load_downtime_history():
+    global server_downtime
+    try:
+        from config_manager import get_config_dir
+        hist_file = get_config_dir() / "downtime_history.json"
+        if hist_file.exists():
+            with open(hist_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, dict):
+                    server_downtime = {str(k): float(v) for k, v in data.items()}
+                    log.info(f"[DesktopBackend] Downtime histórico carregado: {len(server_downtime)} servidores em falha.")
+    except Exception as e:
+        log.warning(f"[DesktopBackend] Falha ao carregar downtime_history.json: {e}")
+
+def _save_downtime_history():
+    try:
+        from config_manager import get_config_dir
+        hist_file = get_config_dir() / "downtime_history.json"
+        with open(hist_file, "w", encoding="utf-8") as f:
+            json.dump(server_downtime, f, indent=2)
+    except Exception as e:
+        log.warning(f"[DesktopBackend] Falha ao salvar downtime_history.json: {e}")
+
+_load_downtime_history()
+
+def check_all_servers_status():
+    """Verifica a conectividade RDP de todos os servidores em paralelo com ThreadPoolExecutor."""
+    servers = list(storage_mgr.servers)
+    now = time.time()
+    changed = False
+
+    def _check_one(srv):
+        nonlocal changed
+        s_id = srv["id"]
+        host = srv.get("host", "")
+        port = int(srv.get("port", 3389))
+        is_online, msg = RDPManager.check_connection(host, port, timeout=1.3)
+
+        if not is_online:
+            if s_id not in server_downtime:
+                server_downtime[s_id] = now
+                changed = True
+        else:
+            if s_id in server_downtime:
+                server_downtime.pop(s_id, None)
+                changed = True
+
+        off_since = server_downtime.get(s_id)
+        duration = int(now - off_since) if off_since else 0
+        server_status_cache[s_id] = {
+            "is_online": is_online,
+            "msg": msg,
+            "offline_since": off_since,
+            "duration_seconds": duration
+        }
+
+    with ThreadPoolExecutor(max_workers=20) as executor:
+        list(executor.map(_check_one, servers))
+
+    if changed:
+        _save_downtime_history()
+
+    broadcast_ws({"type": "servers_status_updated"})
 
 # Modelos Pydantic
 class ConnectRequest(BaseModel):
@@ -148,12 +224,34 @@ def get_status():
 @app.get("/api/servers")
 def get_servers():
     servers = storage_mgr.servers
-    # Remove senhas planas por segurança da API
+    now = time.time()
+    # Remove senhas planas por segurança da API e anexa status de conexão
     safe_servers = []
     for s in servers:
         sc = s.copy()
         sc.pop("password", None)
         sc.pop("password_plain", None)
+
+        s_id = sc.get("id", "")
+        cached = server_status_cache.get(s_id)
+        if cached:
+            sc["is_online"] = cached.get("is_online", True)
+            sc["status_msg"] = cached.get("msg", "Online")
+            sc["offline_since"] = cached.get("offline_since")
+            sc["duration_seconds"] = int(now - cached["offline_since"]) if cached.get("offline_since") else 0
+        else:
+            off_since = server_downtime.get(s_id)
+            if off_since:
+                sc["is_online"] = False
+                sc["status_msg"] = "Porta 3389 fechada ou filtrada"
+                sc["offline_since"] = off_since
+                sc["duration_seconds"] = int(now - off_since)
+            else:
+                sc["is_online"] = True
+                sc["status_msg"] = "Online"
+                sc["offline_since"] = None
+                sc["duration_seconds"] = 0
+
         safe_servers.append(sc)
     return {
         "servers": safe_servers,
@@ -294,36 +392,65 @@ def refresh_all():
     sync_supabase_servers()
     storage_mgr.load()
     ajin_mgr.fetch_telemetry_async(force=True)
-    return {"status": "ok", "message": "Atualização e sincronização solicitadas"}
+    threading.Thread(target=check_all_servers_status, daemon=True).start()
+    return {"status": "ok", "message": "Atualização e verificação de servidores solicitadas"}
+
+@app.post("/api/servers/check_status")
+def trigger_check_all():
+    threading.Thread(target=check_all_servers_status, daemon=True).start()
+    return {"status": "started", "message": "Verificação de conectividade iniciada"}
+
+@app.post("/api/servers/{server_id}/check")
+def check_single_server(server_id: str):
+    srv = storage_mgr.get_server(server_id)
+    if not srv:
+        raise HTTPException(status_code=404, detail="Servidor não encontrado")
+    host = srv.get("host", "")
+    port = int(srv.get("port", 3389))
+    now = time.time()
+    is_online, msg = RDPManager.check_connection(host, port, timeout=1.5)
+
+    if not is_online:
+        if server_id not in server_downtime:
+            server_downtime[server_id] = now
+            _save_downtime_history()
+    else:
+        if server_id in server_downtime:
+            server_downtime.pop(server_id, None)
+            _save_downtime_history()
+
+    off_since = server_downtime.get(server_id)
+    duration = int(now - off_since) if off_since else 0
+    stat = {
+        "is_online": is_online,
+        "msg": msg,
+        "offline_since": off_since,
+        "duration_seconds": duration
+    }
+    server_status_cache[server_id] = stat
+    broadcast_ws({"type": "servers_status_updated"})
+    return stat
 
 @app.get("/api/incidents")
 def get_incidents():
-    from config_manager import get_config_dir
-    hist_file = get_config_dir() / "downtime_history.json"
     now = time.time()
     incidents = []
-    if hist_file.exists():
-        try:
-            with open(hist_file, "r", encoding="utf-8") as f:
-                downtime_map = json.load(f)
-            server_map = {s["id"]: s for s in storage_mgr.servers}
-            for s_id, offline_since in downtime_map.items():
-                srv = server_map.get(s_id)
-                if not srv:
-                    continue
-                duration = max(0, int(now - float(offline_since)))
-                incidents.append({
-                    "id": s_id,
-                    "name": srv.get("name", "Servidor"),
-                    "host": srv.get("host", ""),
-                    "port": srv.get("port", 3389),
-                    "offline_since": offline_since,
-                    "duration_seconds": duration,
-                    "latitude": srv.get("latitude"),
-                    "longitude": srv.get("longitude")
-                })
-        except Exception as e:
-            log.warning(f"Erro ao carregar incidents: {e}")
+    server_map = {s["id"]: s for s in storage_mgr.servers}
+    for s_id, offline_since in list(server_downtime.items()):
+        srv = server_map.get(s_id)
+        if not srv:
+            continue
+        duration = max(0, int(now - float(offline_since)))
+        incidents.append({
+            "id": s_id,
+            "name": srv.get("name", "Servidor"),
+            "host": srv.get("host", ""),
+            "port": srv.get("port", 3389),
+            "offline_since": offline_since,
+            "duration_seconds": duration,
+            "latitude": srv.get("latitude"),
+            "longitude": srv.get("longitude")
+        })
     incidents.sort(key=lambda x: x["duration_seconds"], reverse=True)
     return incidents
 
@@ -379,11 +506,16 @@ def _background_heartbeat():
 
     refresh_countdown = 10
     supabase_sync_counter = 0
+    status_check_counter = 0
+
+    # Primeira checagem imediata de conectividade de todos os servidores
+    threading.Thread(target=check_all_servers_status, daemon=True).start()
 
     while True:
         time.sleep(1)
         refresh_countdown -= 1
         supabase_sync_counter += 1
+        status_check_counter += 1
         now_str = datetime.now().strftime("%H:%M:%S")
 
         if refresh_countdown <= 0:
@@ -395,19 +527,16 @@ def _background_heartbeat():
             supabase_sync_counter = 0
             threading.Thread(target=sync_supabase_servers, daemon=True).start()
 
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running() and ws_manager.active_connections:
-                asyncio.run_coroutine_threadsafe(
-                    ws_manager.broadcast({
-                        "type": "tick",
-                        "time": now_str,
-                        "countdown": refresh_countdown
-                    }),
-                    loop
-                )
-        except Exception:
-            pass
+        # Verifica conectividade de todos os servidores a cada 30 segundos
+        if status_check_counter >= 30:
+            status_check_counter = 0
+            threading.Thread(target=check_all_servers_status, daemon=True).start()
+
+        broadcast_ws({
+            "type": "tick",
+            "time": now_str,
+            "countdown": refresh_countdown
+        })
 
 def start_backend_service(port: int = 8765):
     """Inicia o servidor Uvicorn em uma thread separada."""
