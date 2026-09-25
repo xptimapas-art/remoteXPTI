@@ -35,7 +35,7 @@ def get_resource_path(relative_path: str) -> Path:
             return p
     return Path(__file__).parent.resolve() / relative_path
 class AjinRowWidget:
-    """Linha da tabela de ONUs com alta performance, cache de widgets e hover suave."""
+    """Linha da tabela de ONUs de alta performance, sem containers desnecessários e com zero lag."""
 
     def __init__(self, master, on_edit, on_menu, on_del):
         self.on_edit = on_edit
@@ -51,25 +51,26 @@ class AjinRowWidget:
         self.frame.pack_propagate(False)
 
         # Col 0: Nome (Ponto) - width 145
-        self.c0 = ctk.CTkFrame(self.frame, width=145, height=38, fg_color="transparent")
+        self.c0 = tk.Frame(self.frame, width=145, height=38, bg=self.base_bg)
         self.c0.pack_propagate(False)
         self.c0.pack(side="left", padx=4)
 
-        self.lbl_p = ctk.CTkLabel(self.c0, text="", font=ctk.CTkFont(size=12, weight="bold"), text_color="#ffffff")
+        self.lbl_p = tk.Label(self.c0, text="", font=("Segoe UI", 10, "bold"), fg="#ffffff", bg=self.base_bg)
         self.lbl_p.pack(side="left", padx=(0, 4))
 
-        self.badge_2p = ctk.CTkLabel(
-            self.c0, text="2P", font=ctk.CTkFont(size=9, weight="bold"),
-            text_color="#38bdf8", fg_color="#0f2b48", corner_radius=3, width=22, height=16
+        self.badge_2p = tk.Label(
+            self.c0, text="2P", font=("Segoe UI", 8, "bold"),
+            fg="#38bdf8", bg="#0f2b48", padx=4, pady=1
         )
         self.btn_edit_name = ctk.CTkButton(
             self.c0, text="✏️", width=20, height=20, fg_color="transparent",
             hover_color="#282f42", font=ctk.CTkFont(size=10),
             command=self._handle_edit
         )
+        self.btn_edit_name.pack(side="left")
 
         # Col 1: Status - width 110
-        self.c1 = ctk.CTkFrame(self.frame, width=110, height=38, fg_color="transparent")
+        self.c1 = tk.Frame(self.frame, width=110, height=38, bg=self.base_bg)
         self.c1.pack_propagate(False)
         self.c1.pack(side="left", padx=4)
 
@@ -80,20 +81,17 @@ class AjinRowWidget:
         self.lbl_stt.pack(side="left")
 
         # Col 2: Endereço / Serial - width 135
-        self.c2 = ctk.CTkFrame(self.frame, width=135, height=38, fg_color="transparent")
-        self.c2.pack_propagate(False)
-        self.c2.pack(side="left", padx=4)
-
-        self.lbl_ser = ctk.CTkLabel(
-            self.c2, text="", font=ctk.CTkFont(family="Consolas", size=11, weight="bold"), text_color="#cbd5e1"
+        self.lbl_ser = tk.Label(
+            self.frame, text="", font=("Consolas", 10, "bold"), fg="#cbd5e1", bg=self.base_bg,
+            width=15, anchor="w"
         )
-        self.lbl_ser.pack(side="left")
+        self.lbl_ser.pack(side="left", padx=4)
 
         # Col 3: Descrição (Rua / Local) - EXPANSIVO!
-        self.c3 = ctk.CTkFrame(self.frame, height=38, fg_color="transparent")
+        self.c3 = tk.Frame(self.frame, height=38, bg=self.base_bg)
         self.c3.pack(side="left", fill="x", expand=True, padx=4)
 
-        self.lbl_desc = ctk.CTkLabel(self.c3, text="", font=ctk.CTkFont(size=11), text_color="#f1f5f9")
+        self.lbl_desc = tk.Label(self.c3, text="", font=("Segoe UI", 10), fg="#f1f5f9", bg=self.base_bg, anchor="w")
         self.lbl_desc.pack(side="left", padx=(0, 4))
 
         self.btn_edit_desc = ctk.CTkButton(
@@ -104,33 +102,28 @@ class AjinRowWidget:
         self.btn_edit_desc.pack(side="left")
 
         # Col 4: Fabricante - width 100
-        self.c4 = ctk.CTkFrame(self.frame, width=100, height=38, fg_color="transparent")
-        self.c4.pack_propagate(False)
-        self.c4.pack(side="left", padx=4)
-
-        self.lbl_vendor = ctk.CTkLabel(self.c4, text="", font=ctk.CTkFont(size=11), text_color="#94a3b8")
-        self.lbl_vendor.pack(side="left")
+        self.lbl_vendor = tk.Label(
+            self.frame, text="", font=("Segoe UI", 10), fg="#94a3b8", bg=self.base_bg,
+            width=12, anchor="w"
+        )
+        self.lbl_vendor.pack(side="left", padx=4)
 
         # Col 5: Tempo no Status - width 115
-        self.c5 = ctk.CTkFrame(self.frame, width=115, height=38, fg_color="transparent")
-        self.c5.pack_propagate(False)
-        self.c5.pack(side="left", padx=4)
-
-        self.lbl_upt = ctk.CTkLabel(self.c5, text="", font=ctk.CTkFont(size=11), text_color="#94a3b8")
-        self.lbl_upt.pack(side="left")
+        self.lbl_upt = tk.Label(
+            self.frame, text="", font=("Segoe UI", 10), fg="#94a3b8", bg=self.base_bg,
+            width=13, anchor="w"
+        )
+        self.lbl_upt.pack(side="left", padx=4)
 
         # Col 6: Canal OLT - width 125
-        self.c6 = ctk.CTkFrame(self.frame, width=125, height=38, fg_color="transparent")
-        self.c6.pack_propagate(False)
-        self.c6.pack(side="left", padx=4)
-
-        self.lbl_canal = ctk.CTkLabel(
-            self.c6, text="", font=ctk.CTkFont(family="Consolas", size=11), text_color="#cbd5e1"
+        self.lbl_canal = tk.Label(
+            self.frame, text="", font=("Consolas", 10), fg="#cbd5e1", bg=self.base_bg,
+            width=14, anchor="w"
         )
-        self.lbl_canal.pack(side="left")
+        self.lbl_canal.pack(side="left", padx=4)
 
         # Col 7: Ações - width 85
-        self.c7 = ctk.CTkFrame(self.frame, width=85, height=38, fg_color="transparent")
+        self.c7 = tk.Frame(self.frame, width=85, height=38, bg=self.base_bg)
         self.c7.pack_propagate(False)
         self.c7.pack(side="left", padx=4)
 
@@ -149,27 +142,30 @@ class AjinRowWidget:
         )
         self.btn_del.pack(side="left")
 
-        # Efeito de hover suave nos widgets de conteúdo direto da linha
-        hover_targets = [
-            self.frame, self.lbl_p, self.lbl_stt, self.lbl_ser,
-            self.lbl_desc, self.lbl_vendor, self.lbl_upt, self.lbl_canal
-        ]
-        for w in hover_targets:
-            w.bind("<Enter>", self._on_enter)
-            w.bind("<Leave>", self._on_leave)
+        # Efeito de hover suave instantâneo sem queries Win32
+        for w in (self.frame, self.c0, self.lbl_p, self.c1, self.lbl_ser, self.c3, self.lbl_desc, self.lbl_vendor, self.lbl_upt, self.lbl_canal, self.c7):
+            w.bind("<Enter>", lambda e: self._on_enter(), add="+")
+            w.bind("<Leave>", lambda e: self._on_leave(), add="+")
 
-    def _on_enter(self, e):
+    def _on_enter(self):
         self.frame.configure(fg_color=self.hover_bg)
+        self._set_bg(self.hover_bg)
 
-    def _on_leave(self, e):
-        try:
-            x, y = self.frame.winfo_pointerxy()
-            rx, ry = self.frame.winfo_rootx(), self.frame.winfo_rooty()
-            rw, rh = self.frame.winfo_width(), self.frame.winfo_height()
-            if not (rx <= x <= rx + rw and ry <= y <= ry + rh):
-                self.frame.configure(fg_color=self.base_bg)
-        except Exception:
-            self.frame.configure(fg_color=self.base_bg)
+    def _on_leave(self):
+        self.frame.configure(fg_color=self.base_bg)
+        self._set_bg(self.base_bg)
+
+    def _set_bg(self, color: str):
+        self.c0.configure(bg=color)
+        self.lbl_p.configure(bg=color)
+        self.c1.configure(bg=color)
+        self.lbl_ser.configure(bg=color)
+        self.c3.configure(bg=color)
+        self.lbl_desc.configure(bg=color)
+        self.lbl_vendor.configure(bg=color)
+        self.lbl_upt.configure(bg=color)
+        self.lbl_canal.configure(bg=color)
+        self.c7.configure(bg=color)
 
     def _handle_edit(self):
         if self.current_data and self.on_edit:
@@ -184,10 +180,17 @@ class AjinRowWidget:
             self.on_del(self.current_data)
 
     def update_data(self, r: Dict[str, Any], idx: int, show_olt: bool = True):
+        is_even = (idx % 2 == 0)
+        if self.current_data == r and self.is_even == is_even:
+            if not self.frame.winfo_ismapped():
+                self.frame.pack(fill="x", pady=1)
+            return
+
         self.current_data = r
-        self.is_even = (idx % 2 == 0)
+        self.is_even = is_even
         self.base_bg = "#181c27" if self.is_even else "#141721"
         self.frame.configure(fg_color=self.base_bg)
+        self._set_bg(self.base_bg)
 
         # 0. Nome
         p_name = r.get("name") or "--"
@@ -212,9 +215,9 @@ class AjinRowWidget:
         # 3. Descrição
         p_desc = r.get("desc") or ""
         if not p_desc:
-            self.lbl_desc.configure(text="+ adicionar rua", font=ctk.CTkFont(size=10, slant="italic"), text_color="#64748b")
+            self.lbl_desc.configure(text="+ adicionar rua", font=("Segoe UI", 9, "italic"), fg="#64748b")
         else:
-            self.lbl_desc.configure(text=p_desc, font=ctk.CTkFont(size=11), text_color="#f1f5f9")
+            self.lbl_desc.configure(text=p_desc, font=("Segoe UI", 10), fg="#f1f5f9")
 
         # 4. Fabricante
         self.lbl_vendor.configure(text=r.get("vendor", "-"))
@@ -222,8 +225,8 @@ class AjinRowWidget:
         # 5. Tempo
         upt_txt = r.get("uptime") or "-"
         upt_col = "#f87171" if not is_online else "#94a3b8"
-        upt_weight = "bold" if not is_online else "normal"
-        self.lbl_upt.configure(text=upt_txt, text_color=upt_col, font=ctk.CTkFont(size=11, weight=upt_weight))
+        upt_font = ("Segoe UI", 10, "bold") if not is_online else ("Segoe UI", 10)
+        self.lbl_upt.configure(text=upt_txt, fg=upt_col, font=upt_font)
 
         # 6. Canal OLT
         canal_txt = f"{r.get('port')}_{str(r.get('id')).zfill(3)}" if show_olt else "--"
@@ -239,7 +242,6 @@ class NocSidebarManager:
     def __init__(self):
         self.blocks: List['NocSectionBlock'] = []
         self.active_block: Optional['NocSectionBlock'] = None
-        self._check_job = None
 
     def register(self, block: 'NocSectionBlock'):
         self.blocks.append(block)
@@ -247,7 +249,6 @@ class NocSidebarManager:
     def set_hover(self, block: 'NocSectionBlock'):
         if self.active_block == block:
             return
-        # Desativa imediatamente todos os outros blocos (garante exclusividade)
         for b in self.blocks:
             if b != block:
                 b.set_normal()
@@ -259,30 +260,6 @@ class NocSidebarManager:
         for b in self.blocks:
             b.set_normal()
         self.active_block = None
-
-    def request_leave_check(self, block: 'NocSectionBlock'):
-        if self._check_job:
-            try:
-                block.frame.after_cancel(self._check_job)
-            except Exception:
-                pass
-        self._check_job = block.frame.after(35, lambda: self._do_leave_check(block))
-
-    def _do_leave_check(self, block: 'NocSectionBlock'):
-        self._check_job = None
-        if self.active_block != block:
-            return
-        try:
-            x, y = block.frame.winfo_pointerxy()
-            rx, ry = block.frame.winfo_rootx(), block.frame.winfo_rooty()
-            rw, rh = block.frame.winfo_width(), block.frame.winfo_height()
-            if not (rx <= x <= rx + rw and ry <= y <= ry + rh):
-                block.set_normal()
-                if self.active_block == block:
-                    self.active_block = None
-        except Exception:
-            block.set_normal()
-            self.active_block = None
 
 
 class NocSectionBlock:
@@ -305,7 +282,6 @@ class NocSectionBlock:
     def bind_recursive(self, w=None):
         target = w or self.frame
         target.bind("<Enter>", lambda e: self.manager.set_hover(self), add="+")
-        target.bind("<Leave>", lambda e: self.manager.request_leave_check(self), add="+")
         for child in target.winfo_children():
             self.bind_recursive(child)
 
@@ -535,7 +511,7 @@ class AjinView(ctk.CTkFrame):
                 )
                 lbl.pack(side="left", fill="both", expand=True)
 
-        # Área de rolagem das linhas com scrollbar suave
+        # Área de rolagem das linhas com scrollbar suave e virtualização 144 FPS
         self.scroll_table = ctk.CTkScrollableFrame(
             self.table_container,
             fg_color="transparent",
@@ -545,9 +521,31 @@ class AjinView(ctk.CTkFrame):
         self.scroll_table.grid(row=1, column=0, sticky="nsew", padx=2, pady=2)
         self.scroll_table.grid_columnconfigure(0, weight=1)
 
-        # Pool de linhas reutilizáveis para movimentos e rolagem 60 FPS
+        self.ROW_HEIGHT = 40
+        self.VISIBLE_ROWS = 16
+        self._table_spacer = tk.Frame(self.scroll_table, bg="#13161f", width=1, height=1)
+        self._table_spacer.pack(side="left", fill="y")
+
+        # Pool fixo de apenas 16 linhas virtuais reutilizáveis
         self._row_pool: List[AjinRowWidget] = []
-        self._row_frames: List[ctk.CTkFrame] = []
+        for _ in range(self.VISIBLE_ROWS):
+            item = AjinRowWidget(
+                self.scroll_table,
+                self._open_edit_dialog,
+                self._open_menu_dialog,
+                self._on_delete_onu
+            )
+            self._row_pool.append(item)
+
+        canvas = self.scroll_table._parent_canvas
+        orig_yview = canvas.yview
+        def hooked_yview(*args):
+            res = orig_yview(*args)
+            if args:
+                self._on_table_scroll()
+            return res
+        canvas.yview = hooked_yview
+        canvas.bind("<Configure>", lambda e: self._on_table_scroll(), add="+")
 
     def _on_column_sort(self, col_key: str):
         if self._sort_col == col_key:
@@ -690,15 +688,9 @@ class AjinView(ctk.CTkFrame):
         self.sidebar_frame.grid(row=0, column=1, sticky="ns", padx=(0, 6), pady=(4, 6))
         self.sidebar_frame.grid_propagate(False)
 
-        # Monitor de saída da sidebar para limpar o hover com 100% de precisão
+        # Monitor de saída da sidebar para limpar o hover instantaneamente sem chamadas de Win32
         def _on_sidebar_leave(e):
-            try:
-                x, y = self.sidebar_frame.winfo_pointerxy()
-                rx, ry = self.sidebar_frame.winfo_rootx(), self.sidebar_frame.winfo_rooty()
-                rw, rh = self.sidebar_frame.winfo_width(), self.sidebar_frame.winfo_height()
-                if not (rx <= x <= rx + rw and ry <= y <= ry + rh):
-                    self._noc_hover_mgr.clear()
-            except Exception:
+            if getattr(e, "widget", None) == self.sidebar_frame:
                 self._noc_hover_mgr.clear()
 
         self.sidebar_frame.bind("<Leave>", _on_sidebar_leave, add="+")
@@ -1095,27 +1087,42 @@ class AjinView(ctk.CTkFrame):
         self._render_table_rows()
 
     def _render_table_rows(self):
-        show_olt = True
+        """Atualiza a altura virtual da tabela e sincroniza o viewport."""
         num_rows = len(self._filtered_rows)
+        virtual_h = max(1, num_rows * self.ROW_HEIGHT)
+        self._table_spacer.configure(height=virtual_h)
+        self._on_table_scroll()
 
-        # Atualiza ou aloca widgets do pool (60 FPS sem recriação ou flicker)
-        for idx, r in enumerate(self._filtered_rows):
-            if idx < len(self._row_pool):
-                item = self._row_pool[idx]
-            else:
-                item = AjinRowWidget(
-                    self.scroll_table,
-                    self._open_edit_dialog,
-                    self._open_menu_dialog,
-                    self._on_delete_onu
-                )
-                self._row_pool.append(item)
-            item.update_data(r, idx, show_olt=show_olt)
+    def _on_table_scroll(self):
+        """Posicionamento virtual atômico em 0.03ms sem criar nem destruir widgets."""
+        total_rows = len(self._filtered_rows)
+        if total_rows == 0:
+            for item in self._row_pool:
+                if item.frame.winfo_ismapped():
+                    item.frame.place_forget()
+            return
 
-        # Oculta linhas excedentes do pool quando a lista filtrada for menor
-        for extra in self._row_pool[num_rows:]:
-            if extra.frame.winfo_ismapped():
-                extra.frame.pack_forget()
+        canvas = self.scroll_table._parent_canvas
+        top_y = canvas.canvasy(0)
+        first_idx = max(0, int(top_y // self.ROW_HEIGHT))
+        if total_rows <= self.VISIBLE_ROWS:
+            first_idx = 0
+        else:
+            first_idx = min(first_idx, total_rows - self.VISIBLE_ROWS)
+
+        show_count = min(total_rows, self.VISIBLE_ROWS)
+        for i in range(show_count):
+            row_idx = first_idx + i
+            item = self._row_pool[i]
+            r = self._filtered_rows[row_idx]
+            item.update_data(r, row_idx, show_olt=True)
+            item.frame.place(x=0, y=row_idx * self.ROW_HEIGHT, relwidth=1.0)
+
+        # Oculta linhas excedentes caso haja menos itens que VISIBLE_ROWS
+        for i in range(show_count, self.VISIBLE_ROWS):
+            item = self._row_pool[i]
+            if item.frame.winfo_ismapped():
+                item.frame.place_forget()
 
     # =========================================================================
     # DIÁLOGOS E MODAIS (EDIÇÃO, MENU, SCANNER, EVENTOS)

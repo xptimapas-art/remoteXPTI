@@ -413,7 +413,7 @@ def setup_win32_drag_optimizer(app):
                     except Exception:
                         pass
 
-            old_p = state["old_frame_proc"] if hwnd == frame_hwnd else state["old_client_proc"]
+            old_p = state["old_frame_proc"]
             if old_p:
                 return user32.CallWindowProcW(old_p, hwnd, msg, wp, lp)
             return user32.DefWindowProcW(hwnd, msg, wp, lp)
@@ -422,10 +422,6 @@ def setup_win32_drag_optimizer(app):
         state["old_frame_proc"] = user32.SetWindowLongPtrW(
             frame_hwnd, GWLP_WNDPROC, ctypes.cast(state["c_proc"], ctypes.c_void_p)
         )
-        if client_hwnd and client_hwnd != frame_hwnd:
-            state["old_client_proc"] = user32.SetWindowLongPtrW(
-                client_hwnd, GWLP_WNDPROC, ctypes.cast(state["c_proc"], ctypes.c_void_p)
-            )
 
         log.info("[RemoteXPTI] Otimizador nativo de arrasto Win32 ativado com sucesso.")
 
@@ -433,8 +429,7 @@ def setup_win32_drag_optimizer(app):
             try:
                 if state["old_frame_proc"]:
                     user32.SetWindowLongPtrW(frame_hwnd, GWLP_WNDPROC, state["old_frame_proc"])
-                if state["old_client_proc"]:
-                    user32.SetWindowLongPtrW(client_hwnd, GWLP_WNDPROC, state["old_client_proc"])
+                    state["old_frame_proc"] = None
             except Exception:
                 pass
 
