@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { Layers, X } from 'lucide-react';
+import type { ONUItem } from './AjinView';
 
 interface Server {
   id: string;
@@ -27,10 +28,19 @@ interface Incident {
 
 interface MapViewProps {
   servers: Server[];
+  onus?: ONUItem[];
   onConnect: (serverId: string) => void;
+  targetLocation?: { lat: number; lon: number; zoom?: number; id?: string; itemType?: 'server' | 'onu'; onu?: ONUItem } | null;
+  onEditOnu?: (onu: ONUItem) => void;
 }
 
-export const MapView: React.FC<MapViewProps> = ({ servers, onConnect }) => {
+export const MapView: React.FC<MapViewProps> = ({
+  servers,
+  onus = [],
+  onConnect,
+  targetLocation,
+  onEditOnu,
+}) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
   const currentTileLayerRef = useRef<L.TileLayer | null>(null);
@@ -39,7 +49,10 @@ export const MapView: React.FC<MapViewProps> = ({ servers, onConnect }) => {
   const [activeLayer, setActiveLayer] = useState<'satellite' | 'roads' | 'osm'>('satellite');
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [isTrayOpen, setIsTrayOpen] = useState(false);
+  const [showServers, setShowServers] = useState(true);
+  const [showOnus, setShowOnus] = useState(true);
   const [selectedServer, setSelectedServer] = useState<Server | null>(null);
+  const [selectedOnu, setSelectedOnu] = useState<ONUItem | null>(null);
 
   // Formata duração do downtime exatamente como na referência: 14d 22h, 10d 7h
   const formatLossDuration = (sec: number) => {
@@ -150,7 +163,25 @@ export const MapView: React.FC<MapViewProps> = ({ servers, onConnect }) => {
     currentTileLayerRef.current = newLayer;
   }, [activeLayer]);
 
-  // Marcadores em Alfinete de Alta Definição com Halo Pulsante
+  // Navegação e foco automático quando uma localização alvo é solicitada
+  useEffect(() => {
+    if (!targetLocation || !mapInstanceRef.current) return;
+    mapInstanceRef.current.flyTo([targetLocation.lat, targetLocation.lon], targetLocation.zoom || 16, {
+      duration: 1.2,
+    });
+    if (targetLocation.onu) {
+      setSelectedOnu(targetLocation.onu);
+      setSelectedServer(null);
+    } else if (targetLocation.itemType === 'server') {
+      const srv = servers.find((s) => s.id === targetLocation.id);
+      if (srv) {
+        setSelectedServer(srv);
+        setSelectedOnu(null);
+      }
+    }
+  }, [targetLocation, servers]);
+
+  // Marcadores em Alfinete de Alta Definição com Halo Pulsante (Servidores e ONUs)
   useEffect(() => {
     const map = mapInstanceRef.current;
     const markersGroup = markersLayerRef.current;
@@ -158,45 +189,93 @@ export const MapView: React.FC<MapViewProps> = ({ servers, onConnect }) => {
 
     markersGroup.clearLayers();
 
-    const incidentIds = new Set(incidents.map((inc) => inc.id));
-    const validServers = servers.filter((s) => s.latitude && s.longitude);
+    // 1. Plotar Servidores
+    if (showServers) {
+      const incidentIds = new Set(incidents.map((inc) => inc.id));
+      const validServers = servers.filter((s) => s.latitude && s.longitude);
 
-    validServers.forEach((s) => {
-      const isIncident = incidentIds.has(s.id);
-      const dotColor = isIncident ? '#f04438' : '#2ebd59';
-      const haloColor = isIncident ? 'rgba(240, 68, 56, 0.45)' : 'rgba(46, 189, 89, 0.45)';
-      const pinBg = isIncident ? '#261618' : '#142219';
+      validServers.forEach((s) => {
+        const isIncident = incidentIds.has(s.id);
+        const dotColor = isIncident ? '#f04438' : '#2ebd59';
+        const haloColor = isIncident ? 'rgba(240, 68, 56, 0.45)' : 'rgba(46, 189, 89, 0.45)';
+        const pinBg = isIncident ? '#261618' : '#142219';
 
-      const customIcon = L.divIcon({
-        className: 'leaflet-pin-container',
-        html: `
-          <div class="pin-marker ${isIncident ? 'pin-offline' : 'pin-online'}">
-            <svg width="30" height="38" viewBox="0 0 30 38" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path class="pin-base" d="M15 1.5C7.544 1.5 1.5 7.544 1.5 15C1.5 24.8 13.9 36.6 14.5 37.1C14.8 37.4 15.2 37.4 15.5 37.1C16.1 36.6 28.5 24.8 28.5 15C28.5 7.544 22.456 1.5 15 1.5Z" fill="${pinBg}" stroke="#ffffff" stroke-width="2"/>
-              <circle class="pin-halo" cx="15" cy="15" r="7.5" fill="${haloColor}"/>
-              <circle class="pin-dot" cx="15" cy="15" r="5" fill="${dotColor}" stroke="#ffffff" stroke-width="1.2"/>
-            </svg>
-          </div>
-        `,
-        iconSize: [30, 38],
-        iconAnchor: [15, 37],
-        tooltipAnchor: [0, -38],
+        const customIcon = L.divIcon({
+          className: 'leaflet-pin-container',
+          html: `
+            <div class="pin-marker ${isIncident ? 'pin-offline' : 'pin-online'}">
+              <svg width="30" height="38" viewBox="0 0 30 38" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path class="pin-base" d="M15 1.5C7.544 1.5 1.5 7.544 1.5 15C1.5 24.8 13.9 36.6 14.5 37.1C14.8 37.4 15.2 37.4 15.5 37.1C16.1 36.6 28.5 24.8 28.5 15C28.5 7.544 22.456 1.5 15 1.5Z" fill="${pinBg}" stroke="#ffffff" stroke-width="2"/>
+                <circle class="pin-halo" cx="15" cy="15" r="7.5" fill="${haloColor}"/>
+                <circle class="pin-dot" cx="15" cy="15" r="5" fill="${dotColor}" stroke="#ffffff" stroke-width="1.2"/>
+              </svg>
+            </div>
+          `,
+          iconSize: [30, 38],
+          iconAnchor: [15, 37],
+          tooltipAnchor: [0, -38],
+        });
+
+        const marker = L.marker([Number(s.latitude), Number(s.longitude)], { icon: customIcon }).addTo(markersGroup);
+
+        marker.bindTooltip(`🖥️ <strong>${s.name}</strong><br/><span style="color:#94a3b8">${s.host}:${s.port || 3389}</span>`, {
+          permanent: false,
+          direction: 'top',
+          className: 'leaflet-tooltip-dark',
+          offset: [0, -38],
+        });
+
+        marker.on('click', () => {
+          setSelectedServer(s);
+          setSelectedOnu(null);
+        });
       });
+    }
 
-      const marker = L.marker([s.latitude!, s.longitude!], { icon: customIcon }).addTo(markersGroup);
+    // 2. Plotar ONUs da Ajin
+    if (showOnus && onus) {
+      const validOnus = onus.filter((o) => o.latitude && o.longitude);
 
-      marker.bindTooltip(s.name, {
-        permanent: false,
-        direction: 'top',
-        className: 'leaflet-tooltip-dark',
-        offset: [0, -38],
+      validOnus.forEach((o) => {
+        const isOnline = o.status === 'Online';
+        const dotColor = isOnline ? '#22d3ee' : '#f43f5e';
+        const haloColor = isOnline ? 'rgba(34, 211, 238, 0.45)' : 'rgba(244, 63, 94, 0.5)';
+        const pinBg = isOnline ? '#09252c' : '#330e16';
+        const borderColor = isOnline ? '#06b6d4' : '#f43f5e';
+
+        const customIcon = L.divIcon({
+          className: 'leaflet-pin-container',
+          html: `
+            <div class="pin-marker ${isOnline ? 'pin-onu-online' : 'pin-offline'}">
+              <svg width="28" height="36" viewBox="0 0 30 38" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path class="pin-base" d="M15 1.5C7.544 1.5 1.5 7.544 1.5 15C1.5 24.8 13.9 36.6 14.5 37.1C14.8 37.4 15.2 37.4 15.5 37.1C16.1 36.6 28.5 24.8 28.5 15C28.5 7.544 22.456 1.5 15 1.5Z" fill="${pinBg}" stroke="${borderColor}" stroke-width="2.2"/>
+                <circle class="pin-halo" cx="15" cy="15" r="7.5" fill="${haloColor}"/>
+                <path d="M15 7L11 15H15L14 22L20 13H15L15 7Z" fill="${dotColor}"/>
+              </svg>
+            </div>
+          `,
+          iconSize: [28, 36],
+          iconAnchor: [14, 35],
+          tooltipAnchor: [0, -36],
+        });
+
+        const marker = L.marker([Number(o.latitude), Number(o.longitude)], { icon: customIcon }).addTo(markersGroup);
+
+        const tooltipHtml = `⚡ <strong>${o.name || `Ponto ${o.id}`}</strong> (${o.status})<br/><span style="color:#94a3b8">${o.desc || o.port}</span>`;
+        marker.bindTooltip(tooltipHtml, {
+          permanent: false,
+          direction: 'top',
+          className: 'leaflet-tooltip-dark',
+          offset: [0, -36],
+        });
+
+        marker.on('click', () => {
+          setSelectedOnu(o);
+          setSelectedServer(null);
+        });
       });
-
-      marker.on('click', () => {
-        setSelectedServer(s);
-      });
-    });
-  }, [servers, incidents]);
+    }
+  }, [servers, incidents, onus, showServers, showOnus]);
 
   const handleCenterSC = () => {
     if (mapInstanceRef.current) {
@@ -238,11 +317,11 @@ export const MapView: React.FC<MapViewProps> = ({ servers, onConnect }) => {
             <span>Mapa</span>
           </div>
 
-          {/* Layer Pills */}
+          {/* Layer Pills: Satélite / Padrão */}
           <div className="flex items-center bg-[#14161d] border border-[#363a4a] rounded-md p-0.5 gap-0.5">
             <button
               onClick={() => setActiveLayer('satellite')}
-              className={`px-2.5 py-1 rounded text-[11px] font-bold transition-all flex items-center gap-1 ${
+              className={`px-2 py-1 rounded text-[11px] font-bold transition-all flex items-center gap-1 cursor-pointer ${
                 activeLayer === 'satellite'
                   ? 'bg-[#0066cc] text-white shadow-md'
                   : 'text-[#9aa0b2] hover:text-white'
@@ -253,7 +332,7 @@ export const MapView: React.FC<MapViewProps> = ({ servers, onConnect }) => {
             </button>
             <button
               onClick={() => setActiveLayer('roads')}
-              className={`px-2.5 py-1 rounded text-[11px] font-bold transition-all flex items-center gap-1 ${
+              className={`px-2 py-1 rounded text-[11px] font-bold transition-all flex items-center gap-1 cursor-pointer ${
                 activeLayer === 'roads'
                   ? 'bg-[#0066cc] text-white shadow-md'
                   : 'text-[#9aa0b2] hover:text-white'
@@ -264,10 +343,38 @@ export const MapView: React.FC<MapViewProps> = ({ servers, onConnect }) => {
             </button>
           </div>
 
+          {/* Toggle Camada de Itens: Servidores & ONUs AJIN */}
+          <div className="flex items-center bg-[#14161d] border border-[#363a4a] rounded-md p-0.5 gap-0.5">
+            <button
+              onClick={() => setShowServers(!showServers)}
+              title="Exibir ou ocultar Servidores no mapa"
+              className={`px-2 py-1 rounded text-[11px] font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                showServers
+                  ? 'bg-blue-600 text-white shadow-md'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <span>🖥️</span>
+              <span>Servidores ({servers.filter((s) => s.latitude && s.longitude).length})</span>
+            </button>
+            <button
+              onClick={() => setShowOnus(!showOnus)}
+              title="Exibir ou ocultar ONUs da Ajin no mapa"
+              className={`px-2 py-1 rounded text-[11px] font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                showOnus
+                  ? 'bg-cyan-600 text-white shadow-md'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <span>⚡</span>
+              <span>ONUs AJIN ({onus ? onus.filter((o) => o.latitude && o.longitude).length : 0})</span>
+            </button>
+          </div>
+
           {/* Botão Incidentes com Contador e Pulso */}
           <button
             onClick={() => setIsTrayOpen(!isTrayOpen)}
-            className={`px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all border ${
+            className={`px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all border cursor-pointer ${
               incidents.length > 0
                 ? 'bg-rose-950/60 border-rose-800 text-rose-300 hover:bg-rose-900/80 shadow-[0_0_10px_rgba(244,63,94,0.3)]'
                 : 'bg-[#21262d] border-[#30363d] text-slate-300'
@@ -279,10 +386,6 @@ export const MapView: React.FC<MapViewProps> = ({ servers, onConnect }) => {
               {incidents.length}
             </span>
           </button>
-
-          <span className="text-[11px] text-[#8e92a0]">
-            {servers.filter((s) => s.latitude && s.longitude).length} servidores no mapa
-          </span>
         </div>
 
         {/* 2. BANDEJA RETRÁTIL DE INCIDENTES (LOSS / DOWNTIME) */}
@@ -413,6 +516,76 @@ export const MapView: React.FC<MapViewProps> = ({ servers, onConnect }) => {
         </div>
       )}
 
+      {/* 5. BOTTOM FLOATING CARD (QUANDO UMA ONU É CLICADA) */}
+      {selectedOnu && (
+        <div className="absolute bottom-5 left-1/2 -translate-x-1/2 z-30 w-[min(720px,94%)] bg-[#10141d]/95 backdrop-blur-md border border-cyan-500/40 rounded-xl p-4 shadow-2xl text-white animate-in slide-in-from-bottom-4 duration-200">
+          <div className="flex items-center justify-between mb-2.5">
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <span className="text-xl">⚡</span>
+              <h3 className="font-extrabold text-base tracking-tight text-white">
+                {selectedOnu.name || `Ponto ${selectedOnu.id}`}
+              </h3>
+              <span
+                className={`text-xs px-2.5 py-0.5 rounded-full border font-bold flex items-center gap-1.5 ${
+                  selectedOnu.status === 'Online'
+                    ? 'bg-cyan-950/80 text-cyan-300 border-cyan-700/60'
+                    : 'bg-rose-950/80 text-rose-300 border-rose-700/60'
+                }`}
+              >
+                <span className={`w-1.5 h-1.5 rounded-full ${selectedOnu.status === 'Online' ? 'bg-cyan-400 animate-pulse' : 'bg-rose-400'}`} />
+                {selectedOnu.status === 'Online' ? 'Online' : 'Fora de Funcionamento'}
+              </span>
+              <span className="text-xs px-2 py-0.5 rounded bg-[#1f2430] border border-white/10 text-slate-300 font-mono">
+                {selectedOnu.port} • ID #{selectedOnu.id}
+              </span>
+            </div>
+            <button
+              onClick={() => setSelectedOnu(null)}
+              className="text-slate-400 hover:text-white p-1 rounded cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-slate-300 pt-2 border-t border-white/10">
+            <div className="space-y-1">
+              <div>📍 <span className="text-slate-400">Localização / Rua:</span> <strong className="text-white">{selectedOnu.desc || 'Não especificada'}</strong></div>
+              <div>📟 <span className="text-slate-400">MAC / Serial:</span> <span className="font-mono text-cyan-300">{selectedOnu.serial || '-'}</span></div>
+              <div>🏭 <span className="text-slate-400">Fabricante:</span> <span className="text-white">{selectedOnu.vendor || 'C-Data'}</span></div>
+            </div>
+            <div className="space-y-1">
+              <div>📶 <span className="text-slate-400">Sinal / Uptime:</span> <span className="font-mono text-emerald-400">{selectedOnu.signal || selectedOnu.uptime || '-21.4 dBm'}</span></div>
+              <div>🌐 <span className="text-slate-400">Coordenadas:</span> <span className="font-mono text-cyan-400">{Number(selectedOnu.latitude).toFixed(5)}, {Number(selectedOnu.longitude).toFixed(5)}</span></div>
+              {selectedOnu.cameras && selectedOnu.cameras.length > 0 && (
+                <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+                  <span className="text-slate-400">📷 Câmeras:</span>
+                  {selectedOnu.cameras.map((c: any, idx: number) => {
+                    const ip = typeof c === 'string' ? (c.match(/ip=([0-9.]+)/) ? c.match(/ip=([0-9.]+)/)![1] : c) : (c.ip || '');
+                    return (
+                      <span key={idx} className="font-mono text-[10px] bg-blue-950/80 border border-blue-700/60 text-blue-300 px-1.5 py-0.2 rounded">
+                        {ip}
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {onEditOnu && (
+            <div className="flex justify-end pt-2.5 mt-2 border-t border-white/10">
+              <button
+                onClick={() => onEditOnu(selectedOnu)}
+                className="px-3 py-1.5 bg-[#1f2430] hover:bg-[#2b3242] border border-[#3e4659] text-slate-200 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+              >
+                <span>✏️</span>
+                <span>Editar Identificação / Coordenadas</span>
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Estilos Globais do Leaflet (Alfinetes e Tooltips) */}
       <style>{`
         .leaflet-pin-container {
@@ -438,6 +611,13 @@ export const MapView: React.FC<MapViewProps> = ({ servers, onConnect }) => {
         @keyframes pulse-halo-green {
           0%, 100% { r: 6.5px; opacity: 0.35; }
           50% { r: 8.5px; opacity: 0.9; }
+        }
+        .pin-onu-online .pin-halo {
+          animation: pulse-halo-cyan 2.2s infinite ease-in-out;
+        }
+        @keyframes pulse-halo-cyan {
+          0%, 100% { r: 6.5px; opacity: 0.35; }
+          50% { r: 9px; opacity: 0.95; }
         }
         .pin-offline .pin-halo {
           animation: pulse-halo-red 2.2s infinite ease-in-out;

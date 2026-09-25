@@ -203,6 +203,8 @@ class AjinManager:
             log.warning(f"[AjinManager] Erro ao salvar label: {e}")
         return False
 
+    save_label = update_label
+
     def delete_onu(self, port: str, onu_id: str) -> bool:
         """Remove ou ignora uma ONU do monitoramento."""
         url = f"http://{self.hub_host}/delete_onu"

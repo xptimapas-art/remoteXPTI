@@ -13,9 +13,10 @@ import {
   Pencil,
   Trash2,
   Activity,
+  MapPin,
 } from 'lucide-react';
 
-interface ONUItem {
+export interface ONUItem {
   id: string | number;
   port: string;
   name?: string;
@@ -26,6 +27,9 @@ interface ONUItem {
   vendor?: string;
   rx_power?: string;
   signal?: string;
+  latitude?: number | null;
+  longitude?: number | null;
+  cameras?: any[];
 }
 
 interface TelemetryData {
@@ -46,7 +50,8 @@ interface AjinViewProps {
   countdown: number;
   currentTime: string;
   onRefresh: () => void;
-  onSaveLabel: (port: string, onuId: string, name: string, desc: string) => void;
+  onSaveLabel: (port: string, onuId: string, name: string, desc: string, lat?: number | null, lon?: number | null) => void;
+  onLocateOnMap?: (onu: ONUItem) => void;
 }
 
 function parseColetaTimestamp(val?: string, defaultTime?: string): { time: string; date: string } {
@@ -69,6 +74,7 @@ export const AjinView: React.FC<AjinViewProps> = ({
   currentTime,
   onRefresh,
   onSaveLabel,
+  onLocateOnMap,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedPon, setSelectedPon] = useState('Todas as Portas PON');
@@ -81,6 +87,8 @@ export const AjinView: React.FC<AjinViewProps> = ({
   const [editingItem, setEditingItem] = useState<ONUItem | null>(null);
   const [editName, setEditName] = useState('');
   const [editDesc, setEditDesc] = useState('');
+  const [editLat, setEditLat] = useState('');
+  const [editLon, setEditLon] = useState('');
 
   const handleExportCSV = () => {
     const headers = ['Status', 'ONU / Ponto', 'MAC / Serial', 'Descrição (Rua / Local)', 'Fabricante', 'Sinal / Uptime', 'Canal OLT'];
@@ -163,11 +171,22 @@ export const AjinView: React.FC<AjinViewProps> = ({
     setEditingItem(item);
     setEditName(item.name || `Ponto ${item.id}`);
     setEditDesc(item.desc || '');
+    setEditLat(item.latitude != null ? String(item.latitude) : '');
+    setEditLon(item.longitude != null ? String(item.longitude) : '');
   };
 
   const saveEdit = () => {
     if (editingItem) {
-      onSaveLabel(editingItem.port, String(editingItem.id), editName, editDesc);
+      const latVal = editLat.trim() ? parseFloat(editLat.trim().replace(',', '.')) : null;
+      const lonVal = editLon.trim() ? parseFloat(editLon.trim().replace(',', '.')) : null;
+      onSaveLabel(
+        editingItem.port,
+        String(editingItem.id),
+        editName,
+        editDesc,
+        latVal !== null && !isNaN(latVal) ? latVal : null,
+        lonVal !== null && !isNaN(lonVal) ? lonVal : null
+      );
       setEditingItem(null);
     }
   };
@@ -304,11 +323,22 @@ export const AjinView: React.FC<AjinViewProps> = ({
 
                     {/* Nome do Ponto */}
                     <td className="py-2 px-3 font-semibold text-white">
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-1.5 flex-wrap">
                         <span>{row.name || `Ponto ${row.id}`}</span>
+                        {row.latitude && row.longitude ? (
+                          <button
+                            onClick={() => onLocateOnMap?.(row)}
+                            title={`Localizado no Mapa (${Number(row.latitude).toFixed(4)}, ${Number(row.longitude).toFixed(4)})\nClique para visualizar no Mapa`}
+                            className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-cyan-950/80 border border-cyan-500/40 text-cyan-300 text-[10px] font-mono hover:bg-cyan-900/90 transition-all cursor-pointer"
+                          >
+                            <MapPin className="w-2.5 h-2.5 text-cyan-400" />
+                            <span>GPS</span>
+                          </button>
+                        ) : null}
                         <button
                           onClick={() => openEditModal(row)}
-                          className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 text-slate-400 hover:text-blue-400"
+                          title="Editar identificação e coordenadas"
+                          className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 text-slate-400 hover:text-blue-400 cursor-pointer"
                         >
                           <Pencil className="w-3 h-3" />
                         </button>
@@ -343,13 +373,30 @@ export const AjinView: React.FC<AjinViewProps> = ({
                     {/* Ações */}
                     <td className="py-2 px-3 text-center">
                       <div className="flex items-center justify-center gap-1">
+                        {row.latitude && row.longitude ? (
+                          <button
+                            onClick={() => onLocateOnMap?.(row)}
+                            title="Visualizar ONU no Mapa Interativo"
+                            className="p-1 rounded bg-cyan-950/70 hover:bg-cyan-900 border border-cyan-600/50 text-cyan-300 transition-colors cursor-pointer"
+                          >
+                            <MapPin className="w-3.5 h-3.5" />
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => openEditModal(row)}
+                            title="Definir coordenadas no Mapa"
+                            className="p-1 rounded bg-[#21262d] hover:bg-[#30363d] border border-[#30363d] text-slate-400 hover:text-cyan-300 transition-colors cursor-pointer"
+                          >
+                            <MapPin className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                         <button
                           onClick={() => openEditModal(row)}
-                          className="px-2 py-1 bg-[#21262d] hover:bg-[#30363d] text-slate-300 rounded text-[10px] font-bold border border-[#30363d] transition-colors"
+                          className="px-2 py-1 bg-[#21262d] hover:bg-[#30363d] text-slate-300 rounded text-[10px] font-bold border border-[#30363d] transition-colors cursor-pointer"
                         >
                           Menu
                         </button>
-                        <button className="p-1 text-slate-500 hover:text-rose-400 transition-colors">
+                        <button className="p-1 text-slate-500 hover:text-rose-400 transition-colors cursor-pointer">
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       </div>
@@ -500,6 +547,7 @@ export const AjinView: React.FC<AjinViewProps> = ({
                   type="text"
                   value={editName}
                   onChange={(e) => setEditName(e.target.value)}
+                  placeholder="ex: Ponto 10"
                   className="w-full bg-[#0d1117] border border-[#30363d] rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500"
                 />
               </div>
@@ -510,23 +558,70 @@ export const AjinView: React.FC<AjinViewProps> = ({
                   type="text"
                   value={editDesc}
                   onChange={(e) => setEditDesc(e.target.value)}
+                  placeholder="ex: R. Tabaronas"
                   className="w-full bg-[#0d1117] border border-[#30363d] rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500"
                 />
+              </div>
+
+              {/* Coordenadas Geográficas (Latitude e Longitude para o Mapa) */}
+              <div className="pt-2 border-t border-[#30363d]">
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-[11px] font-bold text-cyan-400 flex items-center gap-1.5">
+                    <MapPin className="w-3.5 h-3.5" />
+                    <span>Localização no Mapa (GPS)</span>
+                  </label>
+                  {editLat && editLon && (
+                    <button
+                      type="button"
+                      onClick={() => { setEditLat(''); setEditLon(''); }}
+                      className="text-[10px] text-rose-400 hover:text-rose-300 cursor-pointer"
+                    >
+                      Remover Coordenadas
+                    </button>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[10px] text-slate-400 block mb-0.5">Latitude</label>
+                    <input
+                      type="text"
+                      value={editLat}
+                      onChange={(e) => setEditLat(e.target.value)}
+                      placeholder="-27.4335"
+                      className="w-full bg-[#0d1117] border border-[#30363d] rounded-lg px-2.5 py-1.5 text-xs text-white font-mono placeholder:text-slate-600 focus:outline-none focus:border-cyan-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-slate-400 block mb-0.5">Longitude</label>
+                    <input
+                      type="text"
+                      value={editLon}
+                      onChange={(e) => setEditLon(e.target.value)}
+                      placeholder="-48.4025"
+                      className="w-full bg-[#0d1117] border border-[#30363d] rounded-lg px-2.5 py-1.5 text-xs text-white font-mono placeholder:text-slate-600 focus:outline-none focus:border-cyan-500"
+                    />
+                  </div>
+                </div>
+                <p className="text-[10px] text-slate-400 mt-1.5 leading-relaxed">
+                  💡 Preencha as coordenadas para plotar este ponto na aba <strong className="text-cyan-300">Mapa</strong> com telemetria e sinal em tempo real.
+                </p>
               </div>
             </div>
 
             <div className="flex justify-end gap-2 pt-2 border-t border-[#30363d]">
               <button
                 onClick={() => setEditingItem(null)}
-                className="px-3 py-1.5 text-xs text-slate-400 hover:text-white rounded-lg transition-colors"
+                className="px-3 py-1.5 text-xs text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer"
               >
                 Cancelar
               </button>
               <button
                 onClick={saveEdit}
-                className="px-3 py-1.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 rounded-lg shadow transition-colors"
+                className="px-3.5 py-1.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 rounded-lg shadow transition-colors cursor-pointer flex items-center gap-1.5"
               >
-                Salvar Alterações
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                <span>Salvar Alterações</span>
               </button>
             </div>
           </div>

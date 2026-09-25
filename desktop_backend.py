@@ -80,9 +80,66 @@ async def on_startup():
     main_event_loop = asyncio.get_running_loop()
     threading.Thread(target=check_all_servers_status, daemon=True).start()
 
+# Cache de coordenadas de ONUs da Ajin
+onu_coordinates: Dict[str, Dict[str, Any]] = {}
+
+def _load_onu_coordinates():
+    global onu_coordinates
+    try:
+        from config_manager import get_config_dir
+        coords_file = get_config_dir() / "onu_coordinates.json"
+        if coords_file.exists():
+            with open(coords_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, dict):
+                    onu_coordinates = data
+                    log.info(f"[DesktopBackend] Coordenadas de ONUs carregadas: {len(onu_coordinates)} cadastradas.")
+                    return
+        # Sementes padrão para pontos conhecidos no norte da ilha (Florianópolis / Ingleses)
+        onu_coordinates = {
+            "Slot1-PON1_6": {"latitude": -27.4335, "longitude": -48.4025, "name": "Ponto 10", "desc": "R. Tabaronas"},
+            "Slot1-PON1_20": {"latitude": -27.4310, "longitude": -48.4010, "name": "Ponto 06", "desc": "R. Manjubas"},
+            "Slot1-PON1_3": {"latitude": -27.4350, "longitude": -48.4040, "name": "Ponto 03", "desc": "R. Guarajubas"},
+            "Slot2-PON1_20": {"latitude": -27.4380, "longitude": -48.4030, "name": "Ponto 20", "desc": "Angeloni"},
+        }
+        _save_onu_coordinates()
+    except Exception as e:
+        log.warning(f"[DesktopBackend] Falha ao carregar onu_coordinates.json: {e}")
+
+def _save_onu_coordinates():
+    try:
+        from config_manager import get_config_dir
+        coords_file = get_config_dir() / "onu_coordinates.json"
+        with open(coords_file, "w", encoding="utf-8") as f:
+            json.dump(onu_coordinates, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        log.warning(f"[DesktopBackend] Falha ao salvar onu_coordinates.json: {e}")
+
+_load_onu_coordinates()
+
+def _enrich_ajin_telemetry(data: Dict[str, Any]) -> Dict[str, Any]:
+    if not data or not isinstance(data, dict):
+        return data
+    res = dict(data)
+    rows = res.get("rows", [])
+    enriched_rows = []
+    for r in rows:
+        rc = dict(r)
+        k = f"{rc.get('port')}_{rc.get('id')}"
+        if k in onu_coordinates:
+            c = onu_coordinates[k]
+            rc["latitude"] = c.get("latitude")
+            rc["longitude"] = c.get("longitude")
+        else:
+            rc["latitude"] = None
+            rc["longitude"] = None
+        enriched_rows.append(rc)
+    res["rows"] = enriched_rows
+    return res
+
 # Callback do AjinManager para notificar o WebSocket
 def _on_ajin_updated():
-    broadcast_ws({"type": "telemetry_update", "data": ajin_mgr.get_data()})
+    broadcast_ws({"type": "telemetry_update", "data": _enrich_ajin_telemetry(ajin_mgr.get_data())})
 
 ajin_mgr.add_listener(_on_ajin_updated)
 
@@ -191,6 +248,16 @@ class EditLabelRequest(BaseModel):
     onu_id: str
     name: str = ""
     desc: str = ""
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+
+class SetOnuLocationRequest(BaseModel):
+    port: str
+    onu_id: str
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    name: Optional[str] = None
+    desc: Optional[str] = None
 
 class DevLoginRequest(BaseModel):
     password: str
@@ -465,7 +532,7 @@ def get_incidents():
 
 @app.get("/api/ajin/telemetry")
 def get_ajin_telemetry():
-    return ajin_mgr.get_data()
+    return _enrich_ajin_telemetry(ajin_mgr.get_data())
 
 @app.post("/api/ajin/refresh")
 def force_refresh_ajin():
@@ -474,18 +541,56 @@ def force_refresh_ajin():
 
 @app.post("/api/ajin/label")
 def save_ajin_label(req: EditLabelRequest):
-    ajin_mgr.save_label(req.port, req.onu_id, req.name, req.desc)
+    ajin_mgr.update_label(req.port, req.onu_id, req.name, req.desc)
+    k = f"{req.port}_{req.onu_id}"
+    if req.latitude is not None and req.longitude is not None:
+        onu_coordinates[k] = {
+            "latitude": req.latitude,
+            "longitude": req.longitude,
+            "name": req.name or "",
+            "desc": req.desc or "",
+            "port": req.port,
+            "onu_id": req.onu_id,
+        }
+        _save_onu_coordinates()
+    elif k in onu_coordinates:
+        onu_coordinates[k]["name"] = req.name or ""
+        onu_coordinates[k]["desc"] = req.desc or ""
+        _save_onu_coordinates()
+    broadcast_ws({"type": "telemetry_update", "data": _enrich_ajin_telemetry(ajin_mgr.get_data())})
     return {"status": "saved"}
+
+@app.post("/api/ajin/onu/location")
+def set_onu_location(req: SetOnuLocationRequest):
+    k = f"{req.port}_{req.onu_id}"
+    if req.latitude is None and req.longitude is None:
+        onu_coordinates.pop(k, None)
+    else:
+        onu_coordinates[k] = {
+            "latitude": req.latitude,
+            "longitude": req.longitude,
+            "name": req.name or "",
+            "desc": req.desc or "",
+            "port": req.port,
+            "onu_id": req.onu_id,
+        }
+    _save_onu_coordinates()
+    broadcast_ws({"type": "telemetry_update", "data": _enrich_ajin_telemetry(ajin_mgr.get_data())})
+    return {"status": "ok", "saved": k}
+
+@app.get("/api/ajin/onu/locations")
+def get_onu_locations():
+    return onu_coordinates
 
 # Endpoint WebSocket para telemetria contínua
 @app.websocket("/ws/ajin")
 async def websocket_ajin_endpoint(websocket: WebSocket):
     await ws_manager.connect(websocket)
     try:
-        # Envia estado inicial imediatamente ao conectar
+        # Envia estado inicial imediatamente ao conectar com coordenadas
         await websocket.send_json({
             "type": "initial_state",
-            "data": ajin_mgr.get_data(),
+            "data": _enrich_ajin_telemetry(ajin_mgr.get_data()),
             "time": datetime.now().strftime("%H:%M:%S")
         })
         while True:

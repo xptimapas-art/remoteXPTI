@@ -22,6 +22,14 @@ export const App: React.FC = () => {
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [isDev, setIsDev] = useState(false);
   const [rdpToast, setRdpToast] = useState<{ visible: boolean; name: string; host: string } | null>(null);
+  const [mapTargetLocation, setMapTargetLocation] = useState<{
+    lat: number;
+    lon: number;
+    zoom?: number;
+    id?: string;
+    itemType?: 'server' | 'onu';
+    onu?: any;
+  } | null>(null);
 
   const [telemetry, setTelemetry] = useState<any>({
     total: 39,
@@ -174,16 +182,43 @@ export const App: React.FC = () => {
     }
   };
 
-  const handleSaveLabel = async (port: string, onuId: string, name: string, desc: string) => {
+  const handleSaveLabel = async (
+    port: string,
+    onuId: string,
+    name: string,
+    desc: string,
+    lat?: number | null,
+    lon?: number | null
+  ) => {
     try {
       await fetch(`${API_BASE}/api/ajin/label`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ port, onu_id: onuId, name, desc }),
+        body: JSON.stringify({
+          port,
+          onu_id: onuId,
+          name,
+          desc,
+          latitude: lat,
+          longitude: lon,
+        }),
       });
       loadTelemetry();
     } catch (e) {
       console.error('Erro ao salvar label:', e);
+    }
+  };
+
+  const handleLocateOnuOnMap = (onu: any) => {
+    if (onu.latitude && onu.longitude) {
+      setMapTargetLocation({
+        lat: Number(onu.latitude),
+        lon: Number(onu.longitude),
+        zoom: 16,
+        itemType: 'onu',
+        onu,
+      });
+      setCurrentTab('map');
     }
   };
 
@@ -220,7 +255,12 @@ export const App: React.FC = () => {
         {currentTab === 'map' && (
           <MapView
             servers={servers}
+            onus={telemetry.rows}
             onConnect={handleConnect}
+            targetLocation={mapTargetLocation}
+            onEditOnu={() => {
+              setCurrentTab('ajin');
+            }}
           />
         )}
 
@@ -231,6 +271,7 @@ export const App: React.FC = () => {
             currentTime={currentTime}
             onRefresh={handleForceRefreshAjin}
             onSaveLabel={handleSaveLabel}
+            onLocateOnMap={handleLocateOnuOnMap}
           />
         )}
       </main>
