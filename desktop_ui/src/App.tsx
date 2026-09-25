@@ -20,6 +20,7 @@ export const App: React.FC = () => {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [editingServerId, setEditingServerId] = useState<string | null>(null);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [isDev, setIsDev] = useState(false);
   const [rdpToast, setRdpToast] = useState<{ visible: boolean; name: string; host: string } | null>(null);
 
   const [telemetry, setTelemetry] = useState<any>({
@@ -37,6 +38,19 @@ export const App: React.FC = () => {
   const [countdown, setCountdown] = useState(10);
   const [currentTime, setCurrentTime] = useState('--:--:--');
   const wsRef = useRef<WebSocket | null>(null);
+
+  // Carrega status de desenvolvedor
+  const checkDevStatus = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/dev/status`);
+      if (res.ok) {
+        const data = await res.json();
+        setIsDev(Boolean(data.is_dev));
+      }
+    } catch (e) {
+      console.warn('Erro ao verificar status DEV:', e);
+    }
+  };
 
   // Carrega lista de servidores da API local
   const loadServers = async () => {
@@ -67,6 +81,7 @@ export const App: React.FC = () => {
 
   // Conexão WebSocket em Tempo Real (Push contínuo a 60 FPS)
   useEffect(() => {
+    checkDevStatus();
     loadServers();
     loadTelemetry();
 
@@ -164,6 +179,7 @@ export const App: React.FC = () => {
         selectedGroup={selectedGroup}
         setSelectedGroup={setSelectedGroup}
         groups={groups}
+        isDev={isDev}
         onRefresh={handleGlobalRefresh}
         onAddServer={() => setIsAddModalOpen(true)}
         onOpenSettings={() => setIsSettingsModalOpen(true)}
@@ -224,6 +240,11 @@ export const App: React.FC = () => {
         isOpen={isSettingsModalOpen}
         onClose={() => setIsSettingsModalOpen(false)}
         serverCount={servers.length}
+        isDev={isDev}
+        onDevStatusChanged={(val) => setIsDev(val)}
+        onServersReload={() => {
+          loadServers();
+        }}
       />
 
       {/* Toast Flutuante de Disparo de RDP */}

@@ -9,6 +9,7 @@ interface TitleBarProps {
   selectedGroup: string;
   setSelectedGroup: (group: string) => void;
   groups: string[];
+  isDev: boolean;
   onRefresh: () => void;
   onAddServer: () => void;
   onOpenSettings: () => void;
@@ -22,6 +23,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({
   selectedGroup,
   setSelectedGroup,
   groups,
+  isDev,
   onRefresh,
   onAddServer,
   onOpenSettings,
@@ -36,9 +38,22 @@ export const TitleBar: React.FC<TitleBarProps> = ({
           className="h-[38px] w-auto object-contain"
         />
         <div className="flex flex-col justify-center leading-none">
-          <span className="text-[17px] font-bold text-white tracking-normal font-sans">
-            RemoteXPTI
-          </span>
+          <div className="flex items-center space-x-2">
+            <span className="text-[17px] font-bold text-white tracking-normal font-sans">
+              RemoteXPTI
+            </span>
+            <button
+              onClick={onOpenSettings}
+              title={isDev ? 'Modo Desenvolvedor Ativo (BETA TESTER)' : 'Clique para Configurações & Login DEV'}
+              className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded cursor-pointer transition-all ${
+                isDev
+                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 hover:bg-emerald-500/30'
+                  : 'bg-[#1f2129] text-[#8e92a0] border border-[#2e323e] hover:text-white'
+              }`}
+            >
+              v1.6.30 {isDev ? '[TESTER]' : ''}
+            </button>
+          </div>
           <span className="text-[10px] text-[#8e92a0] mt-0.5 tracking-wide">
             RDP Quick Launcher
           </span>

@@ -19,10 +19,14 @@ from pydantic import BaseModel
 import uvicorn
 
 from ajin_manager import AjinManager
+from cloud_sync import CloudSyncManager
+from config_manager import ConfigManager
 from logger import log
 from rdp_manager import RDPManager
 from storage import StorageManager
 from version import CURRENT_VERSION
+
+config_mgr = ConfigManager()
 
 # Inicialização FastAPI
 app = FastAPI(title="RemoteXPTI Modern Backend", version=CURRENT_VERSION)
@@ -112,6 +116,25 @@ class EditLabelRequest(BaseModel):
     name: str = ""
     desc: str = ""
 
+class DevLoginRequest(BaseModel):
+    password: str
+
+def sync_supabase_servers() -> tuple[bool, int, str]:
+    if not CloudSyncManager.is_configured():
+        return False, 0, "Supabase não configurado ou desabilitado"
+    try:
+        remote = CloudSyncManager.fetch_servers()
+        if remote is not None:
+            changed, added, updated = storage_mgr.merge_cloud_servers(remote)
+            if changed:
+                storage_mgr.save()
+                log.info(f"[DesktopBackend] Nuvem sincronizada: {added} novos, {updated} atualizados.")
+            return True, len(remote), f"{len(remote)} servidores na nuvem"
+    except Exception as e:
+        log.warning(f"[DesktopBackend] Erro ao sincronizar com Supabase: {e}")
+        return False, 0, str(e)
+    return False, 0, "Nenhum dado retornado do Supabase"
+
 # Endpoints REST
 @app.get("/api/status")
 def get_status():
@@ -176,6 +199,17 @@ def add_server(req: AddServerRequest):
     data = req.dict()
     new_s = storage_mgr.add_server(data)
     storage_mgr.save()
+
+    # Se dev autenticado ou escopo corporativo, publica automaticamente no Supabase
+    if config_mgr.is_dev_authenticated() or new_s.get("scope") == "corporate":
+        def _push():
+            ok, msg = CloudSyncManager.push_single_server(new_s)
+            if ok:
+                log.info(f"[DesktopBackend] Servidor '{new_s.get('name')}' publicado no Supabase com sucesso.")
+            else:
+                log.warning(f"[DesktopBackend] Falha ao publicar servidor no Supabase: {msg}")
+        threading.Thread(target=_push, daemon=True).start()
+
     return {"status": "created", "server": new_s}
 
 @app.get("/api/servers/{server_id}")
@@ -191,20 +225,76 @@ def update_server(server_id: str, req: UpdateServerRequest):
     updated = storage_mgr.update_server(server_id, data)
     if not updated:
         raise HTTPException(status_code=404, detail="Servidor não encontrado")
+
+    # Se dev autenticado ou escopo corporativo, atualiza no Supabase
+    if config_mgr.is_dev_authenticated() or updated.get("scope") == "corporate":
+        def _push():
+            ok, msg = CloudSyncManager.push_single_server(updated)
+            if ok:
+                log.info(f"[DesktopBackend] Servidor '{updated.get('name')}' atualizado no Supabase com sucesso.")
+        threading.Thread(target=_push, daemon=True).start()
+
     return {"status": "updated", "server": updated}
 
 @app.delete("/api/servers/{server_id}")
 def delete_server(server_id: str):
+    srv = storage_mgr.get_server(server_id)
+    is_corp = srv and srv.get("scope") == "corporate"
     ok = storage_mgr.delete_server(server_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Servidor não encontrado")
+
+    if (config_mgr.is_dev_authenticated() or is_corp) and CloudSyncManager.is_configured():
+        def _del():
+            CloudSyncManager.delete_remote_server(server_id)
+            log.info(f"[DesktopBackend] Servidor '{server_id}' removido do Supabase.")
+        threading.Thread(target=_del, daemon=True).start()
+
     return {"status": "deleted"}
+
+@app.get("/api/dev/status")
+def get_dev_status():
+    return {
+        "is_dev": config_mgr.is_dev_authenticated(),
+        "channel": config_mgr.get_update_channel(),
+        "supabase_configured": CloudSyncManager.is_configured(),
+        "supabase_url": config_mgr.get_supabase_config().get("url", "")
+    }
+
+@app.post("/api/dev/login")
+def dev_login(req: DevLoginRequest):
+    success = config_mgr.authenticate_dev(req.password)
+    return {
+        "success": success,
+        "is_dev": config_mgr.is_dev_authenticated(),
+        "channel": config_mgr.get_update_channel()
+    }
+
+@app.post("/api/dev/logout")
+def dev_logout():
+    config_mgr.logout_dev()
+    return {
+        "success": True,
+        "is_dev": False,
+        "channel": "public"
+    }
+
+@app.post("/api/sync/supabase")
+def manual_sync_supabase():
+    ok, count, msg = sync_supabase_servers()
+    storage_mgr.load()
+    return {
+        "success": ok,
+        "count": count,
+        "message": msg
+    }
 
 @app.post("/api/refresh_all")
 def refresh_all():
+    sync_supabase_servers()
     storage_mgr.load()
     ajin_mgr.fetch_telemetry_async(force=True)
-    return {"status": "ok", "message": "Atualização solicitada"}
+    return {"status": "ok", "message": "Atualização e sincronização solicitadas"}
 
 @app.get("/api/incidents")
 def get_incidents():
@@ -284,14 +374,26 @@ if dist_path.exists():
 
 # Loop de contagem regressiva e broadcast periódico
 def _background_heartbeat():
+    # Sincronização inicial com Supabase na inicialização
+    threading.Thread(target=sync_supabase_servers, daemon=True).start()
+
     refresh_countdown = 10
+    supabase_sync_counter = 0
+
     while True:
         time.sleep(1)
         refresh_countdown -= 1
+        supabase_sync_counter += 1
         now_str = datetime.now().strftime("%H:%M:%S")
+
         if refresh_countdown <= 0:
             refresh_countdown = 10
             ajin_mgr.fetch_telemetry_async(force=True)
+
+        # Sincroniza com Supabase a cada 60 segundos automaticamente
+        if supabase_sync_counter >= 60:
+            supabase_sync_counter = 0
+            threading.Thread(target=sync_supabase_servers, daemon=True).start()
 
         try:
             loop = asyncio.get_event_loop()
