@@ -369,7 +369,7 @@ class AjinView(ctk.CTkFrame):
         self.combo_pon = ctk.CTkComboBox(
             ctrl_frame,
             values=["Todas as Portas PON", "Slot1-PON1", "Slot1-PON2", "Slot2-PON1", "Slot2-PON2"],
-            width=150,
+            width=135,
             height=34,
             fg_color="#181c26",
             button_color="#242b3b",
@@ -386,7 +386,7 @@ class AjinView(ctk.CTkFrame):
         self.combo_status = ctk.CTkComboBox(
             ctrl_frame,
             values=["Todos os Status", "Em Funcionamento (Online)", "Fora de Funcionamento (Offline)"],
-            width=165,
+            width=145,
             height=34,
             fg_color="#181c26",
             button_color="#242b3b",
@@ -397,13 +397,13 @@ class AjinView(ctk.CTkFrame):
             command=lambda val: self._apply_filters()
         )
         self.combo_status.set("Todos os Status")
-        self.combo_status.pack(side="left", padx=(0, 8))
+        self.combo_status.pack(side="left", padx=(0, 6))
 
         # 4. Botão Atualizar Câmeras
         self.btn_sync_cams = ctk.CTkButton(
             ctrl_frame,
-            text="📹 Atualizar Câmeras",
-            width=140,
+            text="📹 Sincronizar",
+            width=120,
             height=34,
             fg_color="#222736",
             hover_color="#30384c",
@@ -418,8 +418,8 @@ class AjinView(ctk.CTkFrame):
         # 5. Botão Scanner de ONUs
         self.btn_scanner = ctk.CTkButton(
             ctrl_frame,
-            text="🔍 Scanner de ONUs",
-            width=140,
+            text="🔍 Scanner",
+            width=110,
             height=34,
             fg_color="#0284c7",
             hover_color="#0369a1",
@@ -432,8 +432,8 @@ class AjinView(ctk.CTkFrame):
         # 6. Botão Incidentes & Eventos (com badge)
         self.btn_events = ctk.CTkButton(
             ctrl_frame,
-            text="⚠️ Incidentes & Eventos (0)",
-            width=175,
+            text="⚠️ Incidentes (0)",
+            width=145,
             height=34,
             fg_color="#7f1d1d",
             hover_color="#991b1b",
@@ -532,8 +532,8 @@ class AjinView(ctk.CTkFrame):
         self.table_scrollbar = ctk.CTkScrollbar(
             self.table_viewport_frame,
             orientation="vertical",
-            scrollbar_button_color="#2c3345",
-            scrollbar_button_hover_color="#3d4760"
+            button_color="#2c3345",
+            button_hover_color="#3d4760"
         )
         self.table_scrollbar.grid(row=0, column=1, sticky="ns", padx=(0, 2))
 
@@ -543,6 +543,13 @@ class AjinView(ctk.CTkFrame):
         self._scroll_offset = 0
         self._resize_debounce_job = None
         self.scroll_table = self.table_viewport_frame  # alias para compatibilidade
+
+        self.lbl_empty_table = ctk.CTkLabel(
+            self.table_rows_container,
+            text="Nenhum dispositivo encontrado com os filtros selecionados.",
+            font=ctk.CTkFont(size=13),
+            text_color="#64748b"
+        )
 
         # Pool fixo de linhas estacionárias reutilizáveis
         self._row_pool: List[AjinRowWidget] = []
@@ -1044,7 +1051,7 @@ class AjinView(ctk.CTkFrame):
             active_count = int(active_raw)
         else:
             active_count = offline
-        self.btn_events.configure(text=f"⚠️ Incidentes & Eventos ({active_count})")
+        self.btn_events.configure(text=f"⚠️ Incidentes ({active_count})")
 
         # 2. Aplica filtros e renderiza linhas na tabela
         self._apply_filters()
@@ -1167,6 +1174,13 @@ class AjinView(ctk.CTkFrame):
 
         offset = self._scroll_offset
         display_count = min(self.VISIBLE_ROWS, total)
+
+        if total == 0:
+            if hasattr(self, "lbl_empty_table") and not self.lbl_empty_table.winfo_ismapped():
+                self.lbl_empty_table.pack(pady=40)
+        else:
+            if hasattr(self, "lbl_empty_table") and self.lbl_empty_table.winfo_ismapped():
+                self.lbl_empty_table.pack_forget()
 
         for i in range(display_count):
             data_idx = offset + i
