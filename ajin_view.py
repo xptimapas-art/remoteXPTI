@@ -366,7 +366,7 @@ class AjinView(ctk.CTkFrame):
         # Grid com 2 colunas: Esquerda (Tabela e controles) e Direita (Sidebar NOC fixa)
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(0, weight=1)
-        self.grid_columnconfigure(1, weight=0)
+        self.grid_columnconfigure(1, minsize=312, weight=0)
 
         # -------------------------------------------------------------
         # COLUNA ESQUERDA: Controles, Tabela e Rodapé
@@ -797,16 +797,17 @@ class AjinView(ctk.CTkFrame):
         return lbl_val, lbl_sub
 
     def _build_sidebar_noc(self):
-        # Painel lateral azul (#2870c2) com a largura exata da referência original (260px)
+        # Painel lateral azul (#2870c2) com a largura exata da referência original (304px)
         self.sidebar_frame = ctk.CTkFrame(
             self,
-            width=260,
+            width=304,
             corner_radius=12,
             fg_color="#2870c2",
             border_width=0
         )
-        self.sidebar_frame.grid(row=0, column=1, sticky="ns", padx=(0, 6), pady=(4, 6))
+        self.sidebar_frame.grid(row=0, column=1, sticky="nsew", padx=(0, 8), pady=(4, 6))
         self.sidebar_frame.grid_propagate(False)
+        self.sidebar_frame.pack_propagate(False)
 
         # Monitor de saída da sidebar para limpar o hover instantaneamente sem chamadas de Win32
         def _on_sidebar_leave(e):
@@ -1046,7 +1047,7 @@ class AjinView(ctk.CTkFrame):
             command=self._on_autorefresh_toggle
         )
         self.chk_autorefresh.select()
-        self.chk_autorefresh.pack(side="left", padx=8)
+        self.chk_autorefresh.pack(side="left", padx=16)
 
         # Aliases para compatibilidade legada
         self.card_total = self.lbl_total_val
