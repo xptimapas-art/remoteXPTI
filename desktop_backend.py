@@ -517,12 +517,21 @@ def get_incidents():
         if not srv:
             continue
         duration = max(0, int(now - float(offline_since)))
+        try:
+            dt = datetime.fromtimestamp(float(offline_since))
+            formatted_date = dt.strftime("%d/%m às %H:%M")
+        except Exception:
+            formatted_date = "Recente"
+
         incidents.append({
             "id": s_id,
             "name": srv.get("name", "Servidor"),
             "host": srv.get("host", ""),
             "port": srv.get("port", 3389),
+            "group": srv.get("group", "BEMTEVI"),
+            "username": srv.get("username", "Padrão"),
             "offline_since": offline_since,
+            "offline_since_formatted": formatted_date,
             "duration_seconds": duration,
             "latitude": srv.get("latitude"),
             "longitude": srv.get("longitude")
