@@ -298,7 +298,7 @@ class AjinView(ctk.CTkFrame):
     """Componente principal da aba de monitoramento das ONUs Ajin."""
 
     def __init__(self, parent, **kwargs):
-        super().__init__(parent, fg_color="transparent", **kwargs)
+        super().__init__(parent, fg_color=("#f0f2f5", "#10121a"), **kwargs)
         self.mgr = AjinManager()
 
         # Estado da UI

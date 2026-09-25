@@ -1412,8 +1412,13 @@ class WebMapManager:
                 return
         if self.edge_hwnd and self._is_docked:
             try:
-                w = max(300, self.container.winfo_width() - getattr(self, "_drawer_offset", 0))
-                h = max(300, self.container.winfo_height())
+                try:
+                    w = max(300, self.container.winfo_width() - getattr(self, "_drawer_offset", 0))
+                    h = max(300, self.container.winfo_height())
+                except Exception:
+                    crect = win32gui.GetClientRect(self.container_hwnd) if (self.container_hwnd and win32gui.IsWindow(self.container_hwnd)) else (0, 0, 1100, 700)
+                    w, h = max(300, crect[2] - getattr(self, "_drawer_offset", 0)), max(300, crect[3])
+
                 log.info(f"[WebMapManager] Posicionando Edge no HWND_TOP com tamanho {w}x{h} (drawer_offset={self._drawer_offset})...")
                 win32gui.SetWindowPos(
                     self.edge_hwnd, win32con.HWND_TOP, 0, 0, w, h,
@@ -1440,8 +1445,12 @@ class WebMapManager:
         if not self.edge_hwnd or not self._is_docked or not self.container:
             return
         try:
-            w = max(300, self.container.winfo_width() - getattr(self, "_drawer_offset", 0))
-            h = self.container.winfo_height()
+            try:
+                w = max(300, self.container.winfo_width() - getattr(self, "_drawer_offset", 0))
+                h = self.container.winfo_height()
+            except Exception:
+                crect = win32gui.GetClientRect(self.container_hwnd) if (self.container_hwnd and win32gui.IsWindow(self.container_hwnd)) else (0, 0, 1100, 700)
+                w, h = max(300, crect[2] - getattr(self, "_drawer_offset", 0)), max(300, crect[3])
             if w > 50 and h > 50:
                 win32gui.SetWindowPos(self.edge_hwnd, win32con.HWND_TOP, 0, 0, w, h, win32con.SWP_SHOWWINDOW | win32con.SWP_NOACTIVATE)
         except Exception:
@@ -1456,11 +1465,11 @@ class WebMapManager:
         cache_dir = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "RemoteXPTI" / "map_cache"
         cache_dir.mkdir(parents=True, exist_ok=True)
 
-        if not self.container_hwnd:
-            try:
-                self.container_hwnd = self.container.winfo_id()
-            except Exception:
-                pass
+        try:
+            self.container.update_idletasks()
+            self.container_hwnd = self.container.winfo_id()
+        except Exception:
+            pass
         target_parent_hwnd = self.container_hwnd
         if not target_parent_hwnd:
             log.error("[WebMapManager] Container HWND não disponível para acoplamento.")
@@ -1545,6 +1554,17 @@ class WebMapManager:
                     old_ex = win32gui.GetWindowLong(found_hwnd, win32con.GWL_EXSTYLE)
                     new_ex = (old_ex & ~win32con.WS_EX_APPWINDOW & ~win32con.WS_EX_WINDOWEDGE & ~win32con.WS_EX_DLGMODALFRAME) | win32con.WS_EX_CONTROLPARENT
                     win32gui.SetWindowLong(found_hwnd, win32con.GWL_EXSTYLE, new_ex)
+
+                    # Valida se parent_hwnd ainda é uma janela Win32 válida
+                    if not win32gui.IsWindow(parent_hwnd):
+                        log.warning(f"[WebMapManager] parent_hwnd={parent_hwnd} inválido, tentando reobter...")
+                        try:
+                            parent_hwnd = self.container.winfo_id()
+                        except Exception:
+                            pass
+                    if not win32gui.IsWindow(parent_hwnd):
+                        log.error("[WebMapManager] Impossível acoplar: parent_hwnd não é um HWND válido.")
+                        return
 
                     # Acopla como janela filha inseparável do container Tkinter
                     win32gui.SetParent(found_hwnd, parent_hwnd)

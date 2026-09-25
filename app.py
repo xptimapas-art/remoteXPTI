@@ -807,7 +807,8 @@ class RemoteXPTIApp(ctk.CTk):
         self.ajin_view = None
 
         # Inicia exibindo a grade por padrão com isolamento de containers
-        self.map_container.grid_remove()
+        # map_container permanece gridded de forma permanente para manter seu HWND Win32 válido para o Edge
+        self.map_container.lower()
         self.scroll_frame.grid(row=0, column=0, sticky="nsew")
         self.scroll_frame.tkraise()
 
@@ -1095,6 +1096,8 @@ class RemoteXPTIApp(ctk.CTk):
         return max(1, int(usable_w // slot_w_phys))
 
     def _check_column_recalculation(self):
+        if getattr(self, "view_mode", "grade") != "grade":
+            return
         w = self.winfo_width()
         if w <= 200:
             try:
@@ -1217,7 +1220,7 @@ class RemoteXPTIApp(ctk.CTk):
             if self.web_map:
                 self.web_map.hide()
             if hasattr(self, "map_container"):
-                self.map_container.grid_remove()
+                self.map_container.lower()
             if hasattr(self, "scroll_frame"):
                 self.scroll_frame.grid_remove()
 
@@ -1237,7 +1240,6 @@ class RemoteXPTIApp(ctk.CTk):
             if hasattr(self, "scroll_frame"):
                 self.scroll_frame.grid_remove()
 
-            self.map_container.grid(row=0, column=0, sticky="nsew")
             self.map_container.tkraise()
             self.filter_servers()
             if self.web_map:
@@ -1258,7 +1260,7 @@ class RemoteXPTIApp(ctk.CTk):
                 self.web_map.set_drawer_offset(0)
                 self.web_map.hide()
             if hasattr(self, "map_container"):
-                self.map_container.grid_remove()
+                self.map_container.lower()
 
             self.scroll_frame.grid(row=0, column=0, sticky="nsew")
             self.scroll_frame.tkraise()
