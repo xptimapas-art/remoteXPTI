@@ -3,14 +3,21 @@ import { TitleBar } from './components/TitleBar';
 import { ServersView } from './components/ServersView';
 import { MapView } from './components/MapView';
 import { AjinView } from './components/AjinView';
+import { AddServerModal } from './components/AddServerModal';
+import { SettingsModal } from './components/SettingsModal';
 
 const API_BASE = 'http://127.0.0.1:8765';
 const WS_URL = 'ws://127.0.0.1:8765/ws/ajin';
 
 export const App: React.FC = () => {
-  const [currentTab, setCurrentTab] = useState<'servers' | 'map' | 'ajin'>('ajin');
+  const [currentTab, setCurrentTab] = useState<'servers' | 'map' | 'ajin'>('servers');
   const [servers, setServers] = useState<any[]>([]);
   const [groups, setGroups] = useState<string[]>([]);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedGroup, setSelectedGroup] = useState('Todos os Grupos');
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+
   const [telemetry, setTelemetry] = useState<any>({
     total: 39,
     online: 36,
@@ -27,7 +34,7 @@ export const App: React.FC = () => {
   const [currentTime, setCurrentTime] = useState('--:--:--');
   const wsRef = useRef<WebSocket | null>(null);
 
-  // Carrega servidores da API local
+  // Carrega lista de servidores da API local
   const loadServers = async () => {
     try {
       const res = await fetch(`${API_BASE}/api/servers`);
@@ -79,7 +86,6 @@ export const App: React.FC = () => {
       };
 
       ws.onclose = () => {
-        // Reconexão automática em caso de queda transitória
         setTimeout(connectWebSocket, 2000);
       };
     };
@@ -103,7 +109,17 @@ export const App: React.FC = () => {
     }
   };
 
-  const handleForceRefresh = async () => {
+  const handleGlobalRefresh = async () => {
+    try {
+      await fetch(`${API_BASE}/api/refresh_all`, { method: 'POST' });
+      await loadServers();
+      await loadTelemetry();
+    } catch (e) {
+      console.error('Erro ao atualizar geral:', e);
+    }
+  };
+
+  const handleForceRefreshAjin = async () => {
     try {
       await fetch(`${API_BASE}/api/ajin/refresh`, { method: 'POST' });
     } catch (e) {
@@ -125,21 +141,28 @@ export const App: React.FC = () => {
   };
 
   return (
-    <div className="flex flex-col h-screen w-screen bg-[#0d1117] overflow-hidden select-none">
-      {/* Top Header / Custom TitleBar */}
+    <div className="flex flex-col h-screen w-screen bg-[#0d1117] overflow-hidden select-none font-sans">
+      {/* Top Header Barra idêntica à referência original */}
       <TitleBar
         currentTab={currentTab}
         setCurrentTab={setCurrentTab}
-        serverCount={servers.length}
-        onlineCount={servers.length}
+        searchTerm={searchTerm}
+        setSearchTerm={setSearchTerm}
+        selectedGroup={selectedGroup}
+        setSelectedGroup={setSelectedGroup}
+        groups={groups}
+        onRefresh={handleGlobalRefresh}
+        onAddServer={() => setIsAddModalOpen(true)}
+        onOpenSettings={() => setIsSettingsModalOpen(true)}
       />
 
-      {/* Main View Area com transição instantânea e zero sobreposição */}
+      {/* Main View Area com transição instantânea e sem sobreposição */}
       <main className="flex-1 flex overflow-hidden relative">
         {currentTab === 'servers' && (
           <ServersView
             servers={servers}
-            groups={groups}
+            searchTerm={searchTerm}
+            selectedGroup={selectedGroup}
             onConnect={handleConnect}
           />
         )}
@@ -156,11 +179,27 @@ export const App: React.FC = () => {
             telemetry={telemetry}
             countdown={countdown}
             currentTime={currentTime}
-            onRefresh={handleForceRefresh}
+            onRefresh={handleForceRefreshAjin}
             onSaveLabel={handleSaveLabel}
           />
         )}
       </main>
+
+      {/* Modais de Ação */}
+      <AddServerModal
+        isOpen={isAddModalOpen}
+        onClose={() => setIsAddModalOpen(false)}
+        groups={groups}
+        onServerAdded={() => {
+          loadServers();
+        }}
+      />
+
+      <SettingsModal
+        isOpen={isSettingsModalOpen}
+        onClose={() => setIsSettingsModalOpen(false)}
+        serverCount={servers.length}
+      />
     </div>
   );
 };

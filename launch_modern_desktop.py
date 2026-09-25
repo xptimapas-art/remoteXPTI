@@ -28,6 +28,30 @@ def wait_for_server(timeout=10):
             time.sleep(0.3)
     return False
 
+def _apply_window_icon(window_title: str):
+    time.sleep(1.0)
+    try:
+        import ctypes
+        from pathlib import Path
+        icon_path = Path(__file__).parent / "imagens" / "app_icon.ico"
+        if not icon_path.exists():
+            icon_path = Path(__file__).parent / "imagens" / "icon.ico"
+        if icon_path.exists():
+            hwnd = ctypes.windll.user32.FindWindowW(None, window_title)
+            if hwnd:
+                IMAGE_ICON = 1
+                LR_LOADFROMFILE = 0x00000010
+                LR_DEFAULTSIZE = 0x00000040
+                hicon = ctypes.windll.user32.LoadImageW(
+                    None, str(icon_path.resolve()), IMAGE_ICON, 0, 0, LR_LOADFROMFILE | LR_DEFAULTSIZE
+                )
+                if hicon:
+                    WM_SETICON = 0x0080
+                    ctypes.windll.user32.SendMessageW(hwnd, WM_SETICON, 1, hicon)  # ICON_BIG
+                    ctypes.windll.user32.SendMessageW(hwnd, WM_SETICON, 0, hicon)  # ICON_SMALL
+    except Exception:
+        pass
+
 def main():
     # 1. Inicia o backend FastAPI + WebSockets em segundo plano
     t = threading.Thread(target=_start_backend, daemon=True)
@@ -38,16 +62,20 @@ def main():
         print("Erro: O backend local não respondeu a tempo.")
         sys.exit(1)
 
+    title = "RemoteXPTI - RDP Quick Launcher"
+
+    # Thread para aplicar o ícone oficial da XPTi na barra de tarefas e janela
+    threading.Thread(target=_apply_window_icon, args=(title,), daemon=True).start()
+
     # 3. Abre a janela nativa do Windows acelerada por GPU (Microsoft Edge WebView2)
     window = webview.create_window(
-        title="RemoteXPTI - Painel Operacional NOC & VMS",
+        title=title,
         url=URL,
         width=1280,
         height=780,
         min_size=(940, 620),
-        background_color="#0d1117",
+        background_color="#16171d",
         text_select=False,
-        easy_drag=True
     )
 
     webview.start(debug=False)

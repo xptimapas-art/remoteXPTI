@@ -78,6 +78,20 @@ ajin_mgr.add_listener(_on_ajin_updated)
 class ConnectRequest(BaseModel):
     server_id: str
 
+class AddServerRequest(BaseModel):
+    name: str
+    host: str
+    port: int = 3389
+    username: str = ""
+    password: str = ""
+    group: str = "BEMTEVI"
+    notes: str = ""
+    fullscreen: bool = True
+    admin_mode: bool = False
+    multimon: bool = False
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+
 class EditLabelRequest(BaseModel):
     port: str
     onu_id: str
@@ -138,6 +152,19 @@ def connect_server(req: ConnectRequest):
 
     threading.Thread(target=_launch, daemon=True).start()
     return {"status": "launching", "server_name": server.get("name")}
+
+@app.post("/api/servers/add")
+def add_server(req: AddServerRequest):
+    data = req.dict()
+    new_s = storage_mgr.add_server(data)
+    storage_mgr.save()
+    return {"status": "created", "server": new_s}
+
+@app.post("/api/refresh_all")
+def refresh_all():
+    storage_mgr.load()
+    ajin_mgr.fetch_telemetry_async(force=True)
+    return {"status": "ok", "message": "Atualização solicitada"}
 
 @app.get("/api/incidents")
 def get_incidents():
