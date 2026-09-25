@@ -372,7 +372,7 @@ class AjinView(ctk.CTkFrame):
         # COLUNA ESQUERDA: Controles, Tabela e Rodapé
         # -------------------------------------------------------------
         self.left_panel = ctk.CTkFrame(self, fg_color="transparent")
-        self.left_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+        self.left_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
         self.left_panel.grid_rowconfigure(1, weight=1)
         self.left_panel.grid_columnconfigure(0, weight=1)
 
@@ -764,7 +764,7 @@ class AjinView(ctk.CTkFrame):
         block = NocSectionBlock(parent, self._noc_hover_mgr)
 
         sec = ctk.CTkFrame(block.frame, fg_color="transparent")
-        sec.pack(fill="x", padx=12, pady=(7, 7))
+        sec.pack(fill="x", padx=16, pady=(10, 10))
 
         if icon_img:
             lbl_ico = ctk.CTkLabel(sec, image=icon_img, text="")
@@ -778,7 +778,7 @@ class AjinView(ctk.CTkFrame):
         lbl_val = ctk.CTkLabel(
             r_box,
             text=val_str,
-            font=ctk.CTkFont(size=23, weight="bold"),
+            font=ctk.CTkFont(size=26, weight="bold"),
             text_color="#ffffff",
             anchor="e"
         )
@@ -787,7 +787,7 @@ class AjinView(ctk.CTkFrame):
         lbl_sub = ctk.CTkLabel(
             r_box,
             text=label_str,
-            font=ctk.CTkFont(size=10, weight="bold"),
+            font=ctk.CTkFont(size=11, weight="bold"),
             text_color="#ffffff",
             anchor="e"
         )
@@ -797,15 +797,15 @@ class AjinView(ctk.CTkFrame):
         return lbl_val, lbl_sub
 
     def _build_sidebar_noc(self):
-        # Painel lateral azul (#2870c2) integrado permanente e fixo (224px)
+        # Painel lateral azul (#2870c2) com a largura exata da referência original (260px)
         self.sidebar_frame = ctk.CTkFrame(
             self,
-            width=224,
-            corner_radius=10,
+            width=260,
+            corner_radius=12,
             fg_color="#2870c2",
             border_width=0
         )
-        self.sidebar_frame.grid(row=0, column=1, sticky="ns", padx=(0, 2), pady=(0, 0))
+        self.sidebar_frame.grid(row=0, column=1, sticky="ns", padx=(0, 6), pady=(4, 6))
         self.sidebar_frame.grid_propagate(False)
 
         # Monitor de saída da sidebar para limpar o hover instantaneamente sem chamadas de Win32
@@ -1072,9 +1072,9 @@ class AjinView(ctk.CTkFrame):
     # ATUALIZAÇÃO E RENDERIZAÇÃO DOS DADOS
     # =========================================================================
     def _on_data_updated(self):
-        """Disparado quando o AjinManager tem novos dados em cache/servidor."""
+        """Disparado quando o AjinManager tem novos dados em cache/servidor (thread-safe)."""
         try:
-            self.event_generate("<<AjinDataUpdated>>", when="tail")
+            self.after(0, self._process_incoming_data)
         except Exception:
             pass
 
@@ -1613,7 +1613,7 @@ class AjinView(ctk.CTkFrame):
             self._refresh_countdown -= 1
             if self._refresh_countdown <= 0:
                 self._refresh_countdown = 10
-                self.mgr.fetch_telemetry_async()
+                self.mgr.fetch_telemetry_async(force=True)
             if hasattr(self, "chk_autorefresh") and self.chk_autorefresh:
                 self.chk_autorefresh.configure(text=f"Auto-refresh ({self._refresh_countdown}s)")
         else:
