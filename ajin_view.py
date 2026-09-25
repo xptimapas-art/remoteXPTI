@@ -89,13 +89,13 @@ class AjinRowWidget:
         )
         self.lbl_ser.pack(side="left", padx=4)
 
-        # Col 7: Ações - ANCORADO À DIREITA (NUNCA CORTADO!)
-        self.c7 = tk.Frame(self.frame, width=82, height=38, bg=self.base_bg)
+        # Col 7: Ações - ANCORADO À DIREITA (78px exatos, alinhamento 1:1 com cabeçalho)
+        self.c7 = tk.Frame(self.frame, width=78, height=38, bg=self.base_bg)
         self.c7.pack_propagate(False)
-        self.c7.pack(side="right", padx=(4, 6))
+        self.c7.pack(side="right", padx=(4, 4))
 
         self.btn_menu = ctk.CTkButton(
-            self.c7, text="Menu", width=48, height=24, fg_color="#222736",
+            self.c7, text="Menu", width=46, height=24, fg_color="#222736",
             hover_color="#30384c", border_width=1, border_color="#374151",
             text_color="#f1f5f9", font=ctk.CTkFont(size=10, weight="bold"),
             command=self._handle_menu
@@ -215,9 +215,18 @@ class AjinRowWidget:
 
     def update_data(self, r: Dict[str, Any], show_olt: bool = True):
         self.current_data = r
+        p_name = r.get("name") or "--"
+        is_online = (r.get("status") == "Online")
+        p_desc = r.get("desc") or ""
+        p_ser = r.get("serial", "-")
+        mode = getattr(self, "_current_mode", "full")
+        render_key = (r.get("id"), p_name, is_online, p_ser, p_desc, r.get("uptime"), r.get("port"), mode)
+
+        if getattr(self, "_last_render_key", None) == render_key and self.frame.winfo_ismapped():
+            return
+        self._last_render_key = render_key
 
         # 0. Nome
-        p_name = r.get("name") or "--"
         self.lbl_p.configure(text=f"🖧 {p_name}")
 
         has_2p = bool(r.get("multi_llid"))
@@ -338,8 +347,7 @@ class AjinView(ctk.CTkFrame):
         self._refresh_countdown: int = 10
         self._active_dialog = None
         self._noc_hover_mgr = NocSidebarManager()
-        self._sidebar_collapsed: bool = False
-        self._user_toggled_sidebar: bool = False
+        self._search_debounce_job = None
         self._current_layout_mode: str = "full"
 
         self._build_layout()
@@ -355,7 +363,7 @@ class AjinView(ctk.CTkFrame):
         self._schedule_countdown()
 
     def _build_layout(self):
-        # Grid com 2 colunas: Esquerda (Tabela e controles) e Direita (Sidebar NOC)
+        # Grid com 2 colunas: Esquerda (Tabela e controles) e Direita (Sidebar NOC fixa)
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(0, weight=1)
         self.grid_columnconfigure(1, weight=0)
@@ -364,7 +372,7 @@ class AjinView(ctk.CTkFrame):
         # COLUNA ESQUERDA: Controles, Tabela e Rodapé
         # -------------------------------------------------------------
         self.left_panel = ctk.CTkFrame(self, fg_color="transparent")
-        self.left_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+        self.left_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
         self.left_panel.grid_rowconfigure(1, weight=1)
         self.left_panel.grid_columnconfigure(0, weight=1)
 
@@ -384,7 +392,7 @@ class AjinView(ctk.CTkFrame):
         ctrl_frame = ctk.CTkFrame(self.left_panel, height=44, fg_color="transparent")
         ctrl_frame.grid(row=0, column=0, sticky="ew", pady=(0, 8))
 
-        # 1. Campo de Busca expansivo com largura garantida
+        # 1. Campo de Busca expansivo com largura garantida e debounce fluido
         self.entry_search = ctk.CTkEntry(
             ctrl_frame,
             placeholder_text="🔍 Pesquisar por Nome, Serial, Rua...",
@@ -394,7 +402,7 @@ class AjinView(ctk.CTkFrame):
             text_color="#ffffff"
         )
         self.entry_search.pack(side="left", fill="x", expand=True, padx=(0, 6))
-        self.entry_search.bind("<KeyRelease>", lambda e: self._apply_filters())
+        self.entry_search.bind("<KeyRelease>", self._on_search_key_released)
 
         # 2. Filtro de Portas PON
         self.combo_pon = ctk.CTkComboBox(
@@ -476,6 +484,14 @@ class AjinView(ctk.CTkFrame):
         )
         self.btn_events.pack(side="left")
 
+    def _on_search_key_released(self, event=None):
+        if getattr(self, "_search_debounce_job", None):
+            try:
+                self.after_cancel(self._search_debounce_job)
+            except Exception:
+                pass
+        self._search_debounce_job = self.after(120, self._apply_filters)
+
     # =========================================================================
     # TABELA PRINCIPAL DE DISPOSITIVOS (8 COLUNAS)
     # =========================================================================
@@ -489,18 +505,22 @@ class AjinView(ctk.CTkFrame):
             border_color="#232838"
         )
         self.table_container.grid(row=1, column=0, sticky="nsew")
-        self.table_container.grid_rowconfigure(1, weight=1)
+        self.table_container.grid_rowconfigure(2, weight=1)
         self.table_container.grid_columnconfigure(0, weight=1)
 
-        # Cabeçalho Fixo com Coluna 3 Expansiva e margem para scrollbar
+        # Cabeçalho Fixo Contínuo com Espaçador de Scrollbar e Linha Divisória
         self.header_frame = ctk.CTkFrame(
             self.table_container,
             height=36,
-            corner_radius=0,
-            fg_color="#1a1e2b"
+            corner_radius=6,
+            fg_color="#181c26"
         )
-        self.header_frame.grid(row=0, column=0, sticky="ew", padx=(2, 16))
+        self.header_frame.grid(row=0, column=0, sticky="ew", padx=2, pady=(2, 0))
         self.header_frame.pack_propagate(False)
+
+        # Linha Divisória sutil de 1px entre cabeçalho e viewport
+        self.header_divider = ctk.CTkFrame(self.table_container, height=1, corner_radius=0, fg_color="#232838")
+        self.header_divider.grid(row=1, column=0, sticky="ew")
 
         # 1. Colunas da Esquerda (fixas)
         left_headers = [
@@ -525,17 +545,22 @@ class AjinView(ctk.CTkFrame):
             btn.pack(side="left", fill="both", expand=True)
             self._header_buttons[sort_key] = btn
 
-        # 2. Colunas da Direita (ancoradas na direita, nunca cortadas!)
+        # Espaçador de Scrollbar no extremo direito do Cabeçalho (16px exatos)
+        self._hdr_scroll_spacer = tk.Frame(self.header_frame, width=16, height=36, bg="#181c26")
+        self._hdr_scroll_spacer.pack_propagate(False)
+        self._hdr_scroll_spacer.pack(side="right")
+
+        # 2. Colunas da Direita (ancoradas na direita, alinhamento pixel-perfect 1:1)
         # Ordem de empacotamento right-to-left: Ações -> Canal OLT -> Tempo -> Fabricante
-        # Ações
-        self._hdr_actions_f = ctk.CTkFrame(self.header_frame, width=82, height=36, fg_color="transparent")
+        # Ações (78px exatos, alinhamento pixel-perfect com c7)
+        self._hdr_actions_f = tk.Frame(self.header_frame, width=78, height=36, bg="#181c26")
         self._hdr_actions_f.pack_propagate(False)
-        self._hdr_actions_f.pack(side="right", padx=(4, 6))
-        lbl_act = ctk.CTkLabel(self._hdr_actions_f, text="Ações", anchor="center", font=ctk.CTkFont(size=11, weight="bold"), text_color="#94a3b8")
+        self._hdr_actions_f.pack(side="right", padx=(4, 4))
+        lbl_act = tk.Label(self._hdr_actions_f, text="Ações", anchor="center", font=("Segoe UI", 10, "bold"), fg="#94a3b8", bg="#181c26")
         lbl_act.pack(side="left", fill="both", expand=True)
 
-        # Canal OLT
-        self._hdr_canal_f = ctk.CTkFrame(self.header_frame, width=115, height=36, fg_color="transparent")
+        # Canal OLT (110px)
+        self._hdr_canal_f = ctk.CTkFrame(self.header_frame, width=110, height=36, fg_color="transparent")
         self._hdr_canal_f.pack_propagate(False)
         self._hdr_canal_f.pack(side="right", padx=4)
         btn_canal = ctk.CTkButton(
@@ -548,8 +573,8 @@ class AjinView(ctk.CTkFrame):
         btn_canal.pack(side="left", fill="both", expand=True)
         self._header_buttons["port"] = btn_canal
 
-        # Tempo no Status
-        self._hdr_upt_f = ctk.CTkFrame(self.header_frame, width=85, height=36, fg_color="transparent")
+        # Tempo no Status (75px)
+        self._hdr_upt_f = ctk.CTkFrame(self.header_frame, width=75, height=36, fg_color="transparent")
         self._hdr_upt_f.pack_propagate(False)
         self._hdr_upt_f.pack(side="right", padx=4)
         btn_upt = ctk.CTkButton(
@@ -562,8 +587,8 @@ class AjinView(ctk.CTkFrame):
         btn_upt.pack(side="left", fill="both", expand=True)
         self._header_buttons["uptime"] = btn_upt
 
-        # Fabricante
-        self._hdr_vendor_f = ctk.CTkFrame(self.header_frame, width=85, height=36, fg_color="transparent")
+        # Fabricante (80px)
+        self._hdr_vendor_f = ctk.CTkFrame(self.header_frame, width=80, height=36, fg_color="transparent")
         self._hdr_vendor_f.pack_propagate(False)
         self._hdr_vendor_f.pack(side="right", padx=4)
         btn_vendor = ctk.CTkButton(
@@ -589,23 +614,25 @@ class AjinView(ctk.CTkFrame):
         btn_desc.pack(side="left", fill="both", expand=True)
         self._header_buttons["desc"] = btn_desc
 
-        # Container principal da tabela com linhas estacionárias e scrollbar nativo independente
+        # Container principal da tabela com viewport e scrollbar
         self.table_viewport_frame = ctk.CTkFrame(self.table_container, fg_color="transparent")
-        self.table_viewport_frame.grid(row=1, column=0, sticky="nsew", padx=2, pady=2)
+        self.table_viewport_frame.grid(row=2, column=0, sticky="nsew", padx=2, pady=(0, 2))
         self.table_viewport_frame.grid_rowconfigure(0, weight=1)
         self.table_viewport_frame.grid_columnconfigure(0, weight=1)
+        self.table_viewport_frame.grid_columnconfigure(1, weight=0)
 
         self.table_rows_container = ctk.CTkFrame(self.table_viewport_frame, fg_color="transparent")
-        self.table_rows_container.grid(row=0, column=0, sticky="nsew", padx=(0, 4))
+        self.table_rows_container.grid(row=0, column=0, sticky="nsew", padx=0)
         self.table_rows_container.grid_columnconfigure(0, weight=1)
 
         self.table_scrollbar = ctk.CTkScrollbar(
             self.table_viewport_frame,
+            width=12,
             orientation="vertical",
             button_color="#2c3345",
             button_hover_color="#3d4760"
         )
-        self.table_scrollbar.grid(row=0, column=1, sticky="ns", padx=(0, 2))
+        self.table_scrollbar.grid(row=0, column=1, sticky="ns", padx=(2, 2))
 
         self.ROW_HEIGHT = 40
         self.POOL_SIZE = 35
@@ -703,22 +730,6 @@ class AjinView(ctk.CTkFrame):
         )
         self.btn_refresh.pack(side="left", padx=(0, 14))
 
-        # Botão Toggle Sidebar NOC
-        self.btn_toggle_sidebar = ctk.CTkButton(
-            bot_frame,
-            text="📊 Ocultar NOC",
-            width=115,
-            height=30,
-            fg_color="#1e293b",
-            hover_color="#334155",
-            text_color="#38bdf8",
-            border_width=1,
-            border_color="#334155",
-            font=ctk.CTkFont(size=11, weight="bold"),
-            command=self._toggle_noc_sidebar
-        )
-        self.btn_toggle_sidebar.pack(side="right", padx=(8, 0))
-
         # Informações de Horário
         self.lbl_timer_status = ctk.CTkLabel(
             bot_frame,
@@ -726,23 +737,7 @@ class AjinView(ctk.CTkFrame):
             font=ctk.CTkFont(size=11),
             text_color="#94a3b8"
         )
-        self.lbl_timer_status.pack(side="right")
-
-    def _toggle_noc_sidebar(self):
-        """Alterna a exibição da barra lateral NOC, liberando 266px de largura para a tabela."""
-        self._user_toggled_sidebar = True
-        self._sidebar_collapsed = not getattr(self, "_sidebar_collapsed", False)
-        if self._sidebar_collapsed:
-            self.sidebar_frame.grid_remove()
-            self.left_panel.grid_configure(padx=(0, 0))
-            self.btn_toggle_sidebar.configure(text="📊 Exibir NOC", fg_color="#0284c7")
-        else:
-            self.sidebar_frame.grid(row=0, column=1, sticky="ns", padx=(0, 6), pady=(4, 6))
-            self.left_panel.grid_configure(padx=(0, 10))
-            self.btn_toggle_sidebar.configure(text="📊 Ocultar NOC", fg_color="#1e293b")
-
-        self.update_idletasks()
-        self._handle_table_resize()
+        self.lbl_timer_status.pack(side="right", padx=(0, 4))
 
     # =========================================================================
     # SIDEBAR DIREITA: MÉTRICAS NOC CLEAN (PADRÃO AJIN)
@@ -769,7 +764,7 @@ class AjinView(ctk.CTkFrame):
         block = NocSectionBlock(parent, self._noc_hover_mgr)
 
         sec = ctk.CTkFrame(block.frame, fg_color="transparent")
-        sec.pack(fill="x", padx=16, pady=(10, 10))
+        sec.pack(fill="x", padx=12, pady=(7, 7))
 
         if icon_img:
             lbl_ico = ctk.CTkLabel(sec, image=icon_img, text="")
@@ -783,7 +778,7 @@ class AjinView(ctk.CTkFrame):
         lbl_val = ctk.CTkLabel(
             r_box,
             text=val_str,
-            font=ctk.CTkFont(size=26, weight="bold"),
+            font=ctk.CTkFont(size=23, weight="bold"),
             text_color="#ffffff",
             anchor="e"
         )
@@ -792,7 +787,7 @@ class AjinView(ctk.CTkFrame):
         lbl_sub = ctk.CTkLabel(
             r_box,
             text=label_str,
-            font=ctk.CTkFont(size=11, weight="bold"),
+            font=ctk.CTkFont(size=10, weight="bold"),
             text_color="#ffffff",
             anchor="e"
         )
@@ -802,15 +797,15 @@ class AjinView(ctk.CTkFrame):
         return lbl_val, lbl_sub
 
     def _build_sidebar_noc(self):
-        # Painel lateral azul (#2870c2) com bordas arredondadas e divisores contínuos
+        # Painel lateral azul (#2870c2) integrado permanente e fixo (224px)
         self.sidebar_frame = ctk.CTkFrame(
             self,
-            width=260,
-            corner_radius=12,
+            width=224,
+            corner_radius=10,
             fg_color="#2870c2",
             border_width=0
         )
-        self.sidebar_frame.grid(row=0, column=1, sticky="ns", padx=(0, 6), pady=(4, 6))
+        self.sidebar_frame.grid(row=0, column=1, sticky="ns", padx=(0, 2), pady=(0, 0))
         self.sidebar_frame.grid_propagate(False)
 
         # Monitor de saída da sidebar para limpar o hover instantaneamente sem chamadas de Win32
@@ -1226,15 +1221,20 @@ class AjinView(ctk.CTkFrame):
         total = len(self._filtered_rows)
         if total <= self.VISIBLE_ROWS:
             return
-        if hasattr(e, "delta") and e.delta:
-            delta = -1 if e.delta > 0 else 1
+        raw_delta = getattr(e, "delta", 0)
+        if raw_delta != 0:
+            direction = -1 if raw_delta > 0 else 1
+            # Rolagem proporcional adaptativa (Touchpad de alta precisão vs Mouse tradicional)
+            steps = max(1, min(6, int(abs(raw_delta) / 60)))
         elif getattr(e, "num", None) == 4:
-            delta = -1
+            direction = -1
+            steps = 2
         elif getattr(e, "num", None) == 5:
-            delta = 1
+            direction = 1
+            steps = 2
         else:
-            delta = 0
-        self._set_scroll_offset(self._scroll_offset + (delta * 2))
+            return
+        self._set_scroll_offset(self._scroll_offset + (direction * steps))
 
     def _on_table_resize(self, e=None):
         if not self.winfo_ismapped():
@@ -1244,7 +1244,7 @@ class AjinView(ctk.CTkFrame):
                 self.after_cancel(self._resize_debounce_job)
             except Exception:
                 pass
-        self._resize_debounce_job = self.after(50, self._handle_table_resize)
+        self._resize_debounce_job = self.after(35, self._handle_table_resize)
 
     def _handle_table_resize(self):
         self._resize_debounce_job = None
@@ -1253,16 +1253,6 @@ class AjinView(ctk.CTkFrame):
             new_visible = min(len(self._row_pool), max(5, avail_h // self.ROW_HEIGHT))
             if new_visible != self.VISIBLE_ROWS:
                 self.VISIBLE_ROWS = new_visible
-
-        # Auto-colapso inteligente da sidebar se a janela total estiver muito pequena (< 890px)
-        # e o usuário ainda não tiver clicado manualmente no botão de toggle
-        total_w = self.winfo_width()
-        if total_w > 100 and total_w < 890 and not getattr(self, "_user_toggled_sidebar", False) and not getattr(self, "_sidebar_collapsed", False):
-            self._sidebar_collapsed = True
-            self.sidebar_frame.grid_remove()
-            self.left_panel.grid_configure(padx=(0, 0))
-            if hasattr(self, "btn_toggle_sidebar"):
-                self.btn_toggle_sidebar.configure(text="📊 Exibir NOC", fg_color="#0284c7")
 
         avail_w = self.table_viewport_frame.winfo_width()
         self._update_responsive_layout(avail_w)
@@ -1273,11 +1263,11 @@ class AjinView(ctk.CTkFrame):
         if avail_w < 50:
             return
 
-        if avail_w >= 1020:
+        if avail_w >= 780:
             mode = "full"
             show_vendor = True
             show_canal = True
-        elif avail_w >= 780:
+        elif avail_w >= 600:
             mode = "medium"
             show_vendor = False
             show_canal = True
