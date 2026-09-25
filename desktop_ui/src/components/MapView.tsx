@@ -4,13 +4,6 @@ import 'leaflet/dist/leaflet.css';
 import {
   Layers,
   X,
-  AlertTriangle,
-  RefreshCw,
-  Play,
-  MapPin,
-  Search,
-  CheckCircle2,
-  Clock,
 } from 'lucide-react';
 import type { ONUItem } from './AjinView';
 
@@ -63,20 +56,17 @@ export const MapView: React.FC<MapViewProps> = ({
 
   const [activeLayer, setActiveLayer] = useState<'satellite' | 'roads' | 'osm'>('satellite');
   const [incidents, setIncidents] = useState<Incident[]>([]);
-  const [isTrayOpen, setIsTrayOpen] = useState(false);
+  const [isTrayOpen, setIsTrayOpen] = useState(true);
   const [showServers, setShowServers] = useState(true);
   const [showOnus, setShowOnus] = useState(true);
   const [selectedServer, setSelectedServer] = useState<Server | null>(null);
   const [selectedOnu, setSelectedOnu] = useState<ONUItem | null>(null);
-  const [incidentSearch, setIncidentSearch] = useState('');
-  const [isRetestingAll, setIsRetestingAll] = useState(false);
-  const [testingIncidentId, setTestingIncidentId] = useState<string | null>(null);
 
   const lastTargetKeyRef = useRef<string | null>(
     targetLocation ? `${targetLocation.lat}_${targetLocation.lon}_${targetLocation.itemType || ''}_${targetLocation.id || ''}` : null
   );
 
-  // Formata duração do downtime exatamente como na referência: 14d 22h, 10d 7h
+  // Formata duração do downtime exatamente como na referência: 15d 1h, 10d 9h
   const formatLossDuration = (sec: number) => {
     sec = Math.max(0, Math.floor(sec));
     if (sec < 60) return `${sec}s`;
@@ -103,42 +93,6 @@ export const MapView: React.FC<MapViewProps> = ({
       console.warn('Erro ao carregar incidentes:', e);
     }
   };
-
-  const handleRetestAll = async () => {
-    setIsRetestingAll(true);
-    try {
-      await fetch('http://127.0.0.1:8765/api/servers/check_status', { method: 'POST' });
-      setTimeout(async () => {
-        await loadIncidents();
-        setIsRetestingAll(false);
-      }, 1500);
-    } catch (e) {
-      console.warn('Erro ao retestar servidores:', e);
-      setIsRetestingAll(false);
-    }
-  };
-
-  const handleRetestSingle = async (e: React.MouseEvent, serverId: string) => {
-    e.stopPropagation();
-    setTestingIncidentId(serverId);
-    try {
-      await fetch(`http://127.0.0.1:8765/api/servers/${serverId}/check`, { method: 'POST' });
-      await loadIncidents();
-    } catch (e) {
-      console.warn('Erro ao testar servidor individual:', e);
-    } finally {
-      setTestingIncidentId(null);
-    }
-  };
-
-  const filteredIncidents = incidents.filter((inc) => {
-    if (!incidentSearch.trim()) return true;
-    const term = incidentSearch.toLowerCase().trim();
-    const nameMatch = inc.name.toLowerCase().includes(term);
-    const hostMatch = inc.host.toLowerCase().includes(term);
-    const groupMatch = (inc.group || '').toLowerCase().includes(term);
-    return nameMatch || hostMatch || groupMatch;
-  });
 
   useEffect(() => {
     loadIncidents();
@@ -488,188 +442,50 @@ export const MapView: React.FC<MapViewProps> = ({
           </button>
         </div>
 
-        {/* 2. BANDEJA RETRÁTIL DE INCIDENTES (NOC COMMAND CENTER) */}
-        {isTrayOpen && (
-          <div className="w-[490px] max-w-[94vw] bg-[#11131a]/95 backdrop-blur-xl border border-rose-500/35 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.85),0_0_25px_rgba(244,63,94,0.18)] overflow-hidden flex flex-col animate-in fade-in slide-in-from-top-2 duration-150">
-            {/* Header da Central de Incidentes */}
-            <div className="p-3.5 bg-gradient-to-r from-rose-950/60 via-[#1a141b]/80 to-rose-950/40 border-b border-rose-900/50 flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <div className="relative flex items-center justify-center w-8 h-8 rounded-xl bg-rose-500/15 border border-rose-500/40 shrink-0">
-                  <span className="w-2 h-2 rounded-full bg-rose-500 shadow-[0_0_8px_#f43f5e] animate-ping absolute" />
-                  <span className="w-2 h-2 rounded-full bg-rose-500 shadow-[0_0_8px_#f43f5e]" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-black uppercase tracking-wider text-rose-200">
-                      Central de Incidentes RDP
-                    </span>
-                    <span className="px-1.5 py-0.2 rounded-full bg-rose-600 text-white font-mono text-[10px] font-extrabold shadow-[0_0_6px_#f43f5e]">
-                      {incidents.length}
+        {/* 2. MENU SIMPLES DE SERVIDORES EM FALHA (IDÊNTICO À REFERÊNCIA DO USUÁRIO) */}
+        {isTrayOpen && incidents.length > 0 && (
+          <div className="w-[360px] max-w-[94vw] bg-[#18191f]/95 backdrop-blur-md border border-[#3b1e22] rounded-xl shadow-2xl overflow-hidden flex flex-col animate-in fade-in duration-150">
+            {/* Header */}
+            <div className="px-3.5 py-2.5 border-b border-[#3b1e22] flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-sm">⚠️</span>
+                <span className="text-[11px] font-black uppercase tracking-wider text-[#ff5c5c]">
+                  SERVIDORES EM FALHA / LOSS
+                </span>
+                <span className="px-2 py-0.5 rounded-full bg-[#e03131] text-white font-mono text-[11px] font-bold leading-none shadow-[0_0_6px_rgba(224,49,49,0.5)]">
+                  {incidents.length}
+                </span>
+              </div>
+              <button
+                onClick={() => setIsTrayOpen(false)}
+                className="text-slate-400 hover:text-white transition-colors cursor-pointer p-0.5"
+                title="Fechar"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            {/* Lista simples de servidores */}
+            <div className="max-h-[300px] overflow-y-auto p-2 space-y-1.5">
+              {incidents.map((inc) => (
+                <div
+                  key={inc.id}
+                  onClick={() => handleIncidentClick(inc)}
+                  title="Clique para localizar no mapa"
+                  className="px-3 py-2 rounded-lg bg-[#20222a]/90 hover:bg-[#282a35] border border-white/5 hover:border-red-500/40 transition-all cursor-pointer flex items-center justify-between group"
+                >
+                  <div className="flex items-center gap-2 min-w-0 mr-2">
+                    <span className="w-2 h-2 rounded-full bg-[#ff4d4f] shadow-[0_0_8px_#ff4d4f] shrink-0" />
+                    <span className="text-xs font-semibold text-slate-100 group-hover:text-white truncate">
+                      {inc.name}
                     </span>
                   </div>
-                  <span className="text-[10px] text-slate-400">
-                    {incidents.length === 1
-                      ? '1 servidor inacessível na porta 3389'
-                      : `${incidents.length} servidores inacessíveis na porta 3389`}
+
+                  <span className="px-2.5 py-0.5 rounded border border-[#5c1d24] bg-[#2a1316] text-[#ff6b6b] font-mono text-xs font-semibold shrink-0">
+                    {formatLossDuration(inc.duration_seconds)}
                   </span>
                 </div>
-              </div>
-
-              <div className="flex items-center gap-1.5">
-                <button
-                  onClick={handleRetestAll}
-                  disabled={isRetestingAll}
-                  title="Retestar conectividade de todos os servidores agora"
-                  className="px-2.5 py-1.5 rounded-lg bg-[#1f2432] hover:bg-[#2b3346] border border-white/10 text-slate-200 hover:text-white text-[11px] font-bold flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
-                >
-                  <RefreshCw className={`w-3 h-3 text-cyan-400 ${isRetestingAll ? 'animate-spin' : ''}`} />
-                  <span>{isRetestingAll ? 'Testando...' : 'Retestar Todos'}</span>
-                </button>
-                <button
-                  onClick={() => setIsTrayOpen(false)}
-                  className="w-7 h-7 rounded-lg bg-white/5 hover:bg-white/15 text-slate-400 hover:text-white flex items-center justify-center transition-colors cursor-pointer"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            </div>
-
-            {/* Campo de Busca Rápida (quando houver mais de 2 incidentes) */}
-            {incidents.length > 2 && (
-              <div className="p-2.5 pb-1 border-b border-white/5 bg-[#0e1017]">
-                <div className="relative">
-                  <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-2.5 pointer-events-none" />
-                  <input
-                    type="text"
-                    placeholder="Filtrar por nome, host ou grupo..."
-                    value={incidentSearch}
-                    onChange={(e) => setIncidentSearch(e.target.value)}
-                    className="w-full bg-[#161822] border border-white/10 rounded-lg pl-8 pr-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-rose-500/50 transition-colors"
-                  />
-                </div>
-              </div>
-            )}
-
-            {/* Lista Rolável de Cards de Servidores em Falha */}
-            <div className="max-h-[380px] overflow-y-auto p-2.5 space-y-2">
-              {incidents.length === 0 ? (
-                <div className="text-center py-8 px-4">
-                  <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center mx-auto mb-2 text-emerald-400">
-                    <CheckCircle2 className="w-6 h-6" />
-                  </div>
-                  <h4 className="text-xs font-bold text-emerald-300">Nenhum Incidente Ativo</h4>
-                  <p className="text-[11px] text-slate-400 mt-0.5">
-                    Todos os servidores estão operando e respondendo normalmente via RDP.
-                  </p>
-                </div>
-              ) : filteredIncidents.length === 0 ? (
-                <div className="text-center py-6 text-xs text-slate-400 italic">
-                  Nenhum servidor corresponde ao filtro &quot;{incidentSearch}&quot;
-                </div>
-              ) : (
-                filteredIncidents.map((inc) => (
-                  <div
-                    key={inc.id}
-                    onClick={() => handleIncidentClick(inc)}
-                    className="p-3 rounded-xl bg-white/[0.03] hover:bg-rose-950/25 border border-white/[0.08] hover:border-rose-500/40 transition-all cursor-pointer group shadow-sm flex flex-col gap-2"
-                  >
-                    {/* Linha Superior: Nome, Grupo e Duração */}
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span className="w-2.5 h-2.5 rounded-full bg-rose-500 shadow-[0_0_8px_#f43f5e] shrink-0 animate-pulse" />
-                        <span className="font-extrabold text-xs text-white group-hover:text-rose-200 transition-colors truncate">
-                          {inc.name}
-                        </span>
-                        {inc.group && (
-                          <span className="px-1.5 py-0.2 rounded bg-[#1e2330] border border-white/10 text-[10px] text-slate-400 font-medium shrink-0">
-                            {inc.group}
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Badge de Duração de Downtime */}
-                      <span className="inline-flex items-center gap-1 font-mono font-bold text-[11px] text-rose-300 bg-rose-950/90 border border-rose-800/80 px-2 py-0.5 rounded-lg shrink-0 shadow-sm">
-                        <Clock className="w-3 h-3 text-rose-400" />
-                        {formatLossDuration(inc.duration_seconds)}
-                      </span>
-                    </div>
-
-                    {/* Linha Central: Host:Porta e Data da Queda */}
-                    <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1 border-t border-white/5">
-                      <span className="font-mono text-slate-300 flex items-center gap-1">
-                        <span className="text-slate-500">Host:</span> {inc.host}:{inc.port || 3389}
-                      </span>
-                      {inc.offline_since_formatted && (
-                        <span className="text-[10px] text-slate-500">
-                          Queda: {inc.offline_since_formatted}
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Linha Inferior: Botões de Ação Rápida */}
-                    <div className="flex items-center justify-between pt-1 gap-2">
-                      <span className="text-[10px] text-rose-400/80 flex items-center gap-1">
-                        <AlertTriangle className="w-3 h-3 text-rose-400 shrink-0" />
-                        <span>Porta RDP Inacessível</span>
-                      </span>
-
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          onClick={(e) => handleRetestSingle(e, inc.id)}
-                          disabled={testingIncidentId === inc.id}
-                          title="Testar porta 3389 deste servidor agora"
-                          className="px-2 py-1 bg-[#1a1f2b] hover:bg-[#283144] border border-white/10 text-slate-300 rounded text-[10px] font-bold flex items-center gap-1 transition-colors cursor-pointer disabled:opacity-50"
-                        >
-                          <RefreshCw className={`w-2.5 h-2.5 text-cyan-400 ${testingIncidentId === inc.id ? 'animate-spin' : ''}`} />
-                          <span>{testingIncidentId === inc.id ? '...' : 'Retestar'}</span>
-                        </button>
-
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onConnect(inc.id);
-                          }}
-                          title="Tentar conexão direta via RDP (MSTSC)"
-                          className="px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded text-[10px] font-bold flex items-center gap-1 shadow-sm transition-colors cursor-pointer"
-                        >
-                          <Play className="w-2.5 h-2.5 fill-current" />
-                          <span>Conectar</span>
-                        </button>
-
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleIncidentClick(inc);
-                          }}
-                          title="Focar alfinete deste servidor no mapa"
-                          className="px-2 py-1 bg-white/5 hover:bg-white/15 border border-white/10 text-slate-300 hover:text-white rounded text-[10px] font-bold flex items-center gap-1 transition-colors cursor-pointer"
-                        >
-                          <MapPin className="w-2.5 h-2.5 text-amber-400" />
-                          <span>Focar</span>
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-
-            {/* Rodapé Informativo da Central */}
-            <div className="p-2.5 px-3.5 bg-[#0a0c12] border-t border-white/10 flex items-center justify-between text-[11px] text-slate-400 font-medium">
-              <div className="flex items-center gap-3">
-                <span className="flex items-center gap-1 text-emerald-400">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                  {servers.length - incidents.length} Online
-                </span>
-                <span className="text-slate-600">•</span>
-                <span className="flex items-center gap-1 text-rose-400">
-                  <span className="w-1.5 h-1.5 rounded-full bg-rose-400" />
-                  {incidents.length} em Loss
-                </span>
-              </div>
-              <span className="text-[10px] text-slate-500 font-mono">
-                Taxa de Operação: {servers.length > 0 ? (((servers.length - incidents.length) / servers.length) * 100).toFixed(0) : 100}%
-              </span>
+              ))}
             </div>
           </div>
         )}
