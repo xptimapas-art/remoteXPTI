@@ -36,6 +36,9 @@ class StreamToLogger:
     def flush(self):
         pass
 
+    def isatty(self):
+        return False
+
 def get_logs_dir() -> Path:
     local_appdata = os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))
     logs_dir = Path(local_appdata) / "RemoteXPTI" / "logs"

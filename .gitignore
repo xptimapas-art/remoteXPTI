@@ -25,3 +25,6 @@ thumbnails/*.png
 
 # Cache de mapas offline
 cache/
+
+# Node / Modern Desktop UI
+desktop_ui/node_modules/
