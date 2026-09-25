@@ -149,11 +149,10 @@ class AjinRowWidget:
         )
         self.btn_del.pack(side="left")
 
-        # Efeito de hover suave
+        # Efeito de hover suave nos widgets de conteúdo direto da linha
         hover_targets = [
-            self.frame, self.c0, self.lbl_p, self.c1, self.c2,
-            self.lbl_ser, self.c3, self.lbl_desc, self.c4, self.lbl_vendor,
-            self.c5, self.lbl_upt, self.c6, self.lbl_canal, self.c7
+            self.frame, self.lbl_p, self.lbl_stt, self.lbl_ser,
+            self.lbl_desc, self.lbl_vendor, self.lbl_upt, self.lbl_canal
         ]
         for w in hover_targets:
             w.bind("<Enter>", self._on_enter)
