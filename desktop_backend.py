@@ -139,6 +139,37 @@ def connect_server(req: ConnectRequest):
     threading.Thread(target=_launch, daemon=True).start()
     return {"status": "launching", "server_name": server.get("name")}
 
+@app.get("/api/incidents")
+def get_incidents():
+    from config_manager import get_config_dir
+    hist_file = get_config_dir() / "downtime_history.json"
+    now = time.time()
+    incidents = []
+    if hist_file.exists():
+        try:
+            with open(hist_file, "r", encoding="utf-8") as f:
+                downtime_map = json.load(f)
+            server_map = {s["id"]: s for s in storage_mgr.servers}
+            for s_id, offline_since in downtime_map.items():
+                srv = server_map.get(s_id)
+                if not srv:
+                    continue
+                duration = max(0, int(now - float(offline_since)))
+                incidents.append({
+                    "id": s_id,
+                    "name": srv.get("name", "Servidor"),
+                    "host": srv.get("host", ""),
+                    "port": srv.get("port", 3389),
+                    "offline_since": offline_since,
+                    "duration_seconds": duration,
+                    "latitude": srv.get("latitude"),
+                    "longitude": srv.get("longitude")
+                })
+        except Exception as e:
+            log.warning(f"Erro ao carregar incidents: {e}")
+    incidents.sort(key=lambda x: x["duration_seconds"], reverse=True)
+    return incidents
+
 @app.get("/api/ajin/telemetry")
 def get_ajin_telemetry():
     return ajin_mgr.get_data()
