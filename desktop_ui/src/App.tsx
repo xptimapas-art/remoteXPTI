@@ -5,6 +5,7 @@ import { ServersView } from './components/ServersView';
 import { MapView } from './components/MapView';
 import { AjinView } from './components/AjinView';
 import { AddServerModal } from './components/AddServerModal';
+import { EditServerModal } from './components/EditServerModal';
 import { SettingsModal } from './components/SettingsModal';
 
 const API_BASE = 'http://127.0.0.1:8765';
@@ -17,6 +18,7 @@ export const App: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedGroup, setSelectedGroup] = useState('Todos os Grupos');
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [editingServerId, setEditingServerId] = useState<string | null>(null);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [rdpToast, setRdpToast] = useState<{ visible: boolean; name: string; host: string } | null>(null);
 
@@ -175,6 +177,7 @@ export const App: React.FC = () => {
             searchTerm={searchTerm}
             selectedGroup={selectedGroup}
             onConnect={handleConnect}
+            onEdit={(id) => setEditingServerId(id)}
           />
         )}
 
@@ -204,6 +207,17 @@ export const App: React.FC = () => {
         onServerAdded={() => {
           loadServers();
         }}
+      />
+
+      <EditServerModal
+        serverId={editingServerId}
+        isOpen={Boolean(editingServerId)}
+        onClose={() => setEditingServerId(null)}
+        groups={groups}
+        onServerUpdated={() => {
+          loadServers();
+        }}
+        onConnect={handleConnect}
       />
 
       <SettingsModal

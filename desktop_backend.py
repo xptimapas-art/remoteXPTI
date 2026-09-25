@@ -92,6 +92,20 @@ class AddServerRequest(BaseModel):
     latitude: Optional[float] = None
     longitude: Optional[float] = None
 
+class UpdateServerRequest(BaseModel):
+    name: str
+    host: str
+    port: int = 3389
+    username: str = ""
+    password: Optional[str] = None
+    group: str = "BEMTEVI"
+    notes: str = ""
+    fullscreen: bool = True
+    admin_mode: bool = False
+    multimon: bool = False
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+
 class EditLabelRequest(BaseModel):
     port: str
     onu_id: str
@@ -163,6 +177,28 @@ def add_server(req: AddServerRequest):
     new_s = storage_mgr.add_server(data)
     storage_mgr.save()
     return {"status": "created", "server": new_s}
+
+@app.get("/api/servers/{server_id}")
+def get_server_detail(server_id: str):
+    server = storage_mgr.get_server(server_id)
+    if not server:
+        raise HTTPException(status_code=404, detail="Servidor não encontrado")
+    return server
+
+@app.put("/api/servers/{server_id}")
+def update_server(server_id: str, req: UpdateServerRequest):
+    data = req.dict(exclude_unset=True)
+    updated = storage_mgr.update_server(server_id, data)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Servidor não encontrado")
+    return {"status": "updated", "server": updated}
+
+@app.delete("/api/servers/{server_id}")
+def delete_server(server_id: str):
+    ok = storage_mgr.delete_server(server_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Servidor não encontrado")
+    return {"status": "deleted"}
 
 @app.post("/api/refresh_all")
 def refresh_all():

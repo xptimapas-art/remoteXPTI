@@ -19,6 +19,7 @@ interface ServersViewProps {
   searchTerm: string;
   selectedGroup: string;
   onConnect: (serverId: string) => void;
+  onEdit: (serverId: string) => void;
 }
 
 const PALETTES = [
@@ -45,6 +46,7 @@ export const ServersView: React.FC<ServersViewProps> = ({
   searchTerm,
   selectedGroup,
   onConnect,
+  onEdit,
 }) => {
   const filteredServers = useMemo(() => {
     const term = searchTerm.toLowerCase().trim();
@@ -98,6 +100,10 @@ export const ServersView: React.FC<ServersViewProps> = ({
             <div
               key={s.id}
               onClick={() => onConnect(s.id)}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                onEdit(s.id);
+              }}
               style={{
                 height: '180px',
                 position: 'relative',
@@ -292,22 +298,35 @@ export const ServersView: React.FC<ServersViewProps> = ({
                   </div>
                 </div>
 
-                {/* Três Pontos Verticais AnyDesk ⋮ */}
-                <div
+                {/* Botão Três Pontos AnyDesk ⋮ para Editar Credenciais */}
+                <button
+                  type="button"
+                  title="Editar credenciais e servidor"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onEdit(s.id);
+                  }}
                   style={{
+                    background: 'transparent',
+                    border: 'none',
+                    cursor: 'pointer',
                     display: 'flex',
                     flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
                     gap: '2.5px',
-                    padding: '3px',
-                    opacity: 0.65,
+                    padding: '5px',
+                    borderRadius: '4px',
+                    opacity: 0.75,
                     flexShrink: 0,
+                    transition: 'all 0.15s ease',
                   }}
-                  className="group-hover:opacity-100 transition-opacity"
+                  className="hover:opacity-100 hover:bg-white/20 active:scale-95"
                 >
-                  <span style={{ width: '3px', height: '3px', borderRadius: '50%', backgroundColor: '#ffffff' }} />
-                  <span style={{ width: '3px', height: '3px', borderRadius: '50%', backgroundColor: '#ffffff' }} />
-                  <span style={{ width: '3px', height: '3px', borderRadius: '50%', backgroundColor: '#ffffff' }} />
-                </div>
+                  <span style={{ width: '3.5px', height: '3.5px', borderRadius: '50%', backgroundColor: '#ffffff' }} />
+                  <span style={{ width: '3.5px', height: '3.5px', borderRadius: '50%', backgroundColor: '#ffffff' }} />
+                  <span style={{ width: '3.5px', height: '3.5px', borderRadius: '50%', backgroundColor: '#ffffff' }} />
+                </button>
               </div>
 
               {/* Borda Inferior Luminosa AnyDesk Blue no Hover */}
