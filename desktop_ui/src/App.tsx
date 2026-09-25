@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { Play } from 'lucide-react';
 import { TitleBar } from './components/TitleBar';
 import { ServersView } from './components/ServersView';
 import { MapView } from './components/MapView';
@@ -17,6 +18,7 @@ export const App: React.FC = () => {
   const [selectedGroup, setSelectedGroup] = useState('Todos os Grupos');
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [rdpToast, setRdpToast] = useState<{ visible: boolean; name: string; host: string } | null>(null);
 
   const [telemetry, setTelemetry] = useState<any>({
     total: 39,
@@ -98,6 +100,15 @@ export const App: React.FC = () => {
   }, []);
 
   const handleConnect = async (serverId: string) => {
+    const target = servers.find((s) => s.id === serverId);
+    const name = target?.name || 'Servidor';
+    const host = target?.host || '';
+
+    setRdpToast({ visible: true, name, host });
+    setTimeout(() => {
+      setRdpToast(null);
+    }, 4500);
+
     try {
       await fetch(`${API_BASE}/api/servers/connect`, {
         method: 'POST',
@@ -200,6 +211,26 @@ export const App: React.FC = () => {
         onClose={() => setIsSettingsModalOpen(false)}
         serverCount={servers.length}
       />
+
+      {/* Toast Flutuante de Disparo de RDP */}
+      {rdpToast && (
+        <div className="fixed bottom-6 right-6 z-[200] bg-[#16171d] border border-blue-500/50 shadow-2xl rounded-xl p-4 flex items-center space-x-3.5 animate-in slide-in-from-bottom-5 duration-200">
+          <div className="w-10 h-10 rounded-lg bg-blue-600/20 border border-blue-500/40 flex items-center justify-center text-blue-400 shrink-0">
+            <Play className="w-5 h-5 fill-current" />
+          </div>
+          <div className="flex flex-col">
+            <div className="flex items-center space-x-2">
+              <span className="text-xs font-bold text-white leading-tight">{rdpToast.name}</span>
+              <span className="text-[10px] font-mono text-blue-400 bg-blue-950/80 px-1.5 py-0.5 rounded border border-blue-800/40">
+                {rdpToast.host}
+              </span>
+            </div>
+            <span className="text-[11px] text-[#8e92a0] mt-1">
+              Injetando credenciais via cmdkey e abrindo MSTSC nativo...
+            </span>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

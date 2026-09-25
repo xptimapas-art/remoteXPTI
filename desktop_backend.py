@@ -139,7 +139,7 @@ def connect_server(req: ConnectRequest):
         adm = bool(server.get("admin_mode", False))
         multi = bool(server.get("multimon", False))
 
-        RDPManager.connect(
+        ok, msg = RDPManager.launch_rdp(
             host=host,
             port=port,
             username=user,
@@ -148,7 +148,11 @@ def connect_server(req: ConnectRequest):
             admin_mode=adm,
             multimon=multi
         )
-        storage_mgr.record_connection(req.server_id)
+        if ok:
+            storage_mgr.record_connection(req.server_id)
+            log.info(f"[DesktopBackend] Conexão RDP disparada com sucesso para {server.get('name')}: {msg}")
+        else:
+            log.error(f"[DesktopBackend] Falha ao disparar RDP para {server.get('name')}: {msg}")
 
     threading.Thread(target=_launch, daemon=True).start()
     return {"status": "launching", "server_name": server.get("name")}
@@ -231,6 +235,11 @@ async def websocket_ajin_endpoint(websocket: WebSocket):
         ws_manager.disconnect(websocket)
     except Exception:
         ws_manager.disconnect(websocket)
+
+# Monta diretório de miniaturas dos servidores
+thumbnails_path = Path(__file__).parent / "thumbnails"
+if thumbnails_path.exists():
+    app.mount("/thumbnails", StaticFiles(directory=str(thumbnails_path)), name="thumbnails")
 
 # Monta arquivos estáticos do frontend React compilado
 dist_path = Path(__file__).parent / "desktop_ui" / "dist"
