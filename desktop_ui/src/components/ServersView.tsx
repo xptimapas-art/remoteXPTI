@@ -48,80 +48,211 @@ export const ServersView: React.FC<ServersViewProps> = ({
   }, [servers, searchTerm, selectedGroup]);
 
   return (
-    <div className="flex-1 flex flex-col p-4 bg-[#0d1117] overflow-hidden">
+    <div className="flex-1 flex flex-col bg-[#0d1117] overflow-hidden select-none">
       {/* Sub-header de contagem */}
-      <div className="flex items-center justify-between pb-3 text-xs text-slate-400">
+      <div className="flex items-center justify-between px-5 pt-3 pb-2 text-xs text-slate-400 shrink-0">
         <span className="font-semibold text-slate-300">
           Grade de Acesso RDP • {filteredServers.length} de {servers.length} servidores
         </span>
         {selectedGroup && selectedGroup !== 'Todos os Grupos' && (
-          <span className="px-2 py-0.5 rounded bg-blue-900/50 text-blue-300 border border-blue-700/50 text-[11px]">
-            Grupo: {selectedGroup}
+          <span className="px-2.5 py-0.5 rounded bg-blue-900/50 text-blue-300 border border-blue-700/50 text-[11px] font-medium">
+            Filtro: {selectedGroup}
           </span>
         )}
       </div>
 
-      {/* Grid de Cards dos Servidores no padrão AnyDesk */}
-      <div className="flex-1 overflow-y-auto grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3.5 pr-1">
+      {/* Grid de Cards dos Servidores com dimensões fixas no padrão AnyDesk */}
+      <div
+        className="flex-1 overflow-y-auto px-5 pb-6"
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
+          gridAutoRows: '200px',
+          gap: '16px',
+        }}
+      >
         {filteredServers.map((s) => (
           <div
             key={s.id}
             onClick={() => onConnect(s.id)}
-            className="bg-[#16171d] border border-[#2e323e] hover:border-[#0066cc] rounded-xl overflow-hidden flex flex-col justify-between shadow-md hover:shadow-2xl transition-all group cursor-pointer"
+            style={{
+              height: '200px',
+              backgroundColor: '#16171d',
+              border: '1px solid #2e323e',
+              borderRadius: '12px',
+              overflow: 'hidden',
+              display: 'flex',
+              flexDirection: 'column',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease',
+              boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
+            }}
+            className="hover:border-[#0066cc] hover:-translate-y-1 hover:shadow-xl group"
           >
-            {/* Preview Banner com suporte a miniaturas e gradiente escuro AnyDesk */}
-            <div className="h-28 w-full bg-gradient-to-br from-[#1c2430] via-[#16171d] to-[#0f1117] relative flex items-center justify-center border-b border-[#262832] overflow-hidden">
+            {/* Top Banner / Preview AnyDesk */}
+            <div
+              style={{
+                height: '112px',
+                position: 'relative',
+                background: 'linear-gradient(135deg, #1d2535 0%, #151822 50%, #0e1017 100%)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderBottom: '1px solid #262832',
+                overflow: 'hidden',
+              }}
+            >
+              {/* Miniatura do servidor se existir */}
               <img
                 src={`http://127.0.0.1:8765/thumbnails/${s.id}.png`}
                 alt=""
-                className="absolute inset-0 w-full h-full object-cover opacity-75 group-hover:scale-105 transition-transform duration-300"
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  width: '100%',
+                  height: '100%',
+                  objectFit: 'cover',
+                  opacity: 0.8,
+                }}
                 onError={(e) => {
                   (e.target as HTMLElement).style.display = 'none';
                 }}
               />
-              <div className="absolute inset-0 bg-gradient-to-t from-[#16171d] via-transparent to-transparent pointer-events-none" />
 
-              {/* Tag de Grupo */}
-              <span className="absolute top-2.5 left-2.5 text-[9px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-black/70 text-blue-300 border border-blue-500/30 backdrop-blur-xs">
+              {/* Tag de Grupo (Canto Superior Esquerdo) */}
+              <span
+                style={{
+                  position: 'absolute',
+                  top: '8px',
+                  left: '8px',
+                  fontSize: '9px',
+                  fontWeight: 'bold',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em',
+                  padding: '2px 8px',
+                  borderRadius: '4px',
+                  backgroundColor: 'rgba(0, 0, 0, 0.75)',
+                  color: '#60a5fa',
+                  border: '1px solid rgba(59, 130, 246, 0.3)',
+                  zIndex: 2,
+                }}
+              >
                 {s.group || 'BEMTEVI'}
               </span>
 
-              {/* Badge de Status Online */}
-              <span className="absolute top-2.5 right-2.5 inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-400 bg-black/70 px-2 py-0.5 rounded border border-emerald-500/30 backdrop-blur-xs">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              {/* Status Online (Canto Superior Direito) */}
+              <span
+                style={{
+                  position: 'absolute',
+                  top: '8px',
+                  right: '8px',
+                  fontSize: '10px',
+                  fontWeight: '600',
+                  padding: '2px 8px',
+                  borderRadius: '4px',
+                  backgroundColor: 'rgba(0, 0, 0, 0.75)',
+                  color: '#34d399',
+                  border: '1px solid rgba(16, 185, 129, 0.3)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  zIndex: 2,
+                }}
+              >
+                <span
+                  style={{
+                    width: '6px',
+                    height: '6px',
+                    borderRadius: '50%',
+                    backgroundColor: '#34d399',
+                  }}
+                />
                 Online
               </span>
 
-              {/* Ícone de Computador Central se não houver foto */}
-              <div className="w-12 h-12 rounded-xl bg-blue-600/10 border border-blue-500/20 flex items-center justify-center text-blue-400 group-hover:scale-110 transition-transform">
-                <Server className="w-6 h-6 stroke-1.5" />
+              {/* Ícone Central de Servidor */}
+              <div
+                style={{
+                  width: '44px',
+                  height: '44px',
+                  borderRadius: '10px',
+                  backgroundColor: 'rgba(0, 102, 204, 0.15)',
+                  border: '1px solid rgba(0, 102, 204, 0.3)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#60a5fa',
+                  zIndex: 1,
+                }}
+                className="group-hover:scale-110 transition-transform"
+              >
+                <Server style={{ width: '22px', height: '22px' }} />
               </div>
             </div>
 
-            {/* Informações do Servidor */}
-            <div className="p-3.5 flex flex-col justify-between flex-1">
+            {/* Bottom Info & Connect Button */}
+            <div
+              style={{
+                height: '88px',
+                padding: '10px 14px',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between',
+              }}
+            >
               <div>
-                <h3 className="font-bold text-white text-xs tracking-tight group-hover:text-blue-400 transition-colors line-clamp-1">
+                <h3
+                  style={{
+                    fontSize: '13px',
+                    fontWeight: 'bold',
+                    color: '#ffffff',
+                    margin: 0,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                  className="group-hover:text-blue-400 transition-colors"
+                >
                   {s.name}
                 </h3>
-                <div className="text-[11px] font-mono text-slate-400 mt-1 flex items-center gap-1.5">
-                  <Globe className="w-3 h-3 text-slate-500" />
+                <div
+                  style={{
+                    fontSize: '11px',
+                    fontFamily: 'monospace',
+                    color: '#94a3b8',
+                    marginTop: '2px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                  }}
+                >
+                  <Globe style={{ width: '12px', height: '12px', color: '#64748b' }} />
                   <span>
                     {s.host}:{s.port || 3389}
                   </span>
                 </div>
-
-                {s.notes && (
-                  <p className="text-[10px] text-slate-400 mt-1.5 line-clamp-2 italic">
-                    {s.notes}
-                  </p>
-                )}
               </div>
 
-              {/* Rodapé do Card com Botão Conectar */}
-              <div className="pt-2.5 border-t border-[#262832] mt-2.5 flex items-center justify-between">
-                <span className="text-[10px] text-slate-500 flex items-center gap-1">
-                  <Clock className="w-3 h-3" />
+              {/* Rodapé com Conectar */}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  paddingTop: '6px',
+                  borderTop: '1px solid #262832',
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: '10px',
+                    color: '#64748b',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                  }}
+                >
+                  <Clock style={{ width: '11px', height: '11px' }} />
                   {s.last_connected ? 'Conectado recente' : 'Pronto'}
                 </span>
 
@@ -131,9 +262,23 @@ export const ServersView: React.FC<ServersViewProps> = ({
                     e.stopPropagation();
                     onConnect(s.id);
                   }}
-                  className="px-3.5 py-1 bg-[#0066cc] hover:bg-[#0052a3] text-white rounded-md text-[11px] font-bold flex items-center gap-1.5 shadow-sm transition-transform active:scale-95 cursor-pointer"
+                  style={{
+                    backgroundColor: '#0066cc',
+                    color: '#ffffff',
+                    border: 'none',
+                    borderRadius: '6px',
+                    padding: '4px 10px',
+                    fontSize: '11px',
+                    fontWeight: 'bold',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '5px',
+                    cursor: 'pointer',
+                    boxShadow: '0 2px 6px rgba(0, 102, 204, 0.4)',
+                  }}
+                  className="hover:bg-[#0052a3] active:scale-95 transition-all"
                 >
-                  <Play className="w-3 h-3 fill-current" />
+                  <Play style={{ width: '11px', height: '11px', fill: 'currentColor' }} />
                   <span>Conectar</span>
                 </button>
               </div>
@@ -142,10 +287,25 @@ export const ServersView: React.FC<ServersViewProps> = ({
         ))}
 
         {filteredServers.length === 0 && (
-          <div className="col-span-full flex flex-col items-center justify-center p-12 text-center text-slate-500 space-y-2">
-            <Server className="w-10 h-10 stroke-1 text-slate-600" />
-            <p className="text-sm font-medium text-slate-400">Nenhum servidor encontrado</p>
-            <p className="text-xs">Tente ajustar a busca ou o filtro de grupo selecionado.</p>
+          <div
+            style={{
+              gridColumn: '1 / -1',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '60px 20px',
+              textAlign: 'center',
+              color: '#64748b',
+            }}
+          >
+            <Server style={{ width: '40px', height: '40px', strokeWidth: 1.5, color: '#475569' }} />
+            <p style={{ marginTop: '12px', fontSize: '14px', fontWeight: '600', color: '#94a3b8' }}>
+              Nenhum servidor encontrado
+            </p>
+            <p style={{ marginTop: '4px', fontSize: '12px' }}>
+              Tente ajustar o termo da busca ou o filtro de grupo selecionado.
+            </p>
           </div>
         )}
       </div>
