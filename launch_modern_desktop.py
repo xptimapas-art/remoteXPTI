@@ -15,6 +15,16 @@ import desktop_backend
 PORT = 8765
 URL = f"http://127.0.0.1:{PORT}"
 
+def _dbg(msg: str):
+    try:
+        debug_file = Path(__file__).parent / "launch_debug.txt"
+        with open(debug_file, "a", encoding="utf-8") as f:
+            f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}\n")
+    except Exception:
+        pass
+
+_dbg(f"Módulo carregado com argv: {sys.argv} (executable: {sys.executable})")
+
 def _start_backend():
     desktop_backend.start_backend_service(port=PORT)
 
@@ -53,29 +63,40 @@ def focus_existing_instance(window_title: str) -> bool:
 
 def main():
     title = "RemoteXPTI - RDP Quick Launcher"
+    _dbg("Entrou em main()...")
 
     try:
         # Permite agrupamento e ícone próprio na barra de tarefas do Windows
         try:
             import ctypes
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("XPTI.RemoteXPTI.Modern.App")
-        except Exception:
-            pass
+        except Exception as e:
+            _dbg(f"SetCurrentProcessExplicitAppUserModelID: {e}")
 
         # Se a janela gráfica já estiver aberta e visível, restaura foco e encerra processo duplicado
-        if focus_existing_instance(title):
+        has_win = focus_existing_instance(title)
+        _dbg(f"focus_existing_instance: {has_win}")
+        if has_win:
+            _dbg("Janela já visível. Saindo.")
             sys.exit(0)
 
         # 1. Inicia o backend FastAPI + WebSockets em segundo plano caso ainda não esteja rodando
-        if not is_backend_running():
+        bg_running = is_backend_running()
+        _dbg(f"is_backend_running: {bg_running}")
+        if not bg_running:
+            _dbg("Iniciando backend em thread...")
             t = threading.Thread(target=_start_backend, daemon=True)
             t.start()
 
             # 2. Aguarda o servidor local responder
+            _dbg("Aguardando backend...")
             if not wait_for_server():
+                _dbg("Erro: backend não respondeu a tempo!")
                 sys.exit(1)
+            _dbg("Backend respondendo com sucesso.")
 
         # 3. Abre a janela nativa do Windows acelerada por GPU (Microsoft Edge WebView2)
+        _dbg("Criando janela webview...")
         window = webview.create_window(
             title=title,
             url=URL,
@@ -91,22 +112,17 @@ def main():
             icon_path = Path(__file__).parent / "imagens" / "icon.ico"
         icon_arg = str(icon_path.resolve()) if icon_path.exists() else None
 
+        _dbg(f"Chamando webview.start(icon={icon_arg})...")
         webview.start(debug=False, icon=icon_arg)
+        _dbg("webview.start() finalizado normalmente.")
 
         # Ao fechar a janela gráfica, encerra todo o processo e threads associadas
         import os
         os._exit(0)
 
-    except SystemExit:
-        raise
-    except Exception:
+    except BaseException as e:
         import traceback
-        try:
-            log_file = Path(__file__).parent / "launch_error.log"
-            with open(log_file, "a", encoding="utf-8") as f:
-                f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {traceback.format_exc()}\n")
-        except Exception:
-            pass
+        _dbg(f"BaseException capturada: {type(e).__name__}: {e}\n{traceback.format_exc()}")
         raise
 
 if __name__ == "__main__":
