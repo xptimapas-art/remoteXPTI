@@ -13,6 +13,13 @@ interface TitleBarProps {
   onRefresh: () => void;
   onAddServer: () => void;
   onOpenSettings: () => void;
+  updateInfo?: {
+    currentVersion: string;
+    newVersion: string;
+    updateReady: boolean;
+    isDownloading?: boolean;
+  };
+  onRestartUpdate?: () => void;
 }
 
 export const TitleBar: React.FC<TitleBarProps> = ({
@@ -27,6 +34,8 @@ export const TitleBar: React.FC<TitleBarProps> = ({
   onRefresh,
   onAddServer,
   onOpenSettings,
+  updateInfo,
+  onRestartUpdate,
 }) => {
   return (
     <header className="h-16 bg-[#16171d] border-b border-[#252836] flex items-center justify-between px-4 select-none z-50 shrink-0">
@@ -42,17 +51,36 @@ export const TitleBar: React.FC<TitleBarProps> = ({
             <span className="text-[17px] font-bold text-white tracking-normal font-sans">
               RemoteXPTI
             </span>
-            <button
-              onClick={onOpenSettings}
-              title={isDev ? 'Modo Desenvolvedor Ativo (BETA TESTER)' : 'Clique para Configurações & Login DEV'}
-              className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded cursor-pointer transition-all ${
-                isDev
-                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 hover:bg-emerald-500/30'
-                  : 'bg-[#1f2129] text-[#8e92a0] border border-[#2e323e] hover:text-white'
-              }`}
-            >
-              v1.6.30 {isDev ? '[TESTER]' : ''}
-            </button>
+            {updateInfo?.updateReady ? (
+              <button
+                onClick={onRestartUpdate}
+                title={`Nova versão v${updateInfo.newVersion} pronta! Clique para reiniciar e atualizar.`}
+                className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-md bg-[#0066cc] hover:bg-[#0052a3] text-white border border-blue-400 shadow-[0_0_10px_rgba(0,102,204,0.6)] flex items-center gap-1 cursor-pointer animate-pulse transition-all"
+              >
+                <span>🔄 Restart p/ v{updateInfo.newVersion}</span>
+              </button>
+            ) : updateInfo?.isDownloading ? (
+              <button
+                onClick={onOpenSettings}
+                title="Baixando atualização em segundo plano..."
+                className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-blue-900/50 text-cyan-300 border border-blue-500/40 flex items-center gap-1 cursor-pointer"
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping" />
+                <span>Baixando...</span>
+              </button>
+            ) : (
+              <button
+                onClick={onOpenSettings}
+                title={isDev ? 'Modo Desenvolvedor Ativo (BETA TESTER)' : 'Clique para Configurações & Login DEV'}
+                className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded cursor-pointer transition-all ${
+                  isDev
+                    ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 hover:bg-emerald-500/30'
+                    : 'bg-[#1f2129] text-[#8e92a0] border border-[#2e323e] hover:text-white'
+                }`}
+              >
+                v{updateInfo?.currentVersion || '1.6.30'} {isDev ? '[TESTER]' : ''}
+              </button>
+            )}
           </div>
           <span className="text-[10px] text-[#8e92a0] mt-0.5 tracking-wide">
             RDP Quick Launcher

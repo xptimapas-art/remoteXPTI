@@ -25,7 +25,8 @@ from config_manager import ConfigManager
 from logger import log
 from rdp_manager import RDPManager
 from storage import StorageManager
-from version import CURRENT_VERSION
+from updater import SilentAutoUpdater
+from version import CURRENT_VERSION, APP_NAME, GITHUB_REPO
 
 config_mgr = ConfigManager()
 
@@ -73,6 +74,50 @@ def broadcast_ws(message: dict):
             asyncio.run_coroutine_threadsafe(ws_manager.broadcast(message), main_event_loop)
         except Exception:
             pass
+
+# Instância Global do Auto-Updater Silencioso
+updater_instance: Optional[SilentAutoUpdater] = None
+
+def _on_updater_ready(new_ver: str):
+    log.info(f"[DesktopBackend] Nova versão pronta para instalação: v{new_ver}")
+    broadcast_ws({
+        "type": "update_ready",
+        "data": {
+            "new_version": new_ver,
+            "current_version": CURRENT_VERSION,
+        }
+    })
+
+def _on_updater_status(msg: str):
+    log.info(f"[DesktopBackend] Status do updater: {msg}")
+    broadcast_ws({
+        "type": "update_status",
+        "data": {
+            "message": msg,
+            "is_checking": updater_instance.is_checking if updater_instance else False,
+            "is_downloading": updater_instance.is_downloading if updater_instance else False,
+            "update_ready": updater_instance.update_ready if updater_instance else False,
+            "new_version": updater_instance.new_version if updater_instance else "",
+            "current_version": CURRENT_VERSION,
+        }
+    })
+
+def _cleanup_before_restart():
+    log.info("[DesktopBackend] Executando rotina de limpeza para reinício de update...")
+    try:
+        ajin_mgr.stop()
+    except Exception:
+        pass
+    try:
+        storage_mgr.save()
+    except Exception:
+        pass
+
+updater_instance = SilentAutoUpdater(
+    on_ready_callback=_on_updater_ready,
+    on_status_callback=_on_updater_status,
+    cleanup_callback=_cleanup_before_restart
+)
 
 @app.on_event("startup")
 async def on_startup():
@@ -261,6 +306,13 @@ class SetOnuLocationRequest(BaseModel):
 
 class DevLoginRequest(BaseModel):
     password: str
+
+class InstallVersionRequest(BaseModel):
+    tag: str
+    download_url: str
+
+class SetChannelRequest(BaseModel):
+    channel: str
 
 def sync_supabase_servers() -> tuple[bool, int, str]:
     if not CloudSyncManager.is_configured():
@@ -471,6 +523,91 @@ def refresh_all():
     threading.Thread(target=check_all_servers_status, daemon=True).start()
     return {"status": "ok", "message": "Atualização e verificação de servidores solicitadas"}
 
+# ==============================================================================
+# ENDPOINTS DO SISTEMA DE AUTO-UPDATE
+# ==============================================================================
+@app.get("/api/update/status")
+def get_update_status():
+    global updater_instance
+    if not updater_instance:
+        return {
+            "current_version": CURRENT_VERSION,
+            "new_version": "",
+            "is_checking": False,
+            "is_downloading": False,
+            "update_ready": False,
+            "channel": config_mgr.get_update_channel(),
+            "status_message": "Pronto"
+        }
+    return {
+        "current_version": CURRENT_VERSION,
+        "new_version": updater_instance.new_version,
+        "is_checking": updater_instance.is_checking,
+        "is_downloading": updater_instance.is_downloading,
+        "update_ready": updater_instance.update_ready,
+        "channel": config_mgr.get_update_channel(),
+        "status_message": getattr(updater_instance, "status_message", "Pronto")
+    }
+
+@app.post("/api/update/check")
+def check_updates_manual():
+    global updater_instance
+    if not updater_instance:
+        raise HTTPException(status_code=500, detail="Updater não inicializado")
+    threading.Thread(target=updater_instance.start_background_check, args=(True,), daemon=True).start()
+    return {"status": "started", "message": "Verificação de atualizações iniciada"}
+
+@app.post("/api/update/restart")
+def apply_update_restart():
+    global updater_instance
+    if not updater_instance:
+        raise HTTPException(status_code=500, detail="Updater não inicializado")
+    if not updater_instance.update_ready:
+        raise HTTPException(status_code=400, detail="Nenhuma atualização pronta para instalar")
+
+    def _do_restart():
+        time.sleep(0.4)
+        updater_instance.apply_update_and_restart(cleanup_func=_cleanup_before_restart)
+
+    threading.Thread(target=_do_restart, daemon=True).start()
+    return {"status": "restarting", "message": "Reiniciando aplicação para atualizar..."}
+
+@app.get("/api/update/releases")
+def get_all_releases():
+    try:
+        releases = SilentAutoUpdater.fetch_all_releases()
+        return {"releases": releases, "current_version": CURRENT_VERSION}
+    except Exception as e:
+        log.error(f"[DesktopBackend] Erro ao buscar releases: {e}")
+        return {"releases": [], "error": str(e), "current_version": CURRENT_VERSION}
+
+@app.post("/api/update/install_version")
+def install_specific_version(req: InstallVersionRequest):
+    global updater_instance
+    if not updater_instance:
+        raise HTTPException(status_code=500, detail="Updater não inicializado")
+
+    def on_st(msg):
+        _on_updater_status(msg)
+
+    threading.Thread(
+        target=updater_instance.download_and_install_specific,
+        args=(req.tag, req.download_url, on_st),
+        daemon=True
+    ).start()
+    return {"status": "downloading", "tag": req.tag}
+
+@app.post("/api/update/channel")
+def set_update_channel(req: SetChannelRequest):
+    if req.channel not in ("public", "beta_tester"):
+        raise HTTPException(status_code=400, detail="Canal inválido")
+    config_mgr.set_update_channel(req.channel)
+    broadcast_ws({
+        "type": "update_channel_changed",
+        "channel": config_mgr.get_update_channel()
+    })
+    return {"status": "ok", "channel": config_mgr.get_update_channel()}
+
 @app.post("/api/servers/check_status")
 def trigger_check_all():
     threading.Thread(target=check_all_servers_status, daemon=True).start()
@@ -602,6 +739,19 @@ async def websocket_ajin_endpoint(websocket: WebSocket):
             "data": _enrich_ajin_telemetry(ajin_mgr.get_data()),
             "time": datetime.now().strftime("%H:%M:%S")
         })
+        # Envia status inicial do auto-updater
+        if updater_instance:
+            await websocket.send_json({
+                "type": "update_status",
+                "data": {
+                    "message": getattr(updater_instance, "status_message", "Pronto"),
+                    "is_checking": updater_instance.is_checking,
+                    "is_downloading": updater_instance.is_downloading,
+                    "update_ready": updater_instance.update_ready,
+                    "new_version": updater_instance.new_version,
+                    "current_version": CURRENT_VERSION,
+                }
+            })
         while True:
             # Mantém conexão viva e escuta mensagens do cliente se houver
             data = await websocket.receive_text()
@@ -630,6 +780,7 @@ def _background_heartbeat():
     refresh_countdown = 10
     supabase_sync_counter = 0
     status_check_counter = 0
+    auto_update_counter = 0
 
     # Primeira checagem imediata de conectividade de todos os servidores
     threading.Thread(target=check_all_servers_status, daemon=True).start()
@@ -639,6 +790,7 @@ def _background_heartbeat():
         refresh_countdown -= 1
         supabase_sync_counter += 1
         status_check_counter += 1
+        auto_update_counter += 1
         now_str = datetime.now().strftime("%H:%M:%S")
 
         if refresh_countdown <= 0:
@@ -654,6 +806,15 @@ def _background_heartbeat():
         if status_check_counter >= 30:
             status_check_counter = 0
             threading.Thread(target=check_all_servers_status, daemon=True).start()
+
+        # Checagem inicial de atualização aos 4s e a cada 45 minutos (2700s)
+        if auto_update_counter == 4:
+            if updater_instance:
+                threading.Thread(target=updater_instance.start_background_check, args=(False,), daemon=True).start()
+        elif auto_update_counter >= 2700:
+            auto_update_counter = 5
+            if updater_instance:
+                threading.Thread(target=updater_instance.start_background_check, args=(False,), daemon=True).start()
 
         broadcast_ws({
             "type": "tick",

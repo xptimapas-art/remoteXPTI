@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Play } from 'lucide-react';
 import { TitleBar } from './components/TitleBar';
+import { UpdateBanner } from './components/UpdateBanner';
 import { ServersView } from './components/ServersView';
 import { MapView } from './components/MapView';
 import { AjinView } from './components/AjinView';
@@ -22,6 +23,17 @@ export const App: React.FC = () => {
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [isDev, setIsDev] = useState(false);
   const [rdpToast, setRdpToast] = useState<{ visible: boolean; name: string; host: string } | null>(null);
+  const [updateInfo, setUpdateInfo] = useState({
+    currentVersion: '1.6.30',
+    newVersion: '',
+    updateReady: false,
+    isChecking: false,
+    isDownloading: false,
+    channel: 'public',
+    statusMessage: 'Pronto',
+  });
+  const [isBannerDismissed, setIsBannerDismissed] = useState(false);
+  const [isRestarting, setIsRestarting] = useState(false);
   const [mapTargetLocation, setMapTargetLocation] = useState<{
     lat: number;
     lon: number;
@@ -87,11 +99,34 @@ export const App: React.FC = () => {
     }
   };
 
+  // Carrega status do Auto-Updater
+  const loadUpdateStatus = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/update/status`);
+      if (res.ok) {
+        const data = await res.json();
+        setUpdateInfo((prev) => ({
+          ...prev,
+          currentVersion: data.current_version || prev.currentVersion,
+          newVersion: data.new_version || '',
+          updateReady: Boolean(data.update_ready),
+          isChecking: Boolean(data.is_checking),
+          isDownloading: Boolean(data.is_downloading),
+          channel: data.channel || 'public',
+          statusMessage: data.status_message || '',
+        }));
+      }
+    } catch (e) {
+      console.warn('Erro ao carregar status do updater:', e);
+    }
+  };
+
   // Conexão WebSocket em Tempo Real (Push contínuo a 60 FPS)
   useEffect(() => {
     checkDevStatus();
     loadServers();
     loadTelemetry();
+    loadUpdateStatus();
 
     const connectWebSocket = () => {
       const ws = new WebSocket(WS_URL);
@@ -108,6 +143,12 @@ export const App: React.FC = () => {
             if (typeof msg.countdown === 'number') setCountdown(msg.countdown);
           } else if (msg.type === 'servers_status_updated') {
             loadServers();
+          } else if (
+            msg.type === 'update_status' ||
+            msg.type === 'update_ready' ||
+            msg.type === 'update_channel_changed'
+          ) {
+            loadUpdateStatus();
           }
         } catch (e) {
           console.error('Falha ao processar mensagem do WebSocket:', e);
@@ -222,6 +263,43 @@ export const App: React.FC = () => {
     }
   };
 
+  const handleCheckUpdates = async () => {
+    try {
+      setUpdateInfo((prev) => ({
+        ...prev,
+        isChecking: true,
+        statusMessage: 'Verificando atualizações...',
+      }));
+      await fetch(`${API_BASE}/api/update/check`, { method: 'POST' });
+      await loadUpdateStatus();
+    } catch (e) {
+      console.error('Erro ao verificar atualizações:', e);
+    }
+  };
+
+  const handleRestartUpdate = async () => {
+    try {
+      setIsRestarting(true);
+      await fetch(`${API_BASE}/api/update/restart`, { method: 'POST' });
+    } catch (e) {
+      console.error('Erro ao reiniciar para atualizar:', e);
+      setIsRestarting(false);
+    }
+  };
+
+  const handleChannelChange = async (channel: string) => {
+    try {
+      await fetch(`${API_BASE}/api/update/channel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channel }),
+      });
+      await loadUpdateStatus();
+    } catch (e) {
+      console.error('Erro ao alterar canal de atualização:', e);
+    }
+  };
+
   return (
     <div className="flex flex-col h-screen w-screen bg-[#0d1117] overflow-hidden select-none font-sans">
       {/* Top Header Barra idêntica à referência original */}
@@ -242,7 +320,19 @@ export const App: React.FC = () => {
         onRefresh={handleGlobalRefresh}
         onAddServer={() => setIsAddModalOpen(true)}
         onOpenSettings={() => setIsSettingsModalOpen(true)}
+        updateInfo={updateInfo}
+        onRestartUpdate={handleRestartUpdate}
       />
+
+      {/* Banner Superior de Atualização Pronta */}
+      {updateInfo.updateReady && !isBannerDismissed && (
+        <UpdateBanner
+          newVersion={updateInfo.newVersion}
+          onRestart={handleRestartUpdate}
+          onDismiss={() => setIsBannerDismissed(true)}
+          isRestarting={isRestarting}
+        />
+      )}
 
       {/* Main View Area com transição instantânea e sem sobreposição */}
       <main className="flex-1 flex overflow-hidden relative">
@@ -314,6 +404,10 @@ export const App: React.FC = () => {
         onServersReload={() => {
           loadServers();
         }}
+        updateInfo={updateInfo}
+        onCheckUpdates={handleCheckUpdates}
+        onRestartUpdate={handleRestartUpdate}
+        onChannelChange={handleChannelChange}
       />
 
       {/* Toast Flutuante de Disparo de RDP */}

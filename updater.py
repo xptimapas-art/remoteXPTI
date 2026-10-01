@@ -9,7 +9,10 @@ import subprocess
 import shutil
 from pathlib import Path
 from typing import Optional, Dict, Any, Tuple, Callable, List
-import customtkinter as ctk
+try:
+    import customtkinter as ctk
+except ImportError:
+    ctk = None
 from version import APP_NAME, CURRENT_VERSION, GITHUB_REPO
 from logger import log
 
@@ -63,8 +66,10 @@ class SilentAutoUpdater:
         self.update_ready = False
         self.new_version = ""
         self.downloaded_file: Optional[Path] = None
+        self.status_message = "Pronto"
 
     def notify_status(self, msg: str):
+        self.status_message = msg
         if self.on_status_callback:
             self.on_status_callback(msg)
 
@@ -432,12 +437,35 @@ class SilentAutoUpdater:
         app_dir = current_exe.parent
 
         if not is_frozen:
-            # Modo dev (python main.py): move para dist/RemoteXPTI.exe e reinicia
-            target = Path("dist/RemoteXPTI.exe")
+            # Modo dev / script (Python): atualiza binários compilados se existirem e reinicia
+            repo_dir = Path(__file__).parent.resolve()
+            entry_script = "launch_modern_desktop.py" if (repo_dir / "launch_modern_desktop.py").exists() else "main.py"
+
+            target = repo_dir / "dist" / "RemoteXPTI.exe"
             target.parent.mkdir(exist_ok=True)
-            shutil.move(self.downloaded_file, target)
-            print(f"[SilentUpdater] Atualização copiada para {target}")
-            subprocess.Popen([sys.executable, "main.py"], cwd=str(Path(__file__).parent.resolve()))
+            try:
+                shutil.copy2(self.downloaded_file, target)
+                log.info(f"[SilentUpdater] Atualização copiada para {target}")
+            except Exception as e:
+                log.warning(f"[SilentUpdater] Aviso ao copiar para dist: {e}")
+
+            # Atualiza também a instalação local em AppData se existir
+            local_app_exe = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))) / "Programs" / "RemoteXPTI" / "RemoteXPTI.exe"
+            if local_app_exe.parent.exists():
+                try:
+                    shutil.copy2(self.downloaded_file, local_app_exe)
+                    log.info(f"[SilentUpdater] Executável local atualizado em {local_app_exe}")
+                except Exception as e:
+                    log.warning(f"[SilentUpdater] Aviso ao copiar para {local_app_exe}: {e}")
+
+            py_bin = sys.executable
+            pyw_bin = Path(sys.executable).parent / "pythonw.exe"
+            if pyw_bin.exists():
+                py_bin = str(pyw_bin)
+
+            creation_flags = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
+            log.info(f"[SilentUpdater] Reiniciando aplicativo via {entry_script}...")
+            subprocess.Popen([py_bin, entry_script], cwd=str(repo_dir), creationflags=creation_flags)
             os._exit(0)
 
         # Modo executável compilado (.exe):
@@ -657,52 +685,56 @@ Stop-Process -Id $PID -Force
         os._exit(0)
 
 
-class UpdatePromptBanner(ctk.CTkFrame):
-    """Banner visual no topo do app avisando que o update está baixado e pronto para reiniciar."""
+if ctk is not None:
+    class UpdatePromptBanner(ctk.CTkFrame):
+        """Banner visual no topo do app avisando que o update está baixado e pronto para reiniciar."""
 
-    def __init__(self, parent, new_version: str, on_restart_command, on_dismiss=None):
-        super().__init__(
-            parent,
-            height=42,
-            corner_radius=8,
-            fg_color=("#0052a3", "#123456"),
-            border_width=1,
-            border_color="#0080ff"
-        )
-        self.pack_propagate(False)
+        def __init__(self, parent, new_version: str, on_restart_command, on_dismiss=None):
+            super().__init__(
+                parent,
+                height=42,
+                corner_radius=8,
+                fg_color=("#0052a3", "#123456"),
+                border_width=1,
+                border_color="#0080ff"
+            )
+            self.pack_propagate(False)
 
-        # Texto de aviso
-        lbl = ctk.CTkLabel(
-            self,
-            text=f"🚀 Nova versão v{new_version} pronta para instalar!",
-            font=ctk.CTkFont(size=12, weight="bold"),
-            text_color="#ffffff"
-        )
-        lbl.pack(side="left", padx=16)
+            # Texto de aviso
+            lbl = ctk.CTkLabel(
+                self,
+                text=f"🚀 Nova versão v{new_version} pronta para instalar!",
+                font=ctk.CTkFont(size=12, weight="bold"),
+                text_color="#ffffff"
+            )
+            lbl.pack(side="left", padx=16)
 
-        # Botão Fechar / Mais tarde
-        btn_close = ctk.CTkButton(
-            self,
-            text="✕",
-            width=28,
-            height=26,
-            fg_color="transparent",
-            hover_color=("#003d7a", "#1a4670"),
-            text_color="#ffffff",
-            font=ctk.CTkFont(size=11, weight="bold"),
-            command=on_dismiss or self.destroy
-        )
-        btn_close.pack(side="right", padx=(4, 10))
+            # Botão Fechar / Mais tarde
+            btn_close = ctk.CTkButton(
+                self,
+                text="✕",
+                width=28,
+                height=26,
+                fg_color="transparent",
+                hover_color=("#003d7a", "#1a4670"),
+                text_color="#ffffff",
+                font=ctk.CTkFont(size=11, weight="bold"),
+                command=on_dismiss or self.destroy
+            )
+            btn_close.pack(side="right", padx=(4, 10))
 
-        # Botão Reiniciar Agora
-        btn_restart = ctk.CTkButton(
-            self,
-            text="🔄 Reiniciar para Atualizar",
-            height=28,
-            fg_color="#00a8ff",
-            hover_color="#0088cc",
-            text_color="#ffffff",
-            font=ctk.CTkFont(size=11, weight="bold"),
-            command=on_restart_command
-        )
-        btn_restart.pack(side="right", padx=6)
+            # Botão Reiniciar Agora
+            btn_restart = ctk.CTkButton(
+                self,
+                text="🔄 Reiniciar para Atualizar",
+                height=28,
+                fg_color="#00a8ff",
+                hover_color="#0088cc",
+                text_color="#ffffff",
+                font=ctk.CTkFont(size=11, weight="bold"),
+                command=on_restart_command
+            )
+            btn_restart.pack(side="right", padx=6)
+else:
+    class UpdatePromptBanner:
+        pass
