@@ -569,7 +569,7 @@ def apply_update_restart():
         return {"status": "downloading", "message": "O arquivo de atualização não foi encontrado no disco. Baixando novamente..."}
 
     def _do_restart():
-        time.sleep(0.4)
+        time.sleep(0.1)
         updater_instance.apply_update_and_restart(cleanup_func=_cleanup_before_restart)
 
     threading.Thread(target=_do_restart, daemon=True).start()

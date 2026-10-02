@@ -545,8 +545,14 @@ $script:isApplying = $false
 
 $timer.Add_Tick({{
     $script:ticks++
+    if ($script:ticks -eq 1) {{
+        $statusLabel.Text = "Liberando arquivos e processos anteriores..."
+        $form.Refresh()
+    }}
     if ($script:ticks -eq 2) {{
         Write-Log "Encerrando processos RemoteXPTI e Edge auxiliares..."
+        $statusLabel.Text = "Instalando versão v{self.new_version}..."
+        $form.Refresh()
         try {{
             Stop-Process -Id {current_pid} -Force -ErrorAction SilentlyContinue
         }} catch {{}}
@@ -719,26 +725,30 @@ Stop-Process -Id $PID -Force
 """
         ps1_path.write_text(ps_script, encoding="utf-8-sig")
 
-        creation_flags = 0
-        if sys.platform == "win32":
-            creation_flags = 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
         try:
-            subprocess.Popen(
-                [
-                    "powershell.exe",
-                    "-NoProfile",
-                    "-ExecutionPolicy", "Bypass",
-                    "-File", str(ps1_path)
-                ],
-                creationflags=creation_flags
-            )
-            log.info(f"[SilentUpdater] Script de atualização visual disparado com sucesso: {ps1_path}")
+            # Dispara o atualizador visual via WMI (Win32_Process.Create)
+            # para ser 100% independente do processo pai e sobreviver ao encerramento imediato
+            cmd = f'wmic process call create "powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File \\"{str(ps1_path)}\\""'
+            subprocess.run(cmd, shell=True, capture_output=True)
+            log.info(f"[SilentUpdater] Script de atualização visual disparado com sucesso via WMI: {ps1_path}")
         except Exception as e:
-            log.error(f"[SilentUpdater] Erro ao disparar tela de atualização: {e}")
+            log.error(f"[SilentUpdater] Erro ao disparar tela de atualização via WMI: {e}")
+            try:
+                subprocess.Popen(
+                    [
+                        "powershell.exe",
+                        "-NoProfile",
+                        "-WindowStyle", "Hidden",
+                        "-ExecutionPolicy", "Bypass",
+                        "-File", str(ps1_path)
+                    ]
+                )
+            except Exception:
+                pass
 
-        # Aguarda brevemente para que o Windows inicialize o processo filho do PowerShell
-        # antes do processo pai terminar, evitando abortos no scheduler do Windows
-        time.sleep(0.8)
+        # Fecha a aplicação atual em 250ms para que a janela antiga desapareça
+        # e o usuário veja imediatamente apenas o quadrado central na tela
+        time.sleep(0.25)
         os._exit(0)
 
 
