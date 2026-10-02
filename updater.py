@@ -399,7 +399,9 @@ class SilentAutoUpdater:
     def apply_update_and_restart(self, cleanup_func: Optional[Callable[[], None]] = None):
         """Substitui o executável atual e reinicia o aplicativo imediatamente de forma limpa."""
         if not self.downloaded_file or not self.downloaded_file.exists():
-            log.warning("[SilentUpdater] apply_update_and_restart chamado mas downloaded_file não existe.")
+            log.warning("[SilentUpdater] apply_update_and_restart chamado mas downloaded_file não existe. Disparando novo download...")
+            self.update_ready = False
+            threading.Thread(target=self.start_background_check, args=(True,), daemon=True).start()
             return
 
         self.update_ready = False
@@ -550,6 +552,12 @@ $timer.Add_Tick({{
         }} catch {{}}
         try {{
             Get-Process -Name "RemoteXPTI" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+        }} catch {{}}
+        try {{
+            $conn = Get-NetTCPConnection -LocalPort 8765 -ErrorAction SilentlyContinue
+            if ($conn -and $conn.OwningProcess) {{
+                Stop-Process -Id $conn.OwningProcess -Force -ErrorAction SilentlyContinue
+            }}
         }} catch {{}}
         try {{
             $cache = (Join-Path $env:LOCALAPPDATA "RemoteXPTI\\map_cache").ToLower()

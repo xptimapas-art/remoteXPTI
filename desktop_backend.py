@@ -562,8 +562,11 @@ def apply_update_restart():
     global updater_instance
     if not updater_instance:
         raise HTTPException(status_code=500, detail="Updater não inicializado")
-    if not updater_instance.update_ready:
-        raise HTTPException(status_code=400, detail="Nenhuma atualização pronta para instalar")
+    if not updater_instance.update_ready or not updater_instance.downloaded_file or not updater_instance.downloaded_file.exists():
+        log.warning("[DesktopBackend] Tentativa de reiniciar mas o arquivo baixado não está em disco. Disparando novo download...")
+        updater_instance.update_ready = False
+        threading.Thread(target=updater_instance.start_background_check, args=(True,), daemon=True).start()
+        return {"status": "downloading", "message": "O arquivo de atualização não foi encontrado no disco. Baixando novamente..."}
 
     def _do_restart():
         time.sleep(0.4)
@@ -571,6 +574,36 @@ def apply_update_restart():
 
     threading.Thread(target=_do_restart, daemon=True).start()
     return {"status": "restarting", "message": "Reiniciando aplicação para atualizar..."}
+
+@app.get("/api/logs/path")
+def get_logs_path():
+    log_dir = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))) / "RemoteXPTI" / "logs"
+    log_file = log_dir / "remotexpti.log"
+    return {"dir": str(log_dir), "file": str(log_file), "exists": log_file.exists()}
+
+@app.post("/api/logs/open")
+def open_logs_folder():
+    log_dir = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))) / "RemoteXPTI" / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    if hasattr(os, "startfile"):
+        try:
+            os.startfile(str(log_dir))
+        except Exception as e:
+            log.warning(f"Erro ao abrir pasta de logs: {e}")
+    return {"status": "ok", "path": str(log_dir)}
+
+@app.get("/api/logs/tail")
+def get_logs_tail(lines: int = 50):
+    log_dir = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))) / "RemoteXPTI" / "logs"
+    log_file = log_dir / "remotexpti.log"
+    if not log_file.exists():
+        return {"lines": []}
+    try:
+        with open(log_file, "r", encoding="utf-8", errors="ignore") as f:
+            all_lines = f.readlines()
+            return {"lines": all_lines[-lines:]}
+    except Exception as e:
+        return {"error": str(e), "lines": []}
 
 @app.get("/api/update/releases")
 def get_all_releases():
