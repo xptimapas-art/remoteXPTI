@@ -671,23 +671,17 @@ $timer.Add_Tick({{
                 $psi.UseShellExecute = $true
                 [System.Diagnostics.Process]::Start($psi) | Out-Null
             }} else {{
-                $batPath = '{str(run_bat)}'
-                if (Test-Path $batPath) {{
-                    $psi = New-Object System.Diagnostics.ProcessStartInfo
-                    $psi.FileName = $batPath
-                    $psi.WorkingDirectory = '{str(repo_dir)}'
-                    $psi.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
-                    $psi.UseShellExecute = $true
-                    [System.Diagnostics.Process]::Start($psi) | Out-Null
-                }} else {{
-                    $pywPath = '{str(pyw_bin if pyw_bin.exists() else current_exe)}'
-                    $scriptPath = '{str(launch_script)}'
+                $pywPath = '{str(pyw_bin if pyw_bin.exists() else current_exe)}'
+                $scriptPath = '{str(launch_script)}'
+                if (Test-Path $scriptPath) {{
                     $psi = New-Object System.Diagnostics.ProcessStartInfo
                     $psi.FileName = $pywPath
                     $psi.Arguments = "`"$scriptPath`""
                     $psi.WorkingDirectory = '{str(repo_dir)}'
                     $psi.UseShellExecute = $true
                     [System.Diagnostics.Process]::Start($psi) | Out-Null
+                }} elseif (Test-Path '{str(run_bat)}') {{
+                    Start-Process -FilePath "cmd.exe" -ArgumentList "/c `"{str(run_bat)}`"" -WorkingDirectory '{str(repo_dir)}' -WindowStyle Hidden
                 }}
             }}
             
@@ -742,7 +736,9 @@ Stop-Process -Id $PID -Force
         except Exception as e:
             log.error(f"[SilentUpdater] Erro ao disparar tela de atualização: {e}")
 
-        # Encerra o processo atual imediatamente
+        # Aguarda brevemente para que o Windows inicialize o processo filho do PowerShell
+        # antes do processo pai terminar, evitando abortos no scheduler do Windows
+        time.sleep(0.8)
         os._exit(0)
 
 

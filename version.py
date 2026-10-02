@@ -1,11 +1,10 @@
 """
-ConfiguraÃ§Ãµes internas de versÃ£o e repositÃ³rio do RemoteXPTI.
-A fonte de atualizaÃ§Ã£o Ã© fixa e embutida no aplicativo.
+Configurações internas de versão e repositório do RemoteXPTI.
+A fonte de atualização é fixa e embutida no aplicativo.
 """
 
 APP_NAME = "RemoteXPTI"
-CURRENT_VERSION = "1.6.34"
+CURRENT_VERSION = "1.6.35"
 
-# RepositÃ³rio GitHub oficial fixo do projeto (nÃ£o editÃ¡vel pelo cliente final)
+# Repositório GitHub oficial fixo do projeto (não editável pelo cliente final)
 GITHUB_REPO = "xptimapas-art/remoteXPTI"
-
