@@ -705,6 +705,8 @@ Stop-Process -Id $PID -Force
         ps1_path.write_text(ps_script, encoding="utf-8-sig")
 
         creation_flags = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
+        if sys.platform == "win32":
+            creation_flags |= 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
         try:
             subprocess.Popen(
                 [
