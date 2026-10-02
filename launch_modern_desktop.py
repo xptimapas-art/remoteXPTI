@@ -3,12 +3,14 @@ Inicializador Desktop Moderno do RemoteXPTI (Engine Edge WebView2 + React 18 + F
 Executa o backend assíncrono em segundo plano e abre a janela gráfica nativa com aceleração de hardware.
 """
 
+import os
 import sys
 import threading
 import time
 import urllib.request
 from pathlib import Path
 import webview
+import psutil
 
 import desktop_backend
 
@@ -53,6 +55,18 @@ def focus_existing_instance(window_title: str) -> bool:
         import ctypes
         hwnd = ctypes.windll.user32.FindWindowW(None, window_title)
         if hwnd:
+            proc_id = ctypes.c_ulong()
+            ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(proc_id))
+            current_pid = os.getpid()
+            if proc_id.value == 0 or proc_id.value == current_pid:
+                return False
+            try:
+                proc = psutil.Process(proc_id.value)
+                if not proc.is_running() or proc.status() == psutil.STATUS_ZOMBIE:
+                    return False
+            except Exception:
+                return False
+
             SW_RESTORE = 9
             ctypes.windll.user32.ShowWindow(hwnd, SW_RESTORE)
             ctypes.windll.user32.SetForegroundWindow(hwnd)

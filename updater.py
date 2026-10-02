@@ -434,45 +434,25 @@ class SilentAutoUpdater:
 
         is_frozen = getattr(sys, "frozen", False)
         current_exe = Path(sys.executable).resolve()
-        app_dir = current_exe.parent
+        repo_dir = Path(__file__).parent.resolve()
+        app_dir = current_exe.parent if is_frozen else repo_dir
 
-        if not is_frozen:
-            # Modo dev / script (Python): atualiza binários compilados se existirem e reinicia
-            repo_dir = Path(__file__).parent.resolve()
-            entry_script = "launch_modern_desktop.py" if (repo_dir / "launch_modern_desktop.py").exists() else "main.py"
+        # Caminho dos alvos de atualização
+        dist_exe = repo_dir / "dist" / "RemoteXPTI.exe"
+        local_app_exe = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))) / "Programs" / "RemoteXPTI" / "RemoteXPTI.exe"
+        version_file = repo_dir / "version.py"
+        run_bat = repo_dir / "run_modern.bat"
+        pyw_bin = Path(sys.executable).parent / "pythonw.exe"
+        launch_script = repo_dir / "launch_modern_desktop.py"
+        icon_path = repo_dir / "imagens" / "app_icon.png"
+        if not icon_path.exists():
+            icon_path = app_dir / "imagens" / "app_icon.png"
 
-            target = repo_dir / "dist" / "RemoteXPTI.exe"
-            target.parent.mkdir(exist_ok=True)
-            try:
-                shutil.copy2(self.downloaded_file, target)
-                log.info(f"[SilentUpdater] Atualização copiada para {target}")
-            except Exception as e:
-                log.warning(f"[SilentUpdater] Aviso ao copiar para dist: {e}")
-
-            # Atualiza também a instalação local em AppData se existir
-            local_app_exe = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))) / "Programs" / "RemoteXPTI" / "RemoteXPTI.exe"
-            if local_app_exe.parent.exists():
-                try:
-                    shutil.copy2(self.downloaded_file, local_app_exe)
-                    log.info(f"[SilentUpdater] Executável local atualizado em {local_app_exe}")
-                except Exception as e:
-                    log.warning(f"[SilentUpdater] Aviso ao copiar para {local_app_exe}: {e}")
-
-            py_bin = sys.executable
-            pyw_bin = Path(sys.executable).parent / "pythonw.exe"
-            if pyw_bin.exists():
-                py_bin = str(pyw_bin)
-
-            creation_flags = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
-            log.info(f"[SilentUpdater] Reiniciando aplicativo via {entry_script}...")
-            subprocess.Popen([py_bin, entry_script], cwd=str(repo_dir), creationflags=creation_flags)
-            os._exit(0)
-
-        # Modo executável compilado (.exe):
         import tempfile
         temp_dir = Path(tempfile.gettempdir())
         ps1_path = temp_dir / "remotexpti_update_gui.ps1"
         current_pid = os.getpid()
+        is_frozen_ps = "$true" if is_frozen else "$false"
 
         ps_script = f"""# Atualizador com Tela de Carregamento Moderna (Sem janelas de CMD)
 Add-Type -AssemblyName System.Windows.Forms
@@ -486,6 +466,7 @@ $form.Size = New-Object System.Drawing.Size(460, 290)
 $form.StartPosition = "CenterScreen"
 $form.FormBorderStyle = "None"
 $form.TopMost = $true
+$form.ShowInTaskbar = $true
 $form.BackColor = [System.Drawing.Color]::FromArgb(18, 19, 24)
 $form.ForeColor = [System.Drawing.Color]::White
 
@@ -498,7 +479,7 @@ $form.Add_Paint({{
     $e.Graphics.DrawEllipse($penHalo, 186, 20, 88, 88)
 }})
 
-$pngPath = Join-Path '{str(app_dir)}' "imagens\\app_icon.png"
+$pngPath = '{str(icon_path)}'
 if (Test-Path $pngPath) {{
     try {{
         $pbox = New-Object System.Windows.Forms.PictureBox
@@ -583,39 +564,70 @@ $timer.Add_Tick({{
     if ($script:ticks -ge 4 -and -not $script:isApplying) {{
         $script:isApplying = $true
         $copied = $false
+        $isFrozen = {is_frozen_ps}
         $destPath = '{str(current_exe)}'
         $sourcePath = '{str(self.downloaded_file)}'
-        $oldPath = "$destPath.old"
+        $distPath = '{str(dist_exe)}'
+        $localAppPath = '{str(local_app_exe)}'
+        $versionFilePath = '{str(version_file)}'
 
-        for ($i = 0; $i -lt 30; $i++) {{
-            try {{
-                # Garante que nenhum processo RemoteXPTI está ativo segurando o executável
-                Get-Process -Name "RemoteXPTI" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+        if ($isFrozen) {{
+            $oldPath = "$destPath.old"
+            for ($i = 0; $i -lt 30; $i++) {{
+                try {{
+                    Get-Process -Name "RemoteXPTI" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 
-                if (Test-Path $oldPath) {{
-                    Remove-Item -Path $oldPath -Force -ErrorAction SilentlyContinue
-                }}
-                if (Test-Path $destPath) {{
-                    try {{
-                        Remove-Item -Path $destPath -Force -ErrorAction Stop
-                    }} catch {{
-                        Move-Item -Path $destPath -Destination $oldPath -Force -ErrorAction SilentlyContinue
+                    if (Test-Path $oldPath) {{
+                        Remove-Item -Path $oldPath -Force -ErrorAction SilentlyContinue
                     }}
+                    if (Test-Path $destPath) {{
+                        try {{
+                            Remove-Item -Path $destPath -Force -ErrorAction Stop
+                        }} catch {{
+                            Move-Item -Path $destPath -Destination $oldPath -Force -ErrorAction SilentlyContinue
+                        }}
+                    }}
+                    Copy-Item -Path $sourcePath -Destination $destPath -Force -ErrorAction Stop
+                    Remove-Item -Path $sourcePath -Force -ErrorAction SilentlyContinue
+                    if (Test-Path $oldPath) {{
+                        Remove-Item -Path $oldPath -Force -ErrorAction SilentlyContinue
+                    }}
+                    $copied = $true
+                    Write-Log "Executável compilado substituído com sucesso na tentativa $i!"
+                    break
+                }} catch {{
+                    $err = $_.Exception.Message
+                    Write-Log "Tentativa $i falhou ao substituir executável: $err"
+                    Start-Sleep -Milliseconds 350
                 }}
-                Copy-Item -Path $sourcePath -Destination $destPath -Force -ErrorAction Stop
+            }}
+        }} else {{
+            # Modo Dev / Source: atualiza binários em dist e em AppData, e version.py
+            try {{
+                $distDir = Split-Path -Parent $distPath
+                if (-not (Test-Path $distDir)) {{ New-Item -ItemType Directory -Path $distDir -Force | Out-Null }}
+                Copy-Item -Path $sourcePath -Destination $distPath -Force -ErrorAction SilentlyContinue
+                Write-Log "Binário dist atualizado: $distPath"
+
+                $localDir = Split-Path -Parent $localAppPath
+                if (-not (Test-Path $localDir)) {{ New-Item -ItemType Directory -Path $localDir -Force | Out-Null }}
+                Copy-Item -Path $sourcePath -Destination $localAppPath -Force -ErrorAction SilentlyContinue
+                Write-Log "Binário local atualizado: $localAppPath"
+
+                if (Test-Path $versionFilePath) {{
+                    $raw = Get-Content -Path $versionFilePath -Raw
+                    $raw = $raw -replace 'CURRENT_VERSION\\s*=\\s*"[^"]+"', 'CURRENT_VERSION = "{self.new_version}"'
+                    Set-Content -Path $versionFilePath -Value $raw -Encoding UTF8
+                    Write-Log "version.py atualizado para {self.new_version}"
+                }}
                 Remove-Item -Path $sourcePath -Force -ErrorAction SilentlyContinue
-                if (Test-Path $oldPath) {{
-                    Remove-Item -Path $oldPath -Force -ErrorAction SilentlyContinue
-                }}
                 $copied = $true
-                Write-Log "Executável substituído com sucesso na tentativa $i!"
-                break
             }} catch {{
                 $err = $_.Exception.Message
-                Write-Log "Tentativa $i falhou ao substituir executável: $err"
-                Start-Sleep -Milliseconds 350
+                Write-Log "Erro ao atualizar em modo dev: $err"
             }}
         }}
+
         if ($copied) {{
             $timer.Stop()
             Write-Log "Iniciando nova versão v{self.new_version}..."
@@ -629,12 +641,34 @@ $timer.Add_Tick({{
             $env:PYINSTALLER_RESET_ENVIRONMENT = "1"
             $env:_MEIPASS2 = $null
             $env:_MEIPASS = $null
+
+            Start-Sleep -Milliseconds 700
             
-            $psi = New-Object System.Diagnostics.ProcessStartInfo
-            $psi.FileName = '{str(current_exe)}'
-            $psi.WorkingDirectory = '{str(app_dir)}'
-            $psi.UseShellExecute = $true
-            [System.Diagnostics.Process]::Start($psi) | Out-Null
+            if ($isFrozen) {{
+                $psi = New-Object System.Diagnostics.ProcessStartInfo
+                $psi.FileName = '{str(current_exe)}'
+                $psi.WorkingDirectory = '{str(app_dir)}'
+                $psi.UseShellExecute = $true
+                [System.Diagnostics.Process]::Start($psi) | Out-Null
+            }} else {{
+                $batPath = '{str(run_bat)}'
+                if (Test-Path $batPath) {{
+                    $psi = New-Object System.Diagnostics.ProcessStartInfo
+                    $psi.FileName = $batPath
+                    $psi.WorkingDirectory = '{str(repo_dir)}'
+                    $psi.UseShellExecute = $true
+                    [System.Diagnostics.Process]::Start($psi) | Out-Null
+                }} else {{
+                    $pywPath = '{str(pyw_bin if pyw_bin.exists() else current_exe)}'
+                    $scriptPath = '{str(launch_script)}'
+                    $psi = New-Object System.Diagnostics.ProcessStartInfo
+                    $psi.FileName = $pywPath
+                    $psi.Arguments = "`"$scriptPath`""
+                    $psi.WorkingDirectory = '{str(repo_dir)}'
+                    $psi.UseShellExecute = $true
+                    [System.Diagnostics.Process]::Start($psi) | Out-Null
+                }}
+            }}
             
             Start-Sleep -Milliseconds 400
             $form.Hide()
@@ -659,7 +693,11 @@ $timer.Add_Tick({{
     }}
 }})
 
-$form.Add_Shown({{ $timer.Start() }})
+$form.Add_Shown({{
+    $form.Activate()
+    $form.BringToFront()
+    $timer.Start()
+}})
 [System.Windows.Forms.Application]::Run($form)
 Remove-Item -Path '{str(ps1_path)}' -Force -ErrorAction SilentlyContinue
 Stop-Process -Id $PID -Force
@@ -672,14 +710,14 @@ Stop-Process -Id $PID -Force
                 [
                     "powershell.exe",
                     "-NoProfile",
-                    "-WindowStyle", "Hidden",
                     "-ExecutionPolicy", "Bypass",
                     "-File", str(ps1_path)
                 ],
                 creationflags=creation_flags
             )
+            log.info(f"[SilentUpdater] Script de atualização visual disparado com sucesso: {ps1_path}")
         except Exception as e:
-            print(f"[SilentUpdater] Erro ao disparar tela de atualização: {e}")
+            log.error(f"[SilentUpdater] Erro ao disparar tela de atualização: {e}")
 
         # Encerra o processo atual imediatamente
         os._exit(0)
