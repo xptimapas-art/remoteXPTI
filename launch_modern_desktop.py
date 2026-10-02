@@ -1,8 +1,4 @@
-"""
-Inicializador Desktop Moderno do RemoteXPTI (Engine Edge WebView2 + React 18 + FastAPI).
-Executa o backend assíncrono em segundo plano e abre a janela gráfica nativa com aceleração de hardware.
-"""
-
+import ctypes
 import os
 import sys
 import threading
@@ -10,7 +6,6 @@ import time
 import urllib.request
 from pathlib import Path
 import webview
-import psutil
 
 import desktop_backend
 
@@ -50,9 +45,25 @@ def is_backend_running(timeout=0.6) -> bool:
         pass
     return False
 
+def is_pid_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    SYNCHRONIZE = 0x00100000
+    h_proc = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, False, pid)
+    if not h_proc:
+        return False
+    try:
+        exit_code = ctypes.c_ulong()
+        if ctypes.windll.kernel32.GetExitCodeProcess(h_proc, ctypes.byref(exit_code)):
+            STILL_ACTIVE = 259
+            return exit_code.value == STILL_ACTIVE
+        return False
+    finally:
+        ctypes.windll.kernel32.CloseHandle(h_proc)
+
 def focus_existing_instance(window_title: str) -> bool:
     try:
-        import ctypes
         hwnd = ctypes.windll.user32.FindWindowW(None, window_title)
         if hwnd:
             proc_id = ctypes.c_ulong()
@@ -60,11 +71,7 @@ def focus_existing_instance(window_title: str) -> bool:
             current_pid = os.getpid()
             if proc_id.value == 0 or proc_id.value == current_pid:
                 return False
-            try:
-                proc = psutil.Process(proc_id.value)
-                if not proc.is_running() or proc.status() == psutil.STATUS_ZOMBIE:
-                    return False
-            except Exception:
+            if not is_pid_alive(proc_id.value):
                 return False
 
             SW_RESTORE = 9
