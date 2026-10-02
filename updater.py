@@ -676,6 +676,7 @@ $timer.Add_Tick({{
                     $psi = New-Object System.Diagnostics.ProcessStartInfo
                     $psi.FileName = $batPath
                     $psi.WorkingDirectory = '{str(repo_dir)}'
+                    $psi.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
                     $psi.UseShellExecute = $true
                     [System.Diagnostics.Process]::Start($psi) | Out-Null
                 }} else {{
