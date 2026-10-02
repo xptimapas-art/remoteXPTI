@@ -560,6 +560,18 @@ $timer.Add_Tick({{
             }}
         }} catch {{}}
         try {{
+            Get-CimInstance Win32_Process -Filter "name = 'pythonw.exe' or name = 'python.exe'" | Where-Object {{
+                $_.CommandLine -and $_.CommandLine.Contains("launch_modern_desktop.py")
+            }} | ForEach-Object {{
+                Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+            }}
+        }} catch {{}}
+        try {{
+            Get-Process -Name "pythonw", "python" -ErrorAction SilentlyContinue | Where-Object {{
+                $_.MainWindowTitle -like "*RemoteXPTI*"
+            }} | Stop-Process -Force -ErrorAction SilentlyContinue
+        }} catch {{}}
+        try {{
             $cache = (Join-Path $env:LOCALAPPDATA "RemoteXPTI\\map_cache").ToLower()
             Get-CimInstance Win32_Process -Filter "name = 'msedge.exe'" | Where-Object {{
                 ($_.CommandLine -and $_.CommandLine.ToLower().Contains($cache)) -or
@@ -712,9 +724,9 @@ Stop-Process -Id $PID -Force
 """
         ps1_path.write_text(ps_script, encoding="utf-8-sig")
 
-        creation_flags = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
+        creation_flags = 0
         if sys.platform == "win32":
-            creation_flags |= 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+            creation_flags = 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
         try:
             subprocess.Popen(
                 [
