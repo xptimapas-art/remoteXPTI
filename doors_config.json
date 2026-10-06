@@ -1,0 +1,21 @@
+{
+  "enabled": true,
+  "feedback_sound": true,
+  "feedback_notification": true,
+  "user_code": "BxLxxMC",
+  "doors": [
+    {
+      "id": "door_operacional",
+      "name": "Porta Operacional",
+      "device_name": "Porta sala Operacional",
+      "device_id": "eb4b91aa4fcc8a2788lfde",
+      "home_id": "100383937",
+      "scene_id": "o34EQAoAQQniX6Vk",
+      "scene_name": "Porta operacional",
+      "mode": "cloud_scene",
+      "hotkey": "PageDown",
+      "enabled": true,
+      "last_triggered": null
+    }
+  ]
+}

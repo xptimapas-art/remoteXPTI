@@ -68,3 +68,22 @@ O **RemoteXPTI** resolve isso de forma nativa e limpa:
    mstsc /v:<IP_DO_SERVIDOR>
    ```
 3. O cliente RDP detecta a chave `TERMSRV/` e realiza o login automático sem abrir caixas de diálogo solicitando senha.
+
+---
+
+## 🛠️ Diagnóstico Remoto de Servidores via CLI
+
+O RemoteXPTI inclui uma ferramenta CLI para auditar a integridade, memória RAM, processos e discos de qualquer servidor cadastrado remotamente:
+
+```bash
+# Diagnóstico básico (RAM, CPU, discos e top processos)
+python diagnostico_servidor.py --server "Lages"
+
+# Diagnóstico aprofundado (VSS Writers e histórico de OutOfMemory)
+python diagnostico_servidor.py --server "Lages" --deep
+
+# Listar todos os 56 servidores disponíveis
+python diagnostico_servidor.py --list
+```
+Consulte o arquivo [`DIAGNOSTICO_SERVIDORES.md`](file:///c:/Users/XPTI/Documents/vscode/remoteXPTI/DIAGNOSTICO_SERVIDORES.md) para detalhes técnicos.
+

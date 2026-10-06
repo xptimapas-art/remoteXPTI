@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Play } from 'lucide-react';
+import { Play, DoorClosed, DoorOpen } from 'lucide-react';
 import { TitleBar } from './components/TitleBar';
 import { UpdateBanner } from './components/UpdateBanner';
 import { ServersView } from './components/ServersView';
 import { MapView } from './components/MapView';
 import { AjinView } from './components/AjinView';
+import { DoorsView } from './components/DoorsView';
+import { DoorsSettingsModal } from './components/DoorsSettingsModal';
 import { AddServerModal } from './components/AddServerModal';
 import { EditServerModal } from './components/EditServerModal';
 import { SettingsModal } from './components/SettingsModal';
@@ -13,7 +15,7 @@ const API_BASE = 'http://127.0.0.1:8765';
 const WS_URL = 'ws://127.0.0.1:8765/ws/ajin';
 
 export const App: React.FC = () => {
-  const [currentTab, setCurrentTab] = useState<'servers' | 'map' | 'ajin'>('servers');
+  const [currentTab, setCurrentTab] = useState<'servers' | 'map' | 'ajin' | 'doors'>('servers');
   const [servers, setServers] = useState<any[]>([]);
   const [groups, setGroups] = useState<string[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -21,8 +23,10 @@ export const App: React.FC = () => {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [editingServerId, setEditingServerId] = useState<string | null>(null);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [isDoorsSettingsOpen, setIsDoorsSettingsOpen] = useState(false);
   const [isDev, setIsDev] = useState(false);
   const [rdpToast, setRdpToast] = useState<{ visible: boolean; name: string; host: string } | null>(null);
+  const [doorToast, setDoorToast] = useState<{ visible: boolean; name: string; success: boolean; message: string } | null>(null);
   const [updateInfo, setUpdateInfo] = useState({
     currentVersion: '1.6.30',
     newVersion: '',
@@ -372,6 +376,25 @@ export const App: React.FC = () => {
             onLocateOnMap={handleLocateOnuOnMap}
           />
         )}
+
+        {currentTab === 'doors' && (
+          <DoorsView
+            isDev={isDev}
+            onOpenDevLogin={() => setIsSettingsModalOpen(true)}
+            onOpenDoorsSettings={() => setIsDoorsSettingsOpen(true)}
+            onDoorTriggered={(name, success, msg) => {
+              setDoorToast({
+                visible: true,
+                name,
+                success,
+                message: msg,
+              });
+              setTimeout(() => {
+                setDoorToast(null);
+              }, 4500);
+            }}
+          />
+        )}
       </main>
 
       {/* Modais de Ação */}
@@ -408,6 +431,12 @@ export const App: React.FC = () => {
         onCheckUpdates={handleCheckUpdates}
         onRestartUpdate={handleRestartUpdate}
         onChannelChange={handleChannelChange}
+        onOpenDoorsSettings={() => setIsDoorsSettingsOpen(true)}
+      />
+
+      <DoorsSettingsModal
+        isOpen={isDoorsSettingsOpen}
+        onClose={() => setIsDoorsSettingsOpen(false)}
       />
 
       {/* Toast Flutuante de Disparo de RDP */}
@@ -425,6 +454,48 @@ export const App: React.FC = () => {
             </div>
             <span className="text-[11px] text-[#8e92a0] mt-1">
               Injetando credenciais via cmdkey e abrindo MSTSC nativo...
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Toast Flutuante de Disparo de Portão Tuya */}
+      {doorToast && (
+        <div
+          className={`fixed bottom-6 right-6 z-[200] bg-[#16171d] border shadow-2xl rounded-xl p-4 flex items-center space-x-3.5 animate-in slide-in-from-bottom-5 duration-200 ${
+            doorToast.success ? 'border-emerald-500/50' : 'border-rose-500/50'
+          }`}
+        >
+          <div
+            className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${
+              doorToast.success
+                ? 'bg-emerald-600/20 border border-emerald-500/40 text-emerald-400'
+                : 'bg-rose-600/20 border border-rose-500/40 text-rose-400'
+            }`}
+          >
+            {doorToast.success ? (
+              <DoorOpen className="w-5 h-5" />
+            ) : (
+              <DoorClosed className="w-5 h-5" />
+            )}
+          </div>
+          <div className="flex flex-col">
+            <div className="flex items-center space-x-2">
+              <span className="text-xs font-bold text-white leading-tight">
+                {doorToast.name}
+              </span>
+              <span
+                className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${
+                  doorToast.success
+                    ? 'text-emerald-400 bg-emerald-950/80 border-emerald-800/40'
+                    : 'text-rose-400 bg-rose-950/80 border-rose-800/40'
+                }`}
+              >
+                {doorToast.success ? 'ABERTO' : 'FALHA'}
+              </span>
+            </div>
+            <span className="text-[11px] text-[#8e92a0] mt-1">
+              {doorToast.message}
             </span>
           </div>
         </div>

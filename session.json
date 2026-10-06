@@ -1,0 +1,13 @@
+{
+  "client_id": "HA_3y9q4ak7g4ephrvke",
+  "user_code": "BxLxxMC",
+  "terminal_id": "1791217958486z8ypb5",
+  "endpoint": "https://apigw.tuyaus.com",
+  "token_info": {
+    "t": 1791217958512,
+    "uid": "az1677537057573LxxMC",
+    "expire_time": 7200,
+    "access_token": "fd08db26bec537179f777e1e365cd943",
+    "refresh_token": "791fd02af3db384849bb6b207e4b3236"
+  }
+}

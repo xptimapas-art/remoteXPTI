@@ -25,10 +25,12 @@ from config_manager import ConfigManager
 from logger import log
 from rdp_manager import RDPManager
 from storage import StorageManager
+from tuya_access_manager import TuyaAccessManager
 from updater import SilentAutoUpdater
 from version import CURRENT_VERSION, APP_NAME, GITHUB_REPO
 
 config_mgr = ConfigManager()
+tuya_mgr = TuyaAccessManager()
 
 # Inicialização FastAPI
 app = FastAPI(title="RemoteXPTI Modern Backend", version=CURRENT_VERSION)
@@ -314,6 +316,19 @@ class InstallVersionRequest(BaseModel):
 class SetChannelRequest(BaseModel):
     channel: str
 
+class DoorConfigRequest(BaseModel):
+    enabled: Optional[bool] = None
+    feedback_sound: Optional[bool] = None
+    feedback_notification: Optional[bool] = None
+    user_code: Optional[str] = None
+    doors: Optional[List[Dict[str, Any]]] = None
+
+class DoorOpenRequest(BaseModel):
+    source: Optional[str] = "Painel DEV"
+
+class QRLoginRequest(BaseModel):
+    user_code: Optional[str] = None
+
 def sync_supabase_servers() -> tuple[bool, int, str]:
     if not CloudSyncManager.is_configured():
         return False, 0, "Supabase não configurado ou desabilitado"
@@ -490,6 +505,8 @@ def get_dev_status():
 @app.post("/api/dev/login")
 def dev_login(req: DevLoginRequest):
     success = config_mgr.authenticate_dev(req.password)
+    if success:
+        tuya_mgr.reload_hotkeys()
     return {
         "success": success,
         "is_dev": config_mgr.is_dev_authenticated(),
@@ -499,11 +516,100 @@ def dev_login(req: DevLoginRequest):
 @app.post("/api/dev/logout")
 def dev_logout():
     config_mgr.logout_dev()
+    tuya_mgr.reload_hotkeys()
     return {
         "success": True,
         "is_dev": False,
         "channel": "public"
     }
+
+# ==============================================================================
+# ENDPOINTS DE CONTROLE DE PORTÕES E ACESSOS TUYA (RESTRITO AO MODO DEV)
+# ==============================================================================
+
+def require_dev_access():
+    if not config_mgr.is_dev_authenticated():
+        raise HTTPException(
+            status_code=403,
+            detail="Acesso negado: Somente usuários em Modo Desenvolvedor podem acessar os portões."
+        )
+
+@app.get("/api/doors")
+def get_doors_list():
+    require_dev_access()
+    return {
+        "doors": tuya_mgr.get_doors(),
+        "cloud_status": tuya_mgr.get_cloud_status()
+    }
+
+@app.post("/api/doors/{door_id}/open")
+def open_door_endpoint(door_id: str, req: Optional[DoorOpenRequest] = None):
+    require_dev_access()
+    src = req.source if req and req.source else "Painel DEV"
+    success, message = tuya_mgr.open_door(door_id, source=src)
+    if not success:
+        raise HTTPException(status_code=500, detail=message)
+    return {
+        "success": True,
+        "message": message,
+        "doors": tuya_mgr.get_doors()
+    }
+
+@app.get("/api/doors/config")
+def get_doors_config():
+    require_dev_access()
+    return {
+        "config": tuya_mgr.config,
+        "cloud_status": tuya_mgr.get_cloud_status()
+    }
+
+@app.post("/api/doors/config")
+def save_doors_config(req: DoorConfigRequest):
+    require_dev_access()
+    update_data = {}
+    if req.enabled is not None:
+        update_data["enabled"] = req.enabled
+    if req.feedback_sound is not None:
+        update_data["feedback_sound"] = req.feedback_sound
+    if req.feedback_notification is not None:
+        update_data["feedback_notification"] = req.feedback_notification
+    if req.user_code is not None:
+        update_data["user_code"] = req.user_code
+    if req.doors is not None:
+        update_data["doors"] = req.doors
+
+    tuya_mgr.save_config(update_data)
+    return {
+        "success": True,
+        "config": tuya_mgr.config,
+        "doors": tuya_mgr.get_doors()
+    }
+
+@app.post("/api/doors/sync")
+def sync_doors_cloud():
+    require_dev_access()
+    tuya_mgr._init_cloud_manager()
+    return {
+        "success": True,
+        "cloud_status": tuya_mgr.get_cloud_status(),
+        "doors": tuya_mgr.get_doors()
+    }
+
+@app.get("/api/doors/logs")
+def get_doors_access_logs():
+    require_dev_access()
+    return {
+        "logs": tuya_mgr.get_access_logs()
+    }
+
+@app.post("/api/doors/qr-login")
+def generate_doors_qr_login(req: Optional[QRLoginRequest] = None):
+    require_dev_access()
+    user_code = req.user_code if req and req.user_code else None
+    result = tuya_mgr.generate_qr_login(user_code)
+    if not result.get("success"):
+        raise HTTPException(status_code=500, detail=result.get("error", "Falha ao gerar QR Code"))
+    return result
 
 @app.post("/api/sync/supabase")
 def manual_sync_supabase():

@@ -1,9 +1,9 @@
 import React from 'react';
-import { Search, ChevronDown, RotateCw, Settings } from 'lucide-react';
+import { Search, ChevronDown, RotateCw, Settings, DoorClosed } from 'lucide-react';
 
 interface TitleBarProps {
-  currentTab: 'servers' | 'map' | 'ajin';
-  setCurrentTab: (tab: 'servers' | 'map' | 'ajin') => void;
+  currentTab: 'servers' | 'map' | 'ajin' | 'doors';
+  setCurrentTab: (tab: 'servers' | 'map' | 'ajin' | 'doors') => void;
   searchTerm: string;
   setSearchTerm: (term: string) => void;
   selectedGroup: string;
@@ -180,6 +180,22 @@ export const TitleBar: React.FC<TitleBarProps> = ({
             />
             <span>AJIN</span>
           </button>
+
+          {/* Modo DEV Exclusivo: Controle de Portões e Acesso Tuya */}
+          {isDev && (
+            <button
+              onClick={() => setCurrentTab('doors')}
+              title="Controle de Portões"
+              className={`h-full px-3.5 rounded flex items-center space-x-1.5 text-xs font-bold transition-all ${
+                currentTab === 'doors'
+                  ? 'bg-[#0066cc] text-white shadow-sm'
+                  : 'text-[#a0a5b5] hover:text-white hover:bg-[#252836]'
+              }`}
+            >
+              <DoorClosed className="w-3.5 h-3.5" />
+              <span>Portões</span>
+            </button>
+          )}
         </div>
 
         {/* Botão Atualizar Status Manual */}

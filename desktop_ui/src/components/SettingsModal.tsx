@@ -14,6 +14,7 @@ import {
   Rocket,
   CheckCircle2,
   Radio,
+  DoorClosed,
 } from 'lucide-react';
 
 interface UpdateInfo {
@@ -47,6 +48,7 @@ interface SettingsModalProps {
   onCheckUpdates?: () => void;
   onRestartUpdate?: () => void;
   onChannelChange?: (channel: string) => void;
+  onOpenDoorsSettings?: () => void;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -60,6 +62,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onCheckUpdates,
   onRestartUpdate,
   onChannelChange,
+  onOpenDoorsSettings,
 }) => {
   const [devPassword, setDevPassword] = useState('');
   const [devLoading, setDevLoading] = useState(false);
@@ -460,16 +463,39 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   )}
                 </div>
 
-                <div className="pt-1">
-                  <button
-                    type="button"
-                    onClick={handleDevLogout}
-                    disabled={devLoading}
-                    className="px-3 py-1.5 bg-[#262832] hover:bg-[#343644] text-rose-300 hover:text-rose-200 rounded-lg text-xs font-semibold transition-colors cursor-pointer border border-[#353846]"
-                  >
-                    {devLoading ? 'Encerrando...' : 'Sair do Modo Desenvolvedor'}
-                  </button>
-                </div>
+                {/* 3. Portões & Acessos Tuya */}
+                  <div className="p-2.5 rounded-lg bg-[#14151a] border border-[#262832] flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <DoorClosed className="w-4 h-4 text-emerald-400" />
+                      <div>
+                        <div className="text-xs font-bold text-slate-200">Controle de Portões Tuya</div>
+                        <div className="text-[10px] text-slate-400">Atalhos globais, QR Code e cenas Tuya</div>
+                      </div>
+                    </div>
+                    {onOpenDoorsSettings && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onClose();
+                          onOpenDoorsSettings();
+                        }}
+                        className="px-2.5 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                      >
+                        Configurar
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="pt-1">
+                    <button
+                      type="button"
+                      onClick={handleDevLogout}
+                      disabled={devLoading}
+                      className="px-3 py-1.5 bg-[#262832] hover:bg-[#343644] text-rose-300 hover:text-rose-200 rounded-lg text-xs font-semibold transition-colors cursor-pointer border border-[#353846]"
+                    >
+                      {devLoading ? 'Encerrando...' : 'Sair do Modo Desenvolvedor'}
+                    </button>
+                  </div>
               </div>
             ) : (
               <form onSubmit={handleDevLogin} className="space-y-2.5">

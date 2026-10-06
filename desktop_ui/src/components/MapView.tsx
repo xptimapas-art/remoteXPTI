@@ -1,6 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import '../leaflet-setup';
+import 'leaflet.markercluster';
+import 'leaflet.markercluster/dist/MarkerCluster.css';
+import 'leaflet.markercluster/dist/MarkerCluster.Default.css';
 import {
   Layers,
   X,
@@ -52,7 +56,9 @@ export const MapView: React.FC<MapViewProps> = ({
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
   const currentTileLayerRef = useRef<L.TileLayer | null>(null);
-  const markersLayerRef = useRef<L.LayerGroup | null>(null);
+  const serverClusterGroupRef = useRef<L.MarkerClusterGroup | null>(null);
+  const onuLayerRef = useRef<L.LayerGroup | null>(null);
+  const serverMarkersMapRef = useRef<Map<string, L.Marker>>(new Map());
 
   const [activeLayer, setActiveLayer] = useState<'satellite' | 'roads' | 'osm'>('satellite');
   const [incidents, setIncidents] = useState<Incident[]>([]);
@@ -134,7 +140,82 @@ export const MapView: React.FC<MapViewProps> = ({
       ).addTo(map);
 
       currentTileLayerRef.current = satLayer;
-      markersLayerRef.current = L.layerGroup().addTo(map);
+      // Agrupamento Inteligente de Servidores (MarkerCluster com Alertas de Status)
+      const serverClusterGroup = L.markerClusterGroup({
+        spiderfyOnMaxZoom: true,
+        showCoverageOnHover: false,
+        zoomToBoundsOnClick: true,
+        maxClusterRadius: 35,
+        iconCreateFunction: (cluster) => {
+          const markers = cluster.getAllChildMarkers();
+          const totalCount = cluster.getChildCount();
+          let offlineCount = 0;
+
+          markers.forEach((m: any) => {
+            if (m.isOffline) {
+              offlineCount++;
+            }
+          });
+
+          let clusterStatus = 'online';
+          if (offlineCount === totalCount) {
+            clusterStatus = 'critical'; // Todos offline: Vermelho
+          } else if (offlineCount > 0) {
+            clusterStatus = 'warning'; // 1 ou mais offline: Amarelo
+          }
+
+          let sizeClass = 'cluster-sm';
+          let size = 38;
+          if (totalCount >= 10 && totalCount < 100) {
+            sizeClass = 'cluster-md';
+            size = 44;
+          } else if (totalCount >= 100) {
+            sizeClass = 'cluster-lg';
+            size = 50;
+          }
+
+          return L.divIcon({
+            html: `<div><span>${totalCount}</span></div>`,
+            className: `marker-cluster marker-cluster-${clusterStatus} ${sizeClass}`,
+            iconSize: L.point(size, size),
+          });
+        },
+      });
+
+      // Tooltip informativo escuro ao passar o mouse sobre o cluster agrupado
+      serverClusterGroup.on('clustermouseover', (e: any) => {
+        const cluster = e.layer;
+        const count = cluster.getChildCount();
+        const markers = cluster.getAllChildMarkers();
+        let offlineCount = 0;
+        markers.forEach((m: any) => {
+          if (m.isOffline) offlineCount++;
+        });
+        const onlineCount = count - offlineCount;
+
+        let tooltipHtml = '';
+        if (offlineCount === count) {
+          tooltipHtml = `🔴 <strong>${count} servidores</strong><br/><span style="color:#ef4444;font-weight:700">Todos offline</span>`;
+        } else if (offlineCount > 0) {
+          tooltipHtml = `⚠️ <strong>${count} servidores</strong><br/><span style="color:#f59e0b;font-weight:700">${offlineCount} offline</span> · <span style="color:#10b981;font-weight:700">${onlineCount} online</span>`;
+        } else {
+          tooltipHtml = `🟢 <strong>${count} servidores</strong><br/><span style="color:#10b981;font-weight:700">Todos online</span>`;
+        }
+
+        cluster.bindTooltip(tooltipHtml, {
+          permanent: false,
+          direction: 'top',
+          className: 'leaflet-tooltip-dark',
+          offset: [0, -10],
+        }).openTooltip();
+      });
+
+      serverClusterGroup.addTo(map);
+      serverClusterGroupRef.current = serverClusterGroup;
+
+      const onuLayer = L.layerGroup().addTo(map);
+      onuLayerRef.current = onuLayer;
+
       mapInstanceRef.current = map;
 
       if (targetLocation?.onu) {
@@ -155,7 +236,9 @@ export const MapView: React.FC<MapViewProps> = ({
         mapInstanceRef.current.remove();
         mapInstanceRef.current = null;
         currentTileLayerRef.current = null;
-        markersLayerRef.current = null;
+        serverClusterGroupRef.current = null;
+        onuLayerRef.current = null;
+        serverMarkersMapRef.current.clear();
       }
     };
   }, []);
@@ -207,6 +290,23 @@ export const MapView: React.FC<MapViewProps> = ({
     lastTargetKeyRef.current = targetKey;
 
     const map = mapInstanceRef.current;
+    if (targetLocation.itemType === 'server' && targetLocation.id) {
+      const targetMarker = serverMarkersMapRef.current.get(targetLocation.id);
+      const clusterGroup = serverClusterGroupRef.current;
+      if (targetMarker && clusterGroup) {
+        clusterGroup.zoomToShowLayer(targetMarker, () => {
+          targetMarker.openTooltip();
+          const srv = servers.find((s) => s.id === targetLocation.id);
+          if (srv) {
+            setSelectedServer(srv);
+            setSelectedOnu(null);
+          }
+        });
+        onTargetLocationHandled?.();
+        return;
+      }
+    }
+
     map.stop();
     map.flyTo([Number(targetLocation.lat), Number(targetLocation.lon)], targetLocation.zoom || 16, {
       duration: 1.0,
@@ -229,15 +329,19 @@ export const MapView: React.FC<MapViewProps> = ({
   // Marcadores em Alfinete de Alta Definição com Halo Pulsante (Servidores e ONUs)
   useEffect(() => {
     const map = mapInstanceRef.current;
-    const markersGroup = markersLayerRef.current;
-    if (!map || !markersGroup) return;
+    const clusterGroup = serverClusterGroupRef.current;
+    const onuGroup = onuLayerRef.current;
+    if (!map || !clusterGroup || !onuGroup) return;
 
-    markersGroup.clearLayers();
+    clusterGroup.clearLayers();
+    onuGroup.clearLayers();
+    serverMarkersMapRef.current.clear();
 
-    // 1. Plotar Servidores
+    // 1. Plotar Servidores com Agrupamento (MarkerCluster)
     if (showServers) {
       const incidentIds = new Set(incidents.map((inc) => inc.id));
       const validServers = servers.filter((s) => s.latitude && s.longitude);
+      const markersToAdd: L.Marker[] = [];
 
       validServers.forEach((s) => {
         const isIncident = incidentIds.has(s.id);
@@ -261,7 +365,9 @@ export const MapView: React.FC<MapViewProps> = ({
           tooltipAnchor: [0, -38],
         });
 
-        const marker = L.marker([Number(s.latitude), Number(s.longitude)], { icon: customIcon }).addTo(markersGroup);
+        const marker = L.marker([Number(s.latitude), Number(s.longitude)], { icon: customIcon });
+        (marker as any).serverData = s;
+        (marker as any).isOffline = isIncident;
 
         marker.bindTooltip(`🖥️ <strong>${s.name}</strong><br/><span style="color:#94a3b8">${s.host}:${s.port || 3389}</span>`, {
           permanent: false,
@@ -274,7 +380,12 @@ export const MapView: React.FC<MapViewProps> = ({
           setSelectedServer(s);
           setSelectedOnu(null);
         });
+
+        markersToAdd.push(marker);
+        serverMarkersMapRef.current.set(s.id, marker);
       });
+
+      clusterGroup.addLayers(markersToAdd);
     }
 
     // 2. Plotar ONUs da Ajin
@@ -304,7 +415,7 @@ export const MapView: React.FC<MapViewProps> = ({
           tooltipAnchor: [0, -36],
         });
 
-        const marker = L.marker([Number(o.latitude), Number(o.longitude)], { icon: customIcon }).addTo(markersGroup);
+        const marker = L.marker([Number(o.latitude), Number(o.longitude)], { icon: customIcon }).addTo(onuGroup);
 
         const tooltipHtml = `⚡ <strong>${o.name || `Ponto ${o.id}`}</strong> (${o.status})<br/><span style="color:#94a3b8">${o.desc || o.port}</span>`;
         marker.bindTooltip(tooltipHtml, {
@@ -334,10 +445,8 @@ export const MapView: React.FC<MapViewProps> = ({
   };
 
   const handleIncidentClick = (inc: Incident) => {
-    if (inc.latitude && inc.longitude && mapInstanceRef.current) {
-      mapInstanceRef.current.stop();
-      mapInstanceRef.current.flyTo([Number(inc.latitude), Number(inc.longitude)], 13, { duration: 1.0 });
-    }
+    const targetMarker = serverMarkersMapRef.current.get(inc.id);
+    const clusterGroup = serverClusterGroupRef.current;
     const srv = servers.find((s) => s.id === inc.id) || {
       id: inc.id,
       name: inc.name,
@@ -346,8 +455,19 @@ export const MapView: React.FC<MapViewProps> = ({
       latitude: inc.latitude,
       longitude: inc.longitude,
     };
-    setSelectedServer(srv);
-    setSelectedOnu(null);
+
+    if (targetMarker && clusterGroup) {
+      clusterGroup.zoomToShowLayer(targetMarker, () => {
+        targetMarker.openTooltip();
+        setSelectedServer(srv);
+        setSelectedOnu(null);
+      });
+    } else if (inc.latitude && inc.longitude && mapInstanceRef.current) {
+      mapInstanceRef.current.stop();
+      mapInstanceRef.current.flyTo([Number(inc.latitude), Number(inc.longitude)], 14, { duration: 1.0 });
+      setSelectedServer(srv);
+      setSelectedOnu(null);
+    }
     lastTargetKeyRef.current = null;
     onTargetLocationHandled?.();
   };
@@ -639,7 +759,7 @@ export const MapView: React.FC<MapViewProps> = ({
         </div>
       )}
 
-      {/* Estilos Globais do Leaflet (Alfinetes e Tooltips) */}
+      {/* Estilos Globais do Leaflet (Alfinetes, Clusters e Tooltips) */}
       <style>{`
         .leaflet-pin-container {
           background: transparent !important;
@@ -680,17 +800,139 @@ export const MapView: React.FC<MapViewProps> = ({
           50% { r: 8.5px; opacity: 0.9; }
         }
         .leaflet-tooltip-dark {
-          background: rgba(18, 20, 26, 0.9) !important;
+          background: rgba(18, 20, 26, 0.92) !important;
           color: #ffffff !important;
           border: 1px solid rgba(255, 255, 255, 0.15) !important;
           border-radius: 6px !important;
           font-size: 11px !important;
           font-weight: 600 !important;
           box-shadow: 0 4px 12px rgba(0,0,0,0.5) !important;
-          padding: 4px 8px !important;
+          padding: 5px 9px !important;
+          line-height: 1.35 !important;
         }
         .leaflet-tooltip-dark::before {
-          border-top-color: rgba(18, 20, 26, 0.9) !important;
+          border-top-color: rgba(18, 20, 26, 0.92) !important;
+        }
+
+        /* MarkerCluster Customizado para Servidores (Dark Moderno) */
+        .marker-cluster {
+          background-clip: padding-box;
+          border-radius: 50% !important;
+          transition: transform 0.22s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+          cursor: pointer !important;
+          filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.7));
+        }
+        .marker-cluster:hover {
+          transform: scale(1.18);
+          z-index: 10000 !important;
+        }
+
+        /* Tamanhos dos Clusters */
+        .marker-cluster.cluster-sm {
+          width: 38px !important;
+          height: 38px !important;
+        }
+        .marker-cluster.cluster-sm div {
+          width: 28px !important;
+          height: 28px !important;
+          margin-left: 5px !important;
+          margin-top: 5px !important;
+          border-radius: 50% !important;
+          font-size: 13px !important;
+        }
+        .marker-cluster.cluster-sm span {
+          line-height: 24px !important;
+        }
+
+        .marker-cluster.cluster-md {
+          width: 44px !important;
+          height: 44px !important;
+        }
+        .marker-cluster.cluster-md div {
+          width: 34px !important;
+          height: 34px !important;
+          margin-left: 5px !important;
+          margin-top: 5px !important;
+          border-radius: 50% !important;
+          font-size: 14px !important;
+        }
+        .marker-cluster.cluster-md span {
+          line-height: 30px !important;
+        }
+
+        .marker-cluster.cluster-lg {
+          width: 50px !important;
+          height: 50px !important;
+        }
+        .marker-cluster.cluster-lg div {
+          width: 38px !important;
+          height: 38px !important;
+          margin-left: 6px !important;
+          margin-top: 6px !important;
+          border-radius: 50% !important;
+          font-size: 15px !important;
+        }
+        .marker-cluster.cluster-lg span {
+          line-height: 34px !important;
+        }
+
+        /* 1. VERDE: Todos os servidores online */
+        .marker-cluster-online {
+          background-color: rgba(16, 185, 129, 0.38) !important;
+        }
+        .marker-cluster-online div {
+          background-color: #10b981 !important;
+          color: #ffffff !important;
+          font-weight: 800 !important;
+          border: 2px solid #ffffff !important;
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6) !important;
+          text-align: center;
+        }
+
+        /* 2. AMARELO: 1 ou mais servidores offline no grupo (Alerta) */
+        .marker-cluster-warning {
+          background-color: rgba(245, 158, 11, 0.45) !important;
+          animation: pulse-cluster-warning 2.2s infinite ease-in-out !important;
+        }
+        .marker-cluster-warning div {
+          background-color: #f59e0b !important;
+          color: #0f1117 !important;
+          font-weight: 900 !important;
+          border: 2px solid #ffffff !important;
+          box-shadow: 0 4px 14px rgba(245, 158, 11, 0.8) !important;
+          text-align: center;
+        }
+
+        /* 3. VERMELHO: Todos os servidores offline no grupo (Crítico) */
+        .marker-cluster-critical {
+          background-color: rgba(239, 68, 68, 0.50) !important;
+          animation: pulse-cluster-critical 1.8s infinite ease-in-out !important;
+        }
+        .marker-cluster-critical div {
+          background-color: #ef4444 !important;
+          color: #ffffff !important;
+          font-weight: 900 !important;
+          border: 2px solid #ffffff !important;
+          box-shadow: 0 4px 16px rgba(239, 68, 68, 0.85) !important;
+          text-align: center;
+        }
+
+        @keyframes pulse-cluster-warning {
+          0%, 100% {
+            box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.6);
+          }
+          50% {
+            box-shadow: 0 0 0 10px rgba(245, 158, 11, 0);
+          }
+        }
+
+        @keyframes pulse-cluster-critical {
+          0%, 100% {
+            box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7);
+          }
+          50% {
+            box-shadow: 0 0 0 12px rgba(239, 68, 68, 0);
+          }
         }
       `}</style>
     </div>
