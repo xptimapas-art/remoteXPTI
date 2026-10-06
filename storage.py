@@ -43,10 +43,11 @@ class CredentialVault:
             except Exception:
                 pass
 
-        # Se não existe ou chave corrompida, grava e usa a MASTER_KEY do projeto
+        # Se não existe ou chave corrompida, gera uma chave única
         try:
-            self.key_path.write_bytes(MASTER_KEY)
-            self.cipher = Fernet(MASTER_KEY)
+            new_key = Fernet.generate_key()
+            self.key_path.write_bytes(new_key)
+            self.cipher = Fernet(new_key)
         except Exception:
             self.cipher = Fernet(MASTER_KEY)
 

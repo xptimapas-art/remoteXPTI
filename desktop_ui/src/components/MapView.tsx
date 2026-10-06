@@ -45,7 +45,7 @@ interface MapViewProps {
   onTargetLocationHandled?: () => void;
 }
 
-export const MapView: React.FC<MapViewProps> = ({
+export const MapView: React.FC<MapViewProps> = React.memo(({
   servers,
   onus = [],
   onConnect,
@@ -937,4 +937,4 @@ export const MapView: React.FC<MapViewProps> = ({
       `}</style>
     </div>
   );
-};
+});

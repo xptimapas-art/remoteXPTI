@@ -61,7 +61,7 @@ function getPaletteForId(id: string): string {
   return PALETTES[Math.abs(hash) % PALETTES.length];
 }
 
-export const ServersView: React.FC<ServersViewProps> = ({
+export const ServersView: React.FC<ServersViewProps> = React.memo(({
   servers,
   searchTerm,
   selectedGroup,
@@ -69,6 +69,15 @@ export const ServersView: React.FC<ServersViewProps> = ({
   onEdit,
   onToggleFavorite,
 }) => {
+  const [now, setNow] = React.useState(Math.floor(Date.now() / 1000));
+
+  React.useEffect(() => {
+    const interval = setInterval(() => {
+      setNow(Math.floor(Date.now() / 1000));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
   const filteredServers = useMemo(() => {
     const term = searchTerm.toLowerCase().trim();
     return servers.filter((s) => {
@@ -256,7 +265,7 @@ export const ServersView: React.FC<ServersViewProps> = ({
                   {/* Badge de LOSS em Destaque Vermelho quando Offline */}
                   {isOffline && (
                     <span
-                      title={`Offline há ${formatLossDuration(s.duration_seconds)} (${s.status_msg || ''})`}
+                      title={`Offline há ${formatLossDuration(s.offline_since ? now - s.offline_since : s.duration_seconds)} (${s.status_msg || ''})`}
                       style={{
                         fontSize: '9px',
                         fontWeight: 700,
@@ -275,7 +284,7 @@ export const ServersView: React.FC<ServersViewProps> = ({
                         whiteSpace: 'nowrap',
                       }}
                     >
-                      ⚠️ LOSS {formatLossDuration(s.duration_seconds)}
+                      ⚠️ LOSS {formatLossDuration(s.offline_since ? now - s.offline_since : s.duration_seconds)}
                     </span>
                   )}
                 </div>
@@ -447,4 +456,4 @@ export const ServersView: React.FC<ServersViewProps> = ({
       </div>
     </div>
   );
-};
+});

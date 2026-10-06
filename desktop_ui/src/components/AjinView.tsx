@@ -47,8 +47,6 @@ interface TelemetryData {
 
 interface AjinViewProps {
   telemetry: TelemetryData;
-  countdown: number;
-  currentTime: string;
   onRefresh: () => void;
   onSaveLabel: (port: string, onuId: string, name: string, desc: string, lat?: number | null, lon?: number | null) => void;
   onLocateOnMap?: (onu: ONUItem) => void;
@@ -70,18 +68,27 @@ function parseColetaTimestamp(val?: string, defaultTime?: string): { time: strin
 
 export const AjinView: React.FC<AjinViewProps> = ({
   telemetry,
-  countdown,
-  currentTime,
   onRefresh,
   onSaveLabel,
   onLocateOnMap,
 }) => {
+  const [countdown, setCountdown] = useState(10);
+  const [currentTime, setCurrentTime] = useState('--:--:--');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedPon, setSelectedPon] = useState('Todas as Portas PON');
   const [selectedStatus, setSelectedStatus] = useState('Todos os Status');
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [sortField, setSortField] = useState<string>('name');
   const [sortAsc, setSortAsc] = useState<boolean>(true);
+  
+  React.useEffect(() => {
+    const handleTick = (e: any) => {
+      if (e.detail.time) setCurrentTime(e.detail.time);
+      if (typeof e.detail.countdown === 'number') setCountdown(e.detail.countdown);
+    };
+    window.addEventListener('ajinTick', handleTick);
+    return () => window.removeEventListener('ajinTick', handleTick);
+  }, []);
 
   // Modal de Edição
   const [editingItem, setEditingItem] = useState<ONUItem | null>(null);

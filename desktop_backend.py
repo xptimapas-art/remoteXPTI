@@ -125,7 +125,6 @@ updater_instance = SilentAutoUpdater(
 async def on_startup():
     global main_event_loop
     main_event_loop = asyncio.get_running_loop()
-    threading.Thread(target=check_all_servers_status, daemon=True).start()
 
 # Cache de coordenadas de ONUs da Ajin
 onu_coordinates: Dict[str, Dict[str, Any]] = {}
@@ -255,8 +254,7 @@ def check_all_servers_status():
 
     if changed:
         _save_downtime_history()
-
-    broadcast_ws({"type": "servers_status_updated"})
+        broadcast_ws({"type": "servers_status_updated"})
 
 # Modelos Pydantic
 class ConnectRequest(BaseModel):

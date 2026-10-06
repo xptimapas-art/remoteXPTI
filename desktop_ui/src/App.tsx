@@ -59,8 +59,6 @@ export const App: React.FC = () => {
     ports: {},
     rows: [],
   });
-  const [countdown, setCountdown] = useState(10);
-  const [currentTime, setCurrentTime] = useState('--:--:--');
   const wsRef = useRef<WebSocket | null>(null);
 
   // Carrega status de desenvolvedor
@@ -141,10 +139,9 @@ export const App: React.FC = () => {
           const msg = JSON.parse(event.data);
           if (msg.type === 'initial_state' || msg.type === 'telemetry_update') {
             if (msg.data) setTelemetry(msg.data);
-            if (msg.time) setCurrentTime(msg.time);
+            if (msg.time) window.dispatchEvent(new CustomEvent('ajinTick', { detail: { time: msg.time } }));
           } else if (msg.type === 'tick') {
-            if (msg.time) setCurrentTime(msg.time);
-            if (typeof msg.countdown === 'number') setCountdown(msg.countdown);
+            window.dispatchEvent(new CustomEvent('ajinTick', { detail: { time: msg.time, countdown: msg.countdown } }));
           } else if (msg.type === 'servers_status_updated') {
             loadServers();
           } else if (
@@ -166,13 +163,7 @@ export const App: React.FC = () => {
 
     connectWebSocket();
 
-    // Polling de segurança a cada 15 segundos para manter contadores de LOSS atualizados
-    const srvInterval = setInterval(() => {
-      loadServers();
-    }, 15000);
-
     return () => {
-      clearInterval(srvInterval);
       wsRef.current?.close();
     };
   }, []);
@@ -369,8 +360,6 @@ export const App: React.FC = () => {
         {currentTab === 'ajin' && (
           <AjinView
             telemetry={telemetry}
-            countdown={countdown}
-            currentTime={currentTime}
             onRefresh={handleForceRefreshAjin}
             onSaveLabel={handleSaveLabel}
             onLocateOnMap={handleLocateOnuOnMap}

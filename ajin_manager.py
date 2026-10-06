@@ -62,12 +62,7 @@ class AjinManager:
         # Carrega cache prévio para exibição instantânea ao abrir
         self._load_disk_cache()
 
-        # Thread de auto-refresh em segundo plano (a cada 10 segundos)
         self._stop_event = threading.Event()
-        self._poller_thread = threading.Thread(
-            target=self._background_poller, daemon=True
-        )
-        self._poller_thread.start()
 
     def add_listener(self, callback: Callable[[], None]):
         with self._lock:
@@ -308,16 +303,6 @@ class AjinManager:
         except Exception as e:
             log.warning(f"[AjinManager] Erro ao exportar CSV: {e}")
             return False
-
-    def _background_poller(self):
-        """Loop contínuo em background para manter os dados sempre frescos (10s)."""
-        time.sleep(1.0)
-        while not self._stop_event.is_set():
-            try:
-                self.fetch_telemetry_async(force=True)
-            except Exception:
-                pass
-            self._stop_event.wait(10.0)
 
     def stop(self):
         self._stop_event.set()

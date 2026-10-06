@@ -45,7 +45,7 @@ interface DoorsViewProps {
 
 const API_BASE = 'http://127.0.0.1:8765';
 
-export const DoorsView: React.FC<DoorsViewProps> = ({
+export const DoorsView: React.FC<DoorsViewProps> = React.memo(({
   isDev,
   onOpenDevLogin,
   onOpenDoorsSettings,
@@ -411,4 +411,4 @@ export const DoorsView: React.FC<DoorsViewProps> = ({
       </div>
     </div>
   );
-};
+});
