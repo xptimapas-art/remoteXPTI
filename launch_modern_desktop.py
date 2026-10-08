@@ -7,18 +7,26 @@ import urllib.request
 from pathlib import Path
 import webview
 
-PORT = 8765
+import socket
+
+def get_free_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(('127.0.0.1', 0))
+        return s.getsockname()[1]
+
+PORT = get_free_port()
 URL = f"http://127.0.0.1:{PORT}"
 
 def _dbg(msg: str):
     try:
-        debug_file = Path(__file__).parent / "launch_debug.txt"
+        debug_file = Path(os.environ.get("LOCALAPPDATA", "")) / "RemoteXPTI" / "logs" / "launch_debug.txt"
+        debug_file.parent.mkdir(parents=True, exist_ok=True)
         with open(debug_file, "a", encoding="utf-8") as f:
             f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}\n")
     except Exception:
         pass
 
-_dbg(f"Módulo carregado com argv: {sys.argv} (executable: {sys.executable})")
+_dbg(f"MÃ³dulo carregado com argv: {sys.argv} (executable: {sys.executable})")
 
 def _start_backend():
     import desktop_backend
@@ -85,47 +93,103 @@ def main():
     title = "RemoteXPTI - RDP Quick Launcher"
     _dbg("Entrou em main()...")
 
+    # Garante que apenas uma instÃ¢ncia rode simultaneamente (Mutex)
+    _mutex_name = "RemoteXPTI_SingleInstance_Mutex"
+    _mutex = ctypes.windll.kernel32.CreateMutexW(None, False, _mutex_name)
+    if ctypes.windll.kernel32.GetLastError() == 183: # ERROR_ALREADY_EXISTS
+        _dbg("Outra instÃ¢ncia jÃ¡ estÃ¡ rodando (Mutex detectado). Trazendo para o foco e saindo.")
+        focus_existing_instance(title)
+        sys.exit(0)
+
     try:
-        # Permite agrupamento e ícone próprio na barra de tarefas do Windows
+        # Permite agrupamento e Ã­cone prÃ³prio na barra de tarefas do Windows
         try:
-            import ctypes
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("XPTI.RemoteXPTI.Modern.App")
         except Exception as e:
             _dbg(f"SetCurrentProcessExplicitAppUserModelID: {e}")
 
-        # Se a janela gráfica já estiver aberta e visível, restaura foco e encerra processo duplicado
+        # Se a janela grÃ¡fica jÃ¡ estiver aberta e visÃ­vel, restaura foco e encerra processo duplicado
         has_win = focus_existing_instance(title)
         _dbg(f"focus_existing_instance: {has_win}")
         if has_win:
-            _dbg("Janela já visível. Saindo.")
+            _dbg("Janela jÃ¡ visÃ­vel. Saindo.")
             sys.exit(0)
 
-        # 1. Inicia o backend FastAPI + WebSockets em segundo plano caso ainda não esteja rodando
+        # 1. Inicia o backend FastAPI + WebSockets em segundo plano caso ainda nÃ£o esteja rodando
         bg_running = is_backend_running()
         _dbg(f"is_backend_running: {bg_running}")
+        t = None
         if not bg_running:
             _dbg("Iniciando backend em thread...")
             t = threading.Thread(target=_start_backend, daemon=True)
             t.start()
 
-            # 2. Aguarda o servidor local responder
-            _dbg("Aguardando backend...")
-            if not wait_for_server():
-                _dbg("Erro: backend não respondeu a tempo!")
-                sys.exit(1)
-            _dbg("Backend respondendo com sucesso.")
-
         # 3. Abre a janela nativa do Windows acelerada por GPU (Microsoft Edge WebView2)
         _dbg("Criando janela webview...")
+        
+        loading_html = """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <style>
+                body { background-color: #16171d; color: #ffffff; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; flex-direction: column; }
+                .spinner { border: 4px solid rgba(255,255,255,0.1); width: 40px; height: 40px; border-radius: 50%; border-left-color: #09f; animation: spin 1s linear infinite; margin-bottom: 20px; }
+                @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+            </style>
+        </head>
+        <body>
+            <div class="spinner"></div>
+            <h2>Carregando RemoteXPTI...</h2>
+        </body>
+        </html>
+        """
+
         window = webview.create_window(
             title=title,
-            url=URL,
+            url=URL if bg_running else None,
+            html=loading_html if not bg_running else None,
             width=1280,
             height=780,
             min_size=(940, 620),
             background_color="#16171d",
             text_select=False,
         )
+
+        if not bg_running:
+            def _wait_and_load():
+                _dbg("Aguardando backend em thread separada...")
+                start_t = time.time()
+                success = False
+                while time.time() - start_t < 90:
+                    if is_backend_running(timeout=1):
+                        success = True
+                        break
+                    if t and not t.is_alive():
+                        _dbg("Backend thread died unexpectedly.")
+                        break
+                    time.sleep(0.3)
+                
+                if success:
+                    _dbg("Backend respondendo, carregando URL.")
+                    window.load_url(URL)
+                else:
+                    _dbg("Erro: backend nÃ£o respondeu a tempo ou falhou!")
+                    try:
+                        log_path = str(Path(os.environ.get("LOCALAPPDATA", "")) / "RemoteXPTI" / "logs" / "launch_debug.txt")
+                        # 0x15 = MB_RETRYCANCEL (5) + MB_ICONERROR (0x10)
+                        resp = ctypes.windll.user32.MessageBoxW(0, f"O backend não respondeu (timeout 90s) ou falhou ao iniciar.\n\nVerifique os logs em:\n{log_path}\n\nDeseja tentar novamente?", "Erro ao iniciar - RemoteXPTI", 0x15)
+                        if resp == 4: # IDRETRY
+                            import subprocess
+                            if getattr(sys, 'frozen', False):
+                                subprocess.Popen(sys.argv)
+                            else:
+                                subprocess.Popen([sys.executable] + sys.argv)
+                    except:
+                        pass
+                    os._exit(1)
+            
+            threading.Thread(target=_wait_and_load, daemon=True).start()
 
         icon_path = Path(__file__).parent / "imagens" / "app_icon.ico"
         if not icon_path.exists():
@@ -147,7 +211,7 @@ def main():
                 _dbg(f"show_window error: {e}")
 
         def _exit_app(icon=None, item=None):
-            _dbg("Encerrando via ícone da bandeja...")
+            _dbg("Encerrando via Ã­cone da bandeja...")
             try:
                 if tray_icon:
                     tray_icon.stop()
@@ -168,7 +232,7 @@ def main():
             except Exception as e:
                 _dbg(f"Erro ao acionar porta pela bandeja: {e}")
 
-        # Listener nativo de teclas rodando diretamente na sessão do desktop do usuário
+        # Listener nativo de teclas rodando diretamente na sessÃ£o do desktop do usuÃ¡rio
         def _on_desktop_hotkey(door_id: str, hotkey: str):
             _dbg(f"Atalho nativo disparado no desktop: [{hotkey}] para porta {door_id}")
             try:
@@ -179,7 +243,7 @@ def main():
                     headers={"Content-Type": "application/json"}
                 )
                 with urllib.request.urlopen(req, timeout=4) as resp:
-                    _dbg(f"Disparo de porta via atalho concluído com sucesso (status {resp.status})")
+                    _dbg(f"Disparo de porta via atalho concluÃ­do com sucesso (status {resp.status})")
             except Exception as e:
                 _dbg(f"Erro ao disparar porta via atalho: {e}")
 
@@ -265,7 +329,7 @@ def main():
         webview.start(debug=False, icon=icon_arg)
         _dbg("webview.start() finalizado normalmente.")
 
-        # Se webview finalizou, encerra ícone e processo
+        # Se webview finalizou, encerra Ã­cone e processo
         if desktop_hotkey_mgr:
             try:
                 desktop_hotkey_mgr.stop()
@@ -281,9 +345,20 @@ def main():
         os._exit(0)
 
     except BaseException as e:
+        if isinstance(e, SystemExit):
+            raise
         import traceback
-        _dbg(f"BaseException capturada: {type(e).__name__}: {e}\n{traceback.format_exc()}")
+        tb = traceback.format_exc()
+        msg = f"BaseException capturada: {type(e).__name__}: {e}\n{tb}"
+        _dbg(msg)
+        try:
+            ctypes.windll.user32.MessageBoxW(0, f"Ocorreu um erro fatal ao iniciar:\n\n{type(e).__name__}: {e}", "RemoteXPTI - Erro Fatal", 0x10)
+        except:
+            pass
         raise
 
 if __name__ == "__main__":
     main()
+
+
+

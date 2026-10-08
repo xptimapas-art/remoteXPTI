@@ -84,15 +84,18 @@ class TuyaAccessManager:
         self._last_hotkey_time: Dict[str, float] = {}
         self._registered_hotkeys: List[Any] = []
         self._polling_qr_thread: Optional[threading.Thread] = None
-        self._native_hotkeys = NativeHotkeyManager(on_trigger_callback=self._on_native_hotkey_trigger)
+        self._native_hotkeys = None
 
         self.config_path = self._resolve_config_path()
         self.session_path = self._resolve_session_path()
         self.config = self.load_config()
 
-        # Inicializa cliente da nuvem e listener de teclas
+    def background_init(self, is_embedded: bool = False):
         self._init_cloud_manager()
-        self.start_hotkey_listener()
+        if not is_embedded:
+            self._native_hotkeys = NativeHotkeyManager(on_trigger_callback=self._on_native_hotkey_trigger)
+            self._native_hotkeys.start()
+            self.reload_hotkeys()
 
     def _resolve_config_path(self) -> Path:
         """Localiza o arquivo doors_config.json em %LOCALAPPDATA% ou na pasta do app."""
@@ -151,7 +154,7 @@ class TuyaAccessManager:
         }
         return default_cfg
 
-    def save_config(self, new_config: Optional[Dict[str, Any]] = None):
+    def save_config(self, new_config: Optional[Dict[str, Any]] = None, push_to_cloud: bool = True):
         """Salva a configuração atualizada e recarrega listeners."""
         with self._lock:
             if new_config:
@@ -160,14 +163,38 @@ class TuyaAccessManager:
                 with open(self.config_path, "w", encoding="utf-8") as f:
                     json.dump(self.config, f, indent=2, ensure_ascii=False)
                 log.info(f"[TuyaAccess] Configuração de portas salva em {self.config_path}")
+                
+                if push_to_cloud:
+                    def _push():
+                        try:
+                            from cloud_sync import CloudSyncManager
+                            CloudSyncManager.push_doors_config(self.config)
+                        except Exception as e:
+                            log.error(f"[TuyaAccess] Falha ao fazer push da config de portas: {e}")
+                    threading.Thread(target=_push, daemon=True).start()
             except Exception as e:
                 log.error(f"[TuyaAccess] Erro ao salvar config: {e}")
 
         # Recarrega os atalhos de teclado conforme a nova configuração
         self.reload_hotkeys()
 
-    def _init_cloud_manager(self):
+    def _init_cloud_manager(self, force_sync: bool = False):
         """Inicializa e mantém em cache o cliente da Nuvem Tuya."""
+        from cloud_sync import CloudSyncManager
+
+        # No boot ou erro de sign invalid, buscamos a versão mais nova na nuvem
+        if force_sync or getattr(self, "_first_init", True):
+            self._first_init = False
+            remote_session = CloudSyncManager.fetch_tuya_session()
+            if remote_session:
+                try:
+                    parsed = json.loads(remote_session)
+                    with open(self.session_path, "w", encoding="utf-8") as f:
+                        json.dump(parsed, f, indent=2)
+                    log.info("[TuyaAccess] Sessão Tuya sincronizada com Supabase.")
+                except Exception as e:
+                    log.error(f"[TuyaAccess] Erro ao aplicar sessão do Supabase: {e}")
+
         if not self.session_path.exists():
             log.warning(f"[TuyaAccess] session.json não encontrado em {self.session_path}")
             self._cloud_connected = False
@@ -175,6 +202,8 @@ class TuyaAccessManager:
 
         try:
             import tuya_devices
+            tuya_devices.on_session_saved = CloudSyncManager.push_tuya_session
+            
             with open(self.session_path, "r", encoding="utf-8") as f:
                 sess_data = json.load(f)
             self._manager = tuya_devices.build_manager(sess_data, str(self.session_path))
@@ -261,6 +290,20 @@ class TuyaAccessManager:
             self._log_access(door_id, door.get("name", ""), source, False, msg)
             return False, msg
 
+        # Proactive sync se o token local está expirado ou perto de expirar
+        if self._manager and hasattr(self._manager, "token_info"):
+            try:
+                expire_time = int(self._manager.token_info.get("expire_time") or 0)
+                if expire_time > 1_000_000_000_000:
+                    expire_time = expire_time // 1000
+                if expire_time > 0 and time.time() >= expire_time - 15:
+                    log.info("[TuyaAccess] Token perto da expiração. Verificando a nuvem para evitar colisões de refresh...")
+                    import random
+                    time.sleep(random.uniform(0.0, 3.0))
+                    self._init_cloud_manager(force_sync=True)
+            except (ValueError, TypeError):
+                pass
+
         try:
             log.info(f"[TuyaAccess] Disparando cena '{scene_name}' ({scene_id}) via {source}...")
             self._manager.trigger_scene(home_id, scene_id)
@@ -286,10 +329,20 @@ class TuyaAccessManager:
             return True, msg
 
         except Exception as e:
-            log.warning(f"[TuyaAccess] Falha no primeiro disparo da cena '{scene_name}': {e}. Tentando reconectar...")
+            import random
+            err_str = str(e).lower()
+            if "sign invalid" in err_str or "sign_invalid" in err_str or "token" in err_str:
+                log.warning(f"[TuyaAccess] Erro de token detectado ({e}). Aguardando possível colisão e sincronizando...")
+            else:
+                log.warning(f"[TuyaAccess] Falha no primeiro disparo da cena '{scene_name}': {e}. Sincronizando antes de reconectar...")
+
+            # Jitter para evitar thundering herd no banco e na Tuya API
+            time.sleep(random.uniform(0.5, 2.0))
+            force_sync = True
+
             # Tentativa de auto-recovery da sessão
             try:
-                self._init_cloud_manager()
+                self._init_cloud_manager(force_sync=force_sync)
                 if self._manager:
                     self._manager.trigger_scene(home_id, scene_id)
                     now_iso = time.strftime("%Y-%m-%dT%H:%M:%S")
@@ -308,9 +361,13 @@ class TuyaAccessManager:
                     self._log_access(door_id, door.get("name", ""), source, True, msg)
                     return True, msg
             except Exception as e2:
-                err_msg = f"Erro no acionamento da Nuvem Tuya: {e2}"
+                err_str = str(e2).lower()
+                if "nameresolutionerror" in err_str or "getaddrinfo" in err_str or "gaierror" in err_str:
+                    err_msg = "Sem conexão com a internet"
+                else:
+                    err_msg = f"Erro no acionamento da Nuvem Tuya: {e2}"
                 log.error(f"[TuyaAccess] ❌ {err_msg}")
-                self._log_access(door_id, door.get("name", ""), source, False, str(e2))
+                self._log_access(door_id, door.get("name", ""), source, False, err_msg)
                 return False, err_msg
 
         return False, "Erro desconhecido no acionamento da porta."
@@ -357,6 +414,10 @@ class TuyaAccessManager:
         """Recarrega os atalhos nativos Win32 com base na configuração do disco."""
         with self._lock:
             self.config = self.load_config()
+            
+            if not self._native_hotkeys:
+                return
+                
             if not self.config.get("enabled", True):
                 self._native_hotkeys.update_bindings([])
                 log.info("[TuyaAccess] Módulo de portas desabilitado. Atalhos suspensos.")
@@ -422,6 +483,11 @@ class TuyaAccessManager:
                     if hasattr(manager, "session"):
                         with open(self.session_path, "w", encoding="utf-8") as f:
                             json.dump(manager.session, f, indent=2)
+                        try:
+                            from cloud_sync import CloudSyncManager
+                            CloudSyncManager.push_tuya_session(json.dumps(manager.session))
+                        except Exception as sync_e:
+                            log.error(f"[TuyaAccess] Falha ao enviar sessão QR para Supabase: {sync_e}")
             except Exception as e:
                 log.warning(f"[TuyaAccess] Polling do QR Code finalizado ou expirado: {e}")
 
