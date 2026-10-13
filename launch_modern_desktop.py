@@ -92,6 +92,19 @@ def focus_existing_instance(window_title: str) -> bool:
 def main():
     title = "RemoteXPTI - RDP Quick Launcher"
     _dbg("Entrou em main()...")
+    
+    try:
+        current_exe = Path(sys.executable).resolve()
+        is_frozen = getattr(sys, "frozen", False)
+        target_dir = current_exe.parent if is_frozen else Path(__file__).parent.resolve()
+        for p in target_dir.glob("*.old.exe"):
+            try:
+                p.unlink()
+                _dbg(f"Deleted old executable: {p}")
+            except Exception as e:
+                _dbg(f"Failed to delete {p}: {e}")
+    except Exception as e:
+        _dbg(f"Failed finding old exes: {e}")
 
     # Garante que apenas uma instÃ¢ncia rode simultaneamente (Mutex)
     _mutex_name = "RemoteXPTI_SingleInstance_Mutex"
@@ -232,6 +245,18 @@ def main():
             except Exception as e:
                 _dbg(f"Erro ao acionar porta pela bandeja: {e}")
 
+        def _trigger_facial_tray(icon=None, item=None):
+            try:
+                req = urllib.request.Request(
+                    f"{URL}/api/doors/door_facial_hikvision/open",
+                    data=b'{"source": "Bandeja Windows"}',
+                    headers={"Content-Type": "application/json"}
+                )
+                with urllib.request.urlopen(req, timeout=4) as resp:
+                    _dbg(f"Disparo de facial pela bandeja concluído (status {resp.status})")
+            except Exception as e:
+                _dbg(f"Erro ao acionar facial pela bandeja: {e}")
+
         # Listener nativo de teclas rodando diretamente na sessÃ£o do desktop do usuÃ¡rio
         def _on_desktop_hotkey(door_id: str, hotkey: str):
             _dbg(f"Atalho nativo disparado no desktop: [{hotkey}] para porta {door_id}")
@@ -310,6 +335,7 @@ def main():
             tray_menu = pystray.Menu(
                 pystray.MenuItem("Abrir RemoteXPTI", _show_window, default=True),
                 pystray.MenuItem("Acionar Porta Operacional [DEV]", _trigger_door_tray),
+                pystray.MenuItem("Acionar Facial Hikvision [DEV]", _trigger_facial_tray),
                 pystray.Menu.SEPARATOR,
                 pystray.MenuItem("Sair", _exit_app),
             )

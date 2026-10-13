@@ -158,7 +158,7 @@ export const ServersView: React.FC<ServersViewProps> = React.memo(({
             >
               {/* Foto Cheia (100% da área do Card) */}
               <img
-                src={`http://127.0.0.1:8765/thumbnails/${s.id}.png`}
+                src={`/thumbnails/${s.id}.png`}
                 alt=""
                 style={{
                   position: 'absolute',

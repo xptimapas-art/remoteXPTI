@@ -126,7 +126,36 @@ class TuyaAccessManager:
         if self.config_path.exists():
             try:
                 with open(self.config_path, "r", encoding="utf-8") as f:
-                    return json.load(f)
+                    cfg = json.load(f)
+                    # Migração única: se nunca foi inicializado com a porta facial, adiciona-a uma vez
+                    if not cfg.get("facial_initialized"):
+                        has_facial = any(
+                            d.get("id") == "door_facial_hikvision" or d.get("mode") in ("hikvision", "facial")
+                            for d in cfg.get("doors", [])
+                        )
+                        if not has_facial:
+                            cfg.setdefault("doors", []).append({
+                                "id": "door_facial_hikvision",
+                                "name": "Portaria Facial",
+                                "device_name": "Facial Hikvision (DS-K1T)",
+                                "mode": "hikvision",
+                                "host": "192.168.12.94",
+                                "port": 80,
+                                "protocol": "http",
+                                "username": "admin",
+                                "password": "#18.190%Floripa",
+                                "door_id": 1,
+                                "hotkey": "",
+                                "enabled": True,
+                                "last_triggered": None
+                            })
+                        cfg["facial_initialized"] = True
+                        try:
+                            with open(self.config_path, "w", encoding="utf-8") as fw:
+                                json.dump(cfg, fw, indent=2, ensure_ascii=False)
+                        except Exception:
+                            pass
+                    return cfg
             except Exception as e:
                 log.error(f"[TuyaAccess] Erro ao carregar {self.config_path}: {e}")
 
@@ -136,6 +165,7 @@ class TuyaAccessManager:
             "feedback_sound": True,
             "feedback_notification": True,
             "user_code": DEFAULT_USER_CODE,
+            "facial_initialized": True,
             "doors": [
                 {
                     "id": "door_operacional",
@@ -147,6 +177,21 @@ class TuyaAccessManager:
                     "scene_name": "Porta operacional",
                     "mode": "cloud_scene",
                     "hotkey": "F7",
+                    "enabled": True,
+                    "last_triggered": None
+                },
+                {
+                    "id": "door_facial_hikvision",
+                    "name": "Portaria Facial",
+                    "device_name": "Facial Hikvision (DS-K1T)",
+                    "mode": "hikvision",
+                    "host": "192.168.12.94",
+                    "port": 80,
+                    "protocol": "http",
+                    "username": "admin",
+                    "password": "#18.190%Floripa",
+                    "door_id": 1,
+                    "hotkey": "",
                     "enabled": True,
                     "last_triggered": None
                 }
@@ -243,7 +288,11 @@ class TuyaAccessManager:
         doors = []
         for d in self.config.get("doors", []):
             door_copy = dict(d)
-            door_copy["cloud_online"] = self._cloud_connected
+            if door_copy.get("mode") in ("hikvision", "facial", "isapi"):
+                door_copy["cloud_online"] = True
+                door_copy["is_local"] = True
+            else:
+                door_copy["cloud_online"] = self._cloud_connected
             doors.append(door_copy)
         return doors
 
@@ -253,9 +302,149 @@ class TuyaAccessManager:
                 return dict(d)
         return None
 
+    def _get_hikvision_config(self, door: Dict[str, Any]) -> Dict[str, Any]:
+        """Obtém as configurações de conexão Hikvision para a porta com fallbacks inteligentes."""
+        h_cfg = door.get("hikvision") if isinstance(door.get("hikvision"), dict) else {}
+
+        file_cfg = {}
+        paths_to_try = [
+            Path(r"C:\Users\XPTI\Documents\vscode\portaria facial hikvision tuya\config\config.json"),
+            Path(r"C:\Users\XPTI\Documents\vscode\portaria facial hikvision tuya\config.json"),
+        ]
+        for p in paths_to_try:
+            if p.exists():
+                try:
+                    with open(p, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                        if "hikvision" in data and isinstance(data["hikvision"], dict):
+                            file_cfg = data["hikvision"]
+                            break
+                except Exception:
+                    pass
+
+        raw_host = door.get("host") or h_cfg.get("host") or file_cfg.get("host") or "192.168.12.94"
+        raw_port = door.get("port") if door.get("port") not in (None, "") else (h_cfg.get("port") or file_cfg.get("port") or 80)
+        raw_proto = door.get("protocol") or h_cfg.get("protocol") or file_cfg.get("protocol") or "http"
+        raw_user = door.get("username") or h_cfg.get("username") or file_cfg.get("username") or "admin"
+        raw_pwd = door.get("password") if door.get("password") not in (None, "") else (h_cfg.get("password") or file_cfg.get("password") or "#18.190%Floripa")
+        raw_target = door.get("door_no") if door.get("door_no") not in (None, "") else (door.get("door_id") or h_cfg.get("door_id") or file_cfg.get("door_id") or 1)
+
+        try:
+            port = int(raw_port)
+        except (ValueError, TypeError):
+            port = 80
+
+        try:
+            target_door = int(raw_target)
+        except (ValueError, TypeError):
+            target_door = 1
+
+        return {
+            "host": str(raw_host).strip(),
+            "port": port,
+            "protocol": str(raw_proto).strip().lower(),
+            "username": str(raw_user).strip(),
+            "password": str(raw_pwd),
+            "door_id": target_door,
+        }
+
+    def _open_hikvision_door(self, door: Dict[str, Any], source: str = "Painel DEV") -> Tuple[bool, str]:
+        """Dispara comando ISAPI PUT para abrir a porta conectada ao terminal facial Hikvision."""
+        door_id = door.get("id", "")
+        door_name = door.get("name", "Facial Hikvision")
+        cfg = self._get_hikvision_config(door)
+
+        url = f"{cfg['protocol']}://{cfg['host']}:{cfg['port']}/ISAPI/AccessControl/RemoteControl/door/{cfg['door_id']}"
+        xml_payload = (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<RemoteControlDoor xmlns="http://www.hikvision.com/ver20/XMLSchema" version="2.0">\n'
+            '    <cmd>open</cmd>\n'
+            '</RemoteControlDoor>'
+        )
+        headers = {"Content-Type": "application/xml"}
+
+        log.info(f"[TuyaAccess] Disparando abertura Facial Hikvision '{door_name}' ({url}) via {source}...")
+
+        try:
+            import requests
+            from requests.auth import HTTPDigestAuth
+            import urllib3
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+            auth = HTTPDigestAuth(cfg["username"], cfg["password"])
+            resp = requests.put(url, data=xml_payload, headers=headers, auth=auth, timeout=5, verify=False)
+
+            if resp.status_code == 200:
+                xml_text = resp.text.strip()
+                # Verifica se o terminal retornou erro em formato XML apesar do status 200 OK
+                if "<statusCode>" in xml_text and "<statusCode>1</statusCode>" not in xml_text:
+                    import xml.etree.ElementTree as ET
+                    err_detail = "Comando rejeitado pelo terminal"
+                    try:
+                        root = ET.fromstring(xml_text)
+                        sub_msg = root.findtext(".//{http://www.hikvision.com/ver20/XMLSchema}statusString") or root.findtext(".//statusString")
+                        sub_code = root.findtext(".//{http://www.hikvision.com/ver20/XMLSchema}subStatusCode") or root.findtext(".//subStatusCode")
+                        if sub_msg or sub_code:
+                            err_detail = f"{sub_msg or ''} ({sub_code or ''})".strip()
+                    except Exception:
+                        pass
+                    err_msg = f"Terminal facial '{door_name}' rejeitou abertura: {err_detail}"
+                    log.error(f"[TuyaAccess] ❌ {err_msg}")
+                    self._log_access(door_id, door_name, source, False, err_msg)
+                    return False, err_msg
+
+                now_iso = time.strftime("%Y-%m-%dT%H:%M:%S")
+                door["last_triggered"] = now_iso
+                for d in self.config.get("doors", []):
+                    if d.get("id") == door_id:
+                        d["last_triggered"] = now_iso
+                        break
+
+                if self.config.get("feedback_sound", True):
+                    try:
+                        winsound.Beep(1400, 120)
+                    except Exception:
+                        pass
+
+                msg = f"Terminal Facial '{door_name}' acionado com sucesso!"
+                log.info(f"[TuyaAccess] ✅ {msg}")
+                self._log_access(door_id, door_name, source, True, msg)
+                return True, msg
+            elif resp.status_code == 401:
+                err_msg = f"Erro 401: Usuário ou senha incorretos para o terminal facial '{door_name}'."
+                log.error(f"[TuyaAccess] ❌ {err_msg}")
+                self._log_access(door_id, door_name, source, False, err_msg)
+                return False, err_msg
+            elif resp.status_code == 403:
+                err_msg = f"Erro 403: Acesso negado. Usuário '{cfg['username']}' sem permissão na facial."
+                log.error(f"[TuyaAccess] ❌ {err_msg}")
+                self._log_access(door_id, door_name, source, False, err_msg)
+                return False, err_msg
+            else:
+                err_msg = f"Resposta inesperada do terminal facial (HTTP {resp.status_code}): {resp.text.strip()[:100]}"
+                log.error(f"[TuyaAccess] ❌ {err_msg}")
+                self._log_access(door_id, door_name, source, False, err_msg)
+                return False, err_msg
+
+        except requests.exceptions.ConnectTimeout:
+            err_msg = f"Tempo limite esgotado ao conectar no terminal facial ({cfg['host']}:{cfg['port']})."
+            log.error(f"[TuyaAccess] 🔌 {err_msg}")
+            self._log_access(door_id, door_name, source, False, err_msg)
+            return False, err_msg
+        except requests.exceptions.ConnectionError:
+            err_msg = f"Não foi possível conectar ao terminal facial ({cfg['host']}:{cfg['port']}). Verifique a rede."
+            log.error(f"[TuyaAccess] 🔌 {err_msg}")
+            self._log_access(door_id, door_name, source, False, err_msg)
+            return False, err_msg
+        except Exception as e:
+            err_msg = f"Erro inesperado ao acionar terminal facial: {e}"
+            log.error(f"[TuyaAccess] ❌ {err_msg}")
+            self._log_access(door_id, door_name, source, False, err_msg)
+            return False, err_msg
+
     def open_door(self, door_id: str, source: str = "Painel DEV") -> Tuple[bool, str]:
         """
-        Executa a abertura da porta/portão na Nuvem Tuya.
+        Executa a abertura da porta/portão na Nuvem Tuya ou Terminal Facial Hikvision.
         Retorna (sucesso, mensagem).
         """
         door = self.get_door(door_id)
@@ -270,6 +459,10 @@ class TuyaAccessManager:
             log.warning(f"[TuyaAccess] {msg}")
             self._log_access(door_id, door.get("name", ""), source, False, msg)
             return False, msg
+
+        # Se for terminal facial Hikvision ISAPI (rede local), dispara diretamente
+        if door.get("mode") in ("hikvision", "facial", "isapi"):
+            return self._open_hikvision_door(door, source)
 
         if not self._manager:
             self._init_cloud_manager()

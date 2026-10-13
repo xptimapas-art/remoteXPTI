@@ -11,8 +11,8 @@ import { AddServerModal } from './components/AddServerModal';
 import { EditServerModal } from './components/EditServerModal';
 import { SettingsModal } from './components/SettingsModal';
 
-const API_BASE = 'http://127.0.0.1:8765';
-const WS_URL = 'ws://127.0.0.1:8765/ws/ajin';
+const API_BASE = '';
+const WS_URL = `ws://${window.location.host}/ws/ajin`;
 
 export const App: React.FC = () => {
   const [currentTab, setCurrentTab] = useState<'servers' | 'map' | 'ajin' | 'doors'>('servers');
@@ -37,7 +37,6 @@ export const App: React.FC = () => {
     statusMessage: 'Pronto',
   });
   const [isBannerDismissed, setIsBannerDismissed] = useState(false);
-  const [isRestarting, setIsRestarting] = useState(false);
   const [mapTargetLocation, setMapTargetLocation] = useState<{
     lat: number;
     lon: number;
@@ -150,6 +149,10 @@ export const App: React.FC = () => {
             msg.type === 'update_channel_changed'
           ) {
             loadUpdateStatus();
+          } else if (msg.type === 'doors_updated') {
+            window.dispatchEvent(new Event('doorsUpdated'));
+          } else if (msg.type === 'incidents_updated') {
+            window.dispatchEvent(new Event('incidentsUpdated'));
           }
         } catch (e) {
           console.error('Falha ao processar mensagem do WebSocket:', e);
@@ -274,13 +277,12 @@ export const App: React.FC = () => {
 
   const handleRestartUpdate = async () => {
     try {
-      setIsRestarting(true);
       await fetch(`${API_BASE}/api/update/restart`, { method: 'POST' });
     } catch (e) {
       console.error('Erro ao reiniciar para atualizar:', e);
-      setIsRestarting(false);
     }
   };
+
 
   const handleChannelChange = async (channel: string) => {
     try {
@@ -322,10 +324,7 @@ export const App: React.FC = () => {
       {/* Banner Superior de Atualização Pronta */}
       {updateInfo.updateReady && !isBannerDismissed && (
         <UpdateBanner
-          newVersion={updateInfo.newVersion}
-          onRestart={handleRestartUpdate}
           onDismiss={() => setIsBannerDismissed(true)}
-          isRestarting={isRestarting}
         />
       )}
 

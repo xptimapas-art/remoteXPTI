@@ -81,6 +81,8 @@ class CloudSyncManager:
             with urllib.request.urlopen(req, timeout=8.0) as resp:
                 if resp.status == 200:
                     data = json.loads(resp.read().decode("utf-8"))
+                    # Filtra o servidor fake usado para armazenar a config do Tuya e doors_config
+                    data = [s for s in data if s.get("id") not in ("ffffffff-ffff-ffff-ffff-ffffffffffff", "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee")]
                     log.info(f"[CloudSync] {len(data)} servidores obtidos com sucesso do Supabase.")
                     return data
         except Exception as e:
@@ -146,6 +148,147 @@ class CloudSyncManager:
         if server.get("scope", "corporate") != "corporate":
             return True, "Servidor local: não enviado para a nuvem."
         return cls.push_servers([server])
+
+    @classmethod
+    def fetch_tuya_session(cls) -> Optional[str]:
+        """Busca a sessão Tuya atualizada no Supabase (embutida na tabela servers)."""
+        cfg = ConfigManager().get_supabase_config()
+        if not cfg.get("enabled") or not cfg.get("url") or not cfg.get("key"):
+            return None
+
+        clean_url = cls._clean_base_url(cfg["url"])
+        # Lê da tabela servers usando o UUID reservado
+        url = f"{clean_url}/rest/v1/servers?id=eq.ffffffff-ffff-ffff-ffff-ffffffffffff&select=notes"
+        headers = cls._get_headers(cfg["key"])
+
+        try:
+            log.info("[CloudSync] Consultando tuya_config no Supabase (via servers)...")
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=8.0) as resp:
+                if resp.status == 200:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    if data and isinstance(data, list) and len(data) > 0:
+                        log.info("[CloudSync] tuya_config obtido com sucesso.")
+                        return data[0].get("notes")
+        except Exception as e:
+            log.warning(f"[CloudSync] Falha ao buscar tuya_config do Supabase: {e}")
+        return None
+
+    @classmethod
+    def push_tuya_session(cls, session_json_str: str) -> bool:
+        """Envia a sessão Tuya atualizada para o Supabase (usando a tabela servers)."""
+        cfg = ConfigManager().get_supabase_config()
+        if not cfg.get("enabled") or not cfg.get("url") or not cfg.get("key"):
+            return False
+
+        clean_url = cls._clean_base_url(cfg["url"])
+        url = f"{clean_url}/rest/v1/servers?on_conflict=id"
+        headers = cls._get_headers(cfg["key"])
+        headers["Prefer"] = "resolution=merge-duplicates"
+
+        # Usa a tabela de servidores existente para não precisar criar tabela nova
+        payload = {
+            "id": "ffffffff-ffff-ffff-ffff-ffffffffffff",
+            "name": "TUYA_CONFIG",
+            "host": "0.0.0.0",
+            "port": 0,
+            "username": "",
+            "password": "",
+            "group": "",
+            "scope": "corporate",
+            "latitude": 0.0,
+            "longitude": 0.0,
+            "favorite": False,
+            "admin_mode": False,
+            "multimon": False,
+            "fullscreen": False,
+            "notes": session_json_str
+        }
+
+        try:
+            json_data = json.dumps([payload], ensure_ascii=False).encode("utf-8")
+            req = urllib.request.Request(url, data=json_data, headers=headers, method="POST")
+            with urllib.request.urlopen(req, timeout=8.0) as resp:
+                if resp.status in (200, 201):
+                    log.info("[CloudSync] tuya_config atualizado com sucesso no Supabase.")
+                    return True
+        except Exception as e:
+            log.warning(f"[CloudSync] Falha ao atualizar tuya_config no Supabase: {e}")
+        return False
+
+    @classmethod
+    def fetch_doors_config(cls) -> Optional[str]:
+        """Busca a configuração de portas atualizada no Supabase (embutida na tabela servers)."""
+        cfg = ConfigManager().get_supabase_config()
+        if not cfg.get("enabled") or not cfg.get("url") or not cfg.get("key"):
+            return None
+
+        clean_url = cls._clean_base_url(cfg["url"])
+        url = f"{clean_url}/rest/v1/servers?id=eq.eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee&select=notes"
+        headers = cls._get_headers(cfg["key"])
+
+        try:
+            log.info("[CloudSync] Consultando doors_config no Supabase (via servers)...")
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=8.0) as resp:
+                if resp.status == 200:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    if data and isinstance(data, list) and len(data) > 0:
+                        log.info("[CloudSync] doors_config obtido com sucesso.")
+                        return data[0].get("notes")
+        except Exception as e:
+            log.warning(f"[CloudSync] Falha ao buscar doors_config do Supabase: {e}")
+        return None
+
+    @classmethod
+    def push_doors_config(cls, config_dict: dict) -> bool:
+        """Envia a configuração de portas para o Supabase (usando a tabela servers)."""
+        cfg = ConfigManager().get_supabase_config()
+        if not cfg.get("enabled") or not cfg.get("url") or not cfg.get("key"):
+            return False
+
+        clean_url = cls._clean_base_url(cfg["url"])
+        url = f"{clean_url}/rest/v1/servers?on_conflict=id"
+        headers = cls._get_headers(cfg["key"])
+        headers["Prefer"] = "resolution=merge-duplicates"
+
+        # Portas de rede local (ex: Facial Hikvision ISAPI de rede local)
+        # são restritas a esta empresa/máquina e NÃO devem ser enviadas para o Supabase
+        clean_config = dict(config_dict)
+        if "doors" in clean_config and isinstance(clean_config["doors"], list):
+            clean_config["doors"] = [
+                d for d in clean_config["doors"]
+                if d.get("mode") not in ("hikvision", "facial", "isapi") and not d.get("is_local")
+            ]
+
+        payload = {
+            "id": "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee",
+            "name": "DOORS_CONFIG",
+            "host": "0.0.0.0",
+            "port": 0,
+            "username": "",
+            "password": "",
+            "group": "",
+            "scope": "corporate",
+            "latitude": 0.0,
+            "longitude": 0.0,
+            "favorite": False,
+            "admin_mode": False,
+            "multimon": False,
+            "fullscreen": False,
+            "notes": json.dumps(clean_config, ensure_ascii=False)
+        }
+
+        try:
+            json_data = json.dumps([payload], ensure_ascii=False).encode("utf-8")
+            req = urllib.request.Request(url, data=json_data, headers=headers, method="POST")
+            with urllib.request.urlopen(req, timeout=8.0) as resp:
+                if resp.status in (200, 201):
+                    log.info("[CloudSync] doors_config atualizado com sucesso no Supabase.")
+                    return True
+        except Exception as e:
+            log.warning(f"[CloudSync] Falha ao atualizar doors_config no Supabase: {e}")
+        return False
 
     @classmethod
     def delete_remote_server(cls, server_id: str) -> Tuple[bool, str]:

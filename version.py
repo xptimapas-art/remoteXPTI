@@ -4,7 +4,7 @@ A fonte de atualizaÃ§Ã£o Ã© fixa e embutida no aplicativo.
 """
 
 APP_NAME = "RemoteXPTI"
-CURRENT_VERSION = "2.1.6"
+CURRENT_VERSION = "2.1.8"
 
 # RepositÃ³rio GitHub oficial fixo do projeto (nÃ£o editÃ¡vel pelo cliente final)
 GITHUB_REPO = "xptimapas-art/remoteXPTI"

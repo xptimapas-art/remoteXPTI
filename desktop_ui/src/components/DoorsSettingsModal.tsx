@@ -11,6 +11,7 @@ import {
   RefreshCw,
   Save,
   HelpCircle,
+  ScanFace,
 } from 'lucide-react';
 
 interface DoorConfig {
@@ -22,6 +23,12 @@ interface DoorConfig {
   scene_id?: string;
   scene_name?: string;
   mode?: string;
+  host?: string;
+  port?: number;
+  protocol?: string;
+  username?: string;
+  password?: string;
+  door_id?: number;
   hotkey?: string;
   enabled?: boolean;
 }
@@ -32,7 +39,7 @@ interface DoorsSettingsModalProps {
   onSaved?: () => void;
 }
 
-const API_BASE = 'http://127.0.0.1:8765';
+const API_BASE = '';
 
 export const DoorsSettingsModal: React.FC<DoorsSettingsModalProps> = ({
   isOpen,
@@ -140,12 +147,46 @@ export const DoorsSettingsModal: React.FC<DoorsSettingsModalProps> = ({
     setDoors([...doors, newDoor]);
   };
 
+  const handleAddFacialDoor = () => {
+    const newId = `door_facial_${Date.now()}`;
+    const newDoor: DoorConfig = {
+      id: newId,
+      name: `Facial Hikvision ${doors.filter(d => d.mode === 'hikvision').length + 1}`,
+      device_name: 'Facial Hikvision (DS-K1T)',
+      mode: 'hikvision',
+      host: '192.168.12.94',
+      port: 80,
+      protocol: 'http',
+      username: 'admin',
+      password: '#18.190%Floripa',
+      door_id: 1,
+      hotkey: '',
+      enabled: true,
+    };
+    setDoors([...doors, newDoor]);
+  };
+
   const handleRemoveDoor = (id: string) => {
     setDoors(doors.filter((d) => d.id !== id));
   };
 
   const handleDoorChange = (id: string, field: keyof DoorConfig, value: any) => {
-    setDoors(doors.map((d) => (d.id === id ? { ...d, [field]: value } : d)));
+    setDoors(doors.map((d) => {
+      if (d.id !== id) return d;
+      const updated = { ...d, [field]: value };
+      if (field === 'mode' && value === 'hikvision') {
+        if (!updated.host) updated.host = '192.168.12.94';
+        if (!updated.port) updated.port = 80;
+        if (!updated.protocol) updated.protocol = 'http';
+        if (!updated.username) updated.username = 'admin';
+        if (!updated.password) updated.password = '#18.190%Floripa';
+        if (updated.door_id === undefined) updated.door_id = 1;
+        if (!updated.device_name || updated.device_name === 'Fechadura Tuya') {
+          updated.device_name = 'Facial Hikvision (DS-K1T)';
+        }
+      }
+      return updated;
+    }));
   };
 
   // Gravador de Hotkey
@@ -303,13 +344,22 @@ export const DoorsSettingsModal: React.FC<DoorsSettingsModalProps> = ({
                 <span className="text-xs text-slate-400 font-semibold">
                   Portas e Motores Cadastrados ({doors.length})
                 </span>
-                <button
-                  onClick={handleAddDoor}
-                  className="px-3 py-1.5 rounded-lg bg-amber-600/20 hover:bg-amber-600/30 border border-amber-500/40 text-amber-300 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>Adicionar Porta</span>
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleAddDoor}
+                    className="px-3 py-1.5 rounded-lg bg-amber-600/20 hover:bg-amber-600/30 border border-amber-500/40 text-amber-300 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Porta Tuya</span>
+                  </button>
+                  <button
+                    onClick={handleAddFacialDoor}
+                    className="px-3 py-1.5 rounded-lg bg-cyan-600/20 hover:bg-cyan-600/30 border border-cyan-500/40 text-cyan-300 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
+                  >
+                    <ScanFace className="w-3.5 h-3.5" />
+                    <span>Facial Hikvision</span>
+                  </button>
+                </div>
               </div>
 
               <div className="space-y-3">
@@ -374,32 +424,122 @@ export const DoorsSettingsModal: React.FC<DoorsSettingsModalProps> = ({
                       </button>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-3 pt-2 border-t border-white/5">
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-3 pt-2 border-t border-white/5">
                       <div>
                         <label className="text-[10px] text-slate-400 block mb-1">
-                          ID da Cena Tuya (Tap-to-Run)
+                          Tipo / Protocolo
                         </label>
-                        <input
-                          type="text"
-                          value={door.scene_id || ''}
-                          placeholder="Ex: o34EQAoAQQniX6Vk"
-                          onChange={(e) => handleDoorChange(door.id, 'scene_id', e.target.value)}
-                          className="w-full bg-[#141620] border border-white/10 rounded-lg px-2.5 py-1 text-xs text-white font-mono outline-none focus:border-amber-500"
-                        />
+                        <select
+                          value={door.mode || 'cloud_scene'}
+                          onChange={(e) => handleDoorChange(door.id, 'mode', e.target.value)}
+                          className="w-full bg-[#141620] border border-white/10 rounded-lg px-2.5 py-1 text-xs text-white outline-none focus:border-amber-500 cursor-pointer"
+                        >
+                          <option value="cloud_scene">Nuvem Tuya (Cena)</option>
+                          <option value="hikvision">Facial Hikvision (ISAPI)</option>
+                        </select>
                       </div>
-                      <div>
-                        <label className="text-[10px] text-slate-400 block mb-1">
-                          ID da Casa Tuya (Home ID)
-                        </label>
-                        <input
-                          type="text"
-                          value={door.home_id || ''}
-                          placeholder="Ex: 100383937"
-                          onChange={(e) => handleDoorChange(door.id, 'home_id', e.target.value)}
-                          className="w-full bg-[#141620] border border-white/10 rounded-lg px-2.5 py-1 text-xs text-white font-mono outline-none focus:border-amber-500"
-                        />
-                      </div>
+
+                      {door.mode === 'hikvision' ? (
+                        <>
+                          <div className="md:col-span-1">
+                            <label className="text-[10px] text-slate-400 block mb-1">
+                              IP / Host do Terminal
+                            </label>
+                            <input
+                              type="text"
+                              value={door.host ?? ''}
+                              placeholder="192.168.12.94"
+                              onChange={(e) => handleDoorChange(door.id, 'host', e.target.value)}
+                              className="w-full bg-[#141620] border border-white/10 rounded-lg px-2.5 py-1 text-xs text-white font-mono outline-none focus:border-cyan-500"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] text-slate-400 block mb-1">
+                              Porta HTTP
+                            </label>
+                            <input
+                              type="number"
+                              value={door.port ?? 80}
+                              placeholder="80"
+                              onChange={(e) =>
+                                handleDoorChange(door.id, 'port', parseInt(e.target.value) || 80)
+                              }
+                              className="w-full bg-[#141620] border border-white/10 rounded-lg px-2.5 py-1 text-xs text-white font-mono outline-none focus:border-cyan-500"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] text-slate-400 block mb-1">
+                              ID Relé / Porta
+                            </label>
+                            <input
+                              type="number"
+                              value={door.door_id ?? 1}
+                              placeholder="1"
+                              onChange={(e) =>
+                                handleDoorChange(door.id, 'door_id', parseInt(e.target.value) || 1)
+                              }
+                              className="w-full bg-[#141620] border border-white/10 rounded-lg px-2.5 py-1 text-xs text-white font-mono outline-none focus:border-cyan-500"
+                            />
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="md:col-span-2">
+                            <label className="text-[10px] text-slate-400 block mb-1">
+                              ID da Cena Tuya (Tap-to-Run)
+                            </label>
+                            <input
+                              type="text"
+                              value={door.scene_id || ''}
+                              placeholder="Ex: o34EQAoAQQniX6Vk"
+                              onChange={(e) => handleDoorChange(door.id, 'scene_id', e.target.value)}
+                              className="w-full bg-[#141620] border border-white/10 rounded-lg px-2.5 py-1 text-xs text-white font-mono outline-none focus:border-amber-500"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] text-slate-400 block mb-1">
+                              ID da Casa Tuya (Home ID)
+                            </label>
+                            <input
+                              type="text"
+                              value={door.home_id || ''}
+                              placeholder="Ex: 100383937"
+                              onChange={(e) => handleDoorChange(door.id, 'home_id', e.target.value)}
+                              className="w-full bg-[#141620] border border-white/10 rounded-lg px-2.5 py-1 text-xs text-white font-mono outline-none focus:border-amber-500"
+                            />
+                          </div>
+                        </>
+                      )}
                     </div>
+
+                    {door.mode === 'hikvision' && (
+                      <div className="grid grid-cols-2 gap-3 pt-1">
+                        <div>
+                          <label className="text-[10px] text-slate-400 block mb-1">
+                            Usuário ISAPI
+                          </label>
+                          <input
+                            type="text"
+                            value={door.username ?? ''}
+                            placeholder="admin"
+                            onChange={(e) => handleDoorChange(door.id, 'username', e.target.value)}
+                            className="w-full bg-[#141620] border border-white/10 rounded-lg px-2.5 py-1 text-xs text-white font-mono outline-none focus:border-cyan-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-slate-400 block mb-1">
+                            Senha ISAPI
+                          </label>
+                          <input
+                            type="password"
+                            value={door.password ?? ''}
+                            placeholder="#18.190%Floripa"
+                            onChange={(e) => handleDoorChange(door.id, 'password', e.target.value)}
+                            className="w-full bg-[#141620] border border-white/10 rounded-lg px-2.5 py-1 text-xs text-white font-mono outline-none focus:border-cyan-500"
+                          />
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>

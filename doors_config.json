@@ -2,7 +2,8 @@
   "enabled": true,
   "feedback_sound": true,
   "feedback_notification": true,
-  "user_code": "BxLxxMC",
+  "user_code": "NEW_CODE",
+  "facial_initialized": true,
   "doors": [
     {
       "id": "door_operacional",
@@ -13,7 +14,46 @@
       "scene_id": "o34EQAoAQQniX6Vk",
       "scene_name": "Porta operacional",
       "mode": "cloud_scene",
+      "hotkey": "PageUp",
+      "enabled": true,
+      "last_triggered": null
+    },
+    {
+      "id": "door_1791316808940",
+      "name": "Portao interno XPTI",
+      "device_name": "Fechadura Tuya",
+      "home_id": "100383937",
+      "scene_id": "ajvvOwQB0Xjx1eE6",
+      "scene_name": "Cena Tuya",
+      "mode": "cloud_scene",
       "hotkey": "PageDown",
+      "enabled": true,
+      "last_triggered": null
+    },
+    {
+      "id": "door_1791317260247",
+      "name": "Portão Garagem XPTI ",
+      "device_name": "Fechadura Tuya",
+      "home_id": "100383937",
+      "scene_id": "KLk4MWUauvAgSS6V",
+      "scene_name": "Cena Tuya",
+      "mode": "cloud_scene",
+      "hotkey": "HOME",
+      "enabled": true,
+      "last_triggered": null
+    },
+    {
+      "id": "door_facial_hikvision",
+      "name": "Portaria Facial",
+      "device_name": "Facial Hikvision (DS-K1T)",
+      "mode": "hikvision",
+      "host": "192.168.12.94",
+      "port": 80,
+      "protocol": "http",
+      "username": "admin",
+      "password": "#18.190%Floripa",
+      "door_id": 1,
+      "hotkey": "",
       "enabled": true,
       "last_triggered": null
     }

@@ -384,8 +384,26 @@ class SilentAutoUpdater:
                         pass
                 temp_part.replace(temp_dest)
                 self.downloaded_file = temp_dest
+                
+                # IN-APP SWAPPER
+                try:
+                    is_frozen = getattr(sys, "frozen", False)
+                    if is_frozen:
+                        current_exe = Path(sys.executable).resolve()
+                        old_exe = current_exe.with_name(current_exe.name.replace('.exe', '.old.exe'))
+                        if old_exe.exists():
+                            try:
+                                old_exe.unlink()
+                            except Exception:
+                                pass
+                        current_exe.rename(old_exe)
+                        temp_dest.replace(current_exe)
+                        log.info(f"[SilentUpdater] In-app swap executado com sucesso: {current_exe}")
+                except Exception as e:
+                    log.error(f"[SilentUpdater] Erro no in-app swap: {e}")
+
                 self.update_ready = True
-                log.info(f"[SilentUpdater] Nova versão {self.new_version} baixada e pronta em {temp_dest}!")
+                log.info(f"[SilentUpdater] Nova versão {self.new_version} baixada e pronta!")
 
                 if self.on_ready_callback:
                     self.on_ready_callback(self.new_version)
@@ -398,359 +416,8 @@ class SilentAutoUpdater:
             self.is_downloading = False
 
     def apply_update_and_restart(self, cleanup_func: Optional[Callable[[], None]] = None):
-        """Substitui o executável atual e reinicia o aplicativo imediatamente de forma limpa."""
-        if not self.downloaded_file or not self.downloaded_file.exists():
-            log.warning("[SilentUpdater] apply_update_and_restart chamado mas downloaded_file não existe. Disparando novo download...")
-            self.update_ready = False
-            threading.Thread(target=self.start_background_check, args=(True,), daemon=True).start()
-            return
-
-        self.update_ready = False
-        log.info(f"[SilentUpdater] Aplicando atualização para v{self.new_version} e reiniciando a aplicação...")
-
-        # 1. Executa encerramento gracioso dos subsistemas (Edge, servidores, timers, splash)
-        func_to_clean = cleanup_func or self.cleanup_callback
-        if func_to_clean:
-            try:
-                log.info("[SilentUpdater] Executando rotina de limpeza pré-atualização...")
-                func_to_clean()
-            except Exception as e:
-                log.warning(f"[SilentUpdater] Erro na rotina de limpeza pré-atualização: {e}")
-
-        # Varredura complementar de processos Edge vinculados ao map_cache antes de fechar
-        try:
-            cache_dir = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "RemoteXPTI" / "map_cache"
-            cache_str = str(cache_dir).lower()
-            import win32com.client
-            wmi = win32com.client.GetObject("winmgmts:")
-            procs = wmi.ExecQuery("SELECT ProcessId, CommandLine FROM Win32_Process WHERE Name = 'msedge.exe'")
-            for p in procs:
-                cmd = (p.CommandLine or "").lower()
-                if cache_str in cmd:
-                    try:
-                        creation_flags = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
-                        subprocess.run(["taskkill", "/F", "/T", "/PID", str(p.ProcessId)], capture_output=True, creationflags=creation_flags)
-                    except Exception:
-                        pass
-        except Exception:
-            pass
-
-        is_frozen = getattr(sys, "frozen", False)
-        current_exe = Path(sys.executable).resolve()
-        repo_dir = Path(__file__).parent.resolve()
-        app_dir = current_exe.parent if is_frozen else repo_dir
-
-        # Caminho dos alvos de atualização
-        dist_exe = repo_dir / "dist" / "RemoteXPTI.exe"
-        local_app_exe = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))) / "Programs" / "RemoteXPTI" / "RemoteXPTI.exe"
-        version_file = repo_dir / "version.py"
-        run_bat = repo_dir / "run_modern.bat"
-        pyw_bin = Path(sys.executable).parent / "pythonw.exe"
-        launch_script = repo_dir / "launch_modern_desktop.py"
-        icon_path = repo_dir / "imagens" / "app_icon.png"
-        if not icon_path.exists():
-            icon_path = app_dir / "imagens" / "app_icon.png"
-
-        import tempfile
-        temp_dir = Path(tempfile.gettempdir())
-        ps1_path = temp_dir / "remotexpti_update_gui.ps1"
-        current_pid = os.getpid()
-        is_frozen_ps = "$true" if is_frozen else "$false"
-
-        ps_script = f"""# Atualizador com Tela de Carregamento Moderna (Sem janelas de CMD)
-Add-Type -AssemblyName System.Windows.Forms
-Add-Type -AssemblyName System.Drawing
-
-[System.Windows.Forms.Application]::EnableVisualStyles()
-
-$form = New-Object System.Windows.Forms.Form
-$form.Text = "Atualizando RemoteXPTI"
-$form.Size = New-Object System.Drawing.Size(460, 290)
-$form.StartPosition = "CenterScreen"
-$form.FormBorderStyle = "None"
-$form.TopMost = $true
-$form.ShowInTaskbar = $true
-$form.BackColor = [System.Drawing.Color]::FromArgb(18, 19, 24)
-$form.ForeColor = [System.Drawing.Color]::White
-
-# Borda suave moderna e efeito visual na janela
-$form.Add_Paint({{
-    param($s, $e)
-    $penBorder = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(36, 38, 48), 1.5)
-    $e.Graphics.DrawRectangle($penBorder, 1, 1, $s.Width - 2, $s.Height - 2)
-    $penHalo = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(223, 2, 9), 2.0)
-    $e.Graphics.DrawEllipse($penHalo, 186, 20, 88, 88)
-}})
-
-$pngPath = '{str(icon_path)}'
-if (Test-Path $pngPath) {{
-    try {{
-        $pbox = New-Object System.Windows.Forms.PictureBox
-        $pbox.Size = New-Object System.Drawing.Size(76, 76)
-        $pbox.Location = New-Object System.Drawing.Point(192, 26)
-        $pbox.SizeMode = [System.Windows.Forms.PictureBoxSizeMode]::Zoom
-        $pbox.Image = [System.Drawing.Image]::FromFile($pngPath)
-        $form.Controls.Add($pbox)
-    }} catch {{}}
-}}
-
-$titleLabel = New-Object System.Windows.Forms.Label
-$titleLabel.Text = "Atualizando RemoteXPTI"
-$titleLabel.Font = New-Object System.Drawing.Font("Segoe UI", 15, [System.Drawing.FontStyle]::Bold)
-$titleLabel.ForeColor = [System.Drawing.Color]::White
-$titleLabel.Location = New-Object System.Drawing.Point(20, 118)
-$titleLabel.Size = New-Object System.Drawing.Size(420, 28)
-$titleLabel.TextAlign = [System.Drawing.ContentAlignment]::MiddleCenter
-$form.Controls.Add($titleLabel)
-
-$subLabel = New-Object System.Windows.Forms.Label
-$subLabel.Text = "XPti Tecnologia  •  Instalando v{self.new_version}"
-$subLabel.Font = New-Object System.Drawing.Font("Segoe UI", 9.5)
-$subLabel.ForeColor = [System.Drawing.Color]::FromArgb(126, 131, 148)
-$subLabel.Location = New-Object System.Drawing.Point(20, 148)
-$subLabel.Size = New-Object System.Drawing.Size(420, 20)
-$subLabel.TextAlign = [System.Drawing.ContentAlignment]::MiddleCenter
-$form.Controls.Add($subLabel)
-
-$pbar = New-Object System.Windows.Forms.ProgressBar
-$pbar.Location = New-Object System.Drawing.Point(115, 190)
-$pbar.Size = New-Object System.Drawing.Size(230, 4)
-$pbar.Style = [System.Windows.Forms.ProgressBarStyle]::Marquee
-$pbar.MarqueeAnimationSpeed = 15
-$form.Controls.Add($pbar)
-
-$statusLabel = New-Object System.Windows.Forms.Label
-$statusLabel.Text = "Substituindo executável pela nova versão..."
-$statusLabel.Font = New-Object System.Drawing.Font("Segoe UI", 8.5)
-$statusLabel.ForeColor = [System.Drawing.Color]::FromArgb(100, 104, 122)
-$statusLabel.Location = New-Object System.Drawing.Point(20, 216)
-$statusLabel.Size = New-Object System.Drawing.Size(420, 22)
-$statusLabel.TextAlign = [System.Drawing.ContentAlignment]::MiddleCenter
-$form.Controls.Add($statusLabel)
-
-$logDir = Join-Path $env:LOCALAPPDATA "RemoteXPTI\\logs"
-if (-not (Test-Path $logDir)) {{ New-Item -ItemType Directory -Path $logDir -Force | Out-Null }}
-$logFile = Join-Path $logDir "remotexpti.log"
-
-function Write-Log($msg) {{
-    $line = "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] [AutoUpdater] $msg"
-    try {{ Add-Content -Path $logFile -Value $line -ErrorAction SilentlyContinue }} catch {{}}
-}}
-
-Write-Log "Iniciando processo de atualização para v{self.new_version}..."
-
-$timer = New-Object System.Windows.Forms.Timer
-$timer.Interval = 250
-$script:ticks = 0
-$script:isApplying = $false
-
-$timer.Add_Tick({{
-    $script:ticks++
-    if ($script:ticks -eq 1) {{
-        $statusLabel.Text = "Liberando arquivos e processos anteriores..."
-        $form.Refresh()
-    }}
-    if ($script:ticks -eq 2) {{
-        Write-Log "Encerrando processos RemoteXPTI e Edge auxiliares..."
-        $statusLabel.Text = "Instalando versão v{self.new_version}..."
-        $form.Refresh()
-        try {{
-            Stop-Process -Id {current_pid} -Force -ErrorAction SilentlyContinue
-        }} catch {{}}
-        try {{
-            Get-Process -Name "RemoteXPTI" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-        }} catch {{}}
-        try {{
-            $conn = Get-NetTCPConnection -LocalPort 8765 -ErrorAction SilentlyContinue
-            if ($conn -and $conn.OwningProcess) {{
-                Stop-Process -Id $conn.OwningProcess -Force -ErrorAction SilentlyContinue
-            }}
-        }} catch {{}}
-        try {{
-            Get-CimInstance Win32_Process -Filter "name = 'pythonw.exe' or name = 'python.exe'" | Where-Object {{
-                $_.CommandLine -and $_.CommandLine.Contains("launch_modern_desktop.py")
-            }} | ForEach-Object {{
-                Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
-            }}
-        }} catch {{}}
-        try {{
-            Get-Process -Name "pythonw", "python" -ErrorAction SilentlyContinue | Where-Object {{
-                $_.MainWindowTitle -like "*RemoteXPTI*"
-            }} | Stop-Process -Force -ErrorAction SilentlyContinue
-        }} catch {{}}
-        try {{
-            $cache = (Join-Path $env:LOCALAPPDATA "RemoteXPTI\\map_cache").ToLower()
-            Get-CimInstance Win32_Process -Filter "name = 'msedge.exe'" | Where-Object {{
-                ($_.CommandLine -and $_.CommandLine.ToLower().Contains($cache)) -or
-                ($_.ParentProcessId -eq {current_pid})
-            }} | ForEach-Object {{
-                try {{ cmd.exe /c "taskkill /F /T /PID $($_.ProcessId) >nul 2>&1" }} catch {{ Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }}
-            }}
-        }} catch {{}}
-    }}
-    if ($script:ticks -ge 4 -and -not $script:isApplying) {{
-        $script:isApplying = $true
-        $copied = $false
-        $isFrozen = {is_frozen_ps}
-        $destPath = '{str(current_exe)}'
-        $sourcePath = '{str(self.downloaded_file)}'
-        $distPath = '{str(dist_exe)}'
-        $localAppPath = '{str(local_app_exe)}'
-        $versionFilePath = '{str(version_file)}'
-
-        if ($isFrozen) {{
-            $oldPath = "$destPath.old"
-            for ($i = 0; $i -lt 30; $i++) {{
-                try {{
-                    Get-Process -Name "RemoteXPTI" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-
-                    if (Test-Path $oldPath) {{
-                        Remove-Item -Path $oldPath -Force -ErrorAction SilentlyContinue
-                    }}
-                    if (Test-Path $destPath) {{
-                        try {{
-                            Remove-Item -Path $destPath -Force -ErrorAction Stop
-                        }} catch {{
-                            Move-Item -Path $destPath -Destination $oldPath -Force -ErrorAction SilentlyContinue
-                        }}
-                    }}
-                    Copy-Item -Path $sourcePath -Destination $destPath -Force -ErrorAction Stop
-                    Remove-Item -Path $sourcePath -Force -ErrorAction SilentlyContinue
-                    if (Test-Path $oldPath) {{
-                        Remove-Item -Path $oldPath -Force -ErrorAction SilentlyContinue
-                    }}
-                    $copied = $true
-                    Write-Log "Executável compilado substituído com sucesso na tentativa $i!"
-                    break
-                }} catch {{
-                    $err = $_.Exception.Message
-                    Write-Log "Tentativa $i falhou ao substituir executável: $err"
-                    Start-Sleep -Milliseconds 350
-                }}
-            }}
-        }} else {{
-            # Modo Dev / Source: atualiza binários em dist e em AppData, e version.py
-            try {{
-                $distDir = Split-Path -Parent $distPath
-                if (-not (Test-Path $distDir)) {{ New-Item -ItemType Directory -Path $distDir -Force | Out-Null }}
-                Copy-Item -Path $sourcePath -Destination $distPath -Force -ErrorAction SilentlyContinue
-                Write-Log "Binário dist atualizado: $distPath"
-
-                $localDir = Split-Path -Parent $localAppPath
-                if (-not (Test-Path $localDir)) {{ New-Item -ItemType Directory -Path $localDir -Force | Out-Null }}
-                Copy-Item -Path $sourcePath -Destination $localAppPath -Force -ErrorAction SilentlyContinue
-                Write-Log "Binário local atualizado: $localAppPath"
-
-                if (Test-Path $versionFilePath) {{
-                    $raw = Get-Content -Path $versionFilePath -Raw
-                    $raw = $raw -replace 'CURRENT_VERSION\\s*=\\s*"[^"]+"', 'CURRENT_VERSION = "{self.new_version}"'
-                    Set-Content -Path $versionFilePath -Value $raw -Encoding UTF8
-                    Write-Log "version.py atualizado para {self.new_version}"
-                }}
-                Remove-Item -Path $sourcePath -Force -ErrorAction SilentlyContinue
-                $copied = $true
-            }} catch {{
-                $err = $_.Exception.Message
-                Write-Log "Erro ao atualizar em modo dev: $err"
-            }}
-        }}
-
-        if ($copied) {{
-            $timer.Stop()
-            Write-Log "Iniciando nova versão v{self.new_version}..."
-            $statusLabel.Text = "Versão v{self.new_version} instalada com sucesso! Iniciando..."
-            $statusLabel.ForeColor = [System.Drawing.Color]::FromArgb(0, 204, 102)
-            $pbar.Style = [System.Windows.Forms.ProgressBarStyle]::Continuous
-            $pbar.Value = 100
-            $form.Refresh()
-            [System.Windows.Forms.Application]::DoEvents()
-            
-            $env:PYINSTALLER_RESET_ENVIRONMENT = "1"
-            $env:_MEIPASS2 = $null
-            $env:_MEIPASS = $null
-
-            Start-Sleep -Milliseconds 700
-            
-            if ($isFrozen) {{
-                $psi = New-Object System.Diagnostics.ProcessStartInfo
-                $psi.FileName = '{str(current_exe)}'
-                $psi.WorkingDirectory = '{str(app_dir)}'
-                $psi.UseShellExecute = $true
-                [System.Diagnostics.Process]::Start($psi) | Out-Null
-            }} else {{
-                $pywPath = '{str(pyw_bin if pyw_bin.exists() else current_exe)}'
-                $scriptPath = '{str(launch_script)}'
-                if (Test-Path $scriptPath) {{
-                    $psi = New-Object System.Diagnostics.ProcessStartInfo
-                    $psi.FileName = $pywPath
-                    $psi.Arguments = "`"$scriptPath`""
-                    $psi.WorkingDirectory = '{str(repo_dir)}'
-                    $psi.UseShellExecute = $true
-                    [System.Diagnostics.Process]::Start($psi) | Out-Null
-                }} elseif (Test-Path '{str(run_bat)}') {{
-                    Start-Process -FilePath "cmd.exe" -ArgumentList "/c `"{str(run_bat)}`"" -WorkingDirectory '{str(repo_dir)}' -WindowStyle Hidden
-                }}
-            }}
-            
-            Start-Sleep -Milliseconds 400
-            $form.Hide()
-            $form.Close()
-            $form.Dispose()
-            [System.Windows.Forms.Application]::Exit()
-            Remove-Item -Path '{str(ps1_path)}' -Force -ErrorAction SilentlyContinue
-            Stop-Process -Id $PID -Force
-        }} elseif ($script:ticks -gt 35) {{
-            $timer.Stop()
-            Write-Log "ERRO CRÍTICO: Não foi possível substituir o executável após 30 tentativas."
-            [System.Windows.Forms.MessageBox]::Show("Não foi possível substituir o executável. Verifique os logs de diagnóstico em %LOCALAPPDATA%\\RemoteXPTI\\logs ou execute o instalador Setup_RemoteXPTI.", "Erro na Atualização", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
-            $form.Hide()
-            $form.Close()
-            $form.Dispose()
-            [System.Windows.Forms.Application]::Exit()
-            Remove-Item -Path '{str(ps1_path)}' -Force -ErrorAction SilentlyContinue
-            Stop-Process -Id $PID -Force
-        }} else {{
-            $script:isApplying = $false
-        }}
-    }}
-}})
-
-$form.Add_Shown({{
-    $form.Activate()
-    $form.BringToFront()
-    $timer.Start()
-}})
-[System.Windows.Forms.Application]::Run($form)
-Remove-Item -Path '{str(ps1_path)}' -Force -ErrorAction SilentlyContinue
-Stop-Process -Id $PID -Force
-"""
-        ps1_path.write_text(ps_script, encoding="utf-8-sig")
-
-        try:
-            # Dispara o atualizador visual via WMI (Win32_Process.Create)
-            # para ser 100% independente do processo pai e sobreviver ao encerramento imediato
-            cmd = f'wmic process call create "powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File \\"{str(ps1_path)}\\""'
-            subprocess.run(cmd, shell=True, capture_output=True)
-            log.info(f"[SilentUpdater] Script de atualização visual disparado com sucesso via WMI: {ps1_path}")
-        except Exception as e:
-            log.error(f"[SilentUpdater] Erro ao disparar tela de atualização via WMI: {e}")
-            try:
-                subprocess.Popen(
-                    [
-                        "powershell.exe",
-                        "-NoProfile",
-                        "-WindowStyle", "Hidden",
-                        "-ExecutionPolicy", "Bypass",
-                        "-File", str(ps1_path)
-                    ]
-                )
-            except Exception:
-                pass
-
-        # Fecha a aplicação atual em 250ms para que a janela antiga desapareça
-        # e o usuário veja imediatamente apenas o quadrado central na tela
-        time.sleep(0.25)
-        os._exit(0)
+        """Aviso: não mais reinicia automaticamente. Apenas registra. A troca in-place já ocorreu."""
+        pass
 
 
 if ctk is not None:
@@ -768,10 +435,9 @@ if ctk is not None:
             )
             self.pack_propagate(False)
 
-            # Texto de aviso
             lbl = ctk.CTkLabel(
                 self,
-                text=f"🚀 Nova versão v{new_version} pronta para instalar!",
+                text="Atualização pronta. Reinicie quando quiser.",
                 font=ctk.CTkFont(size=12, weight="bold"),
                 text_color="#ffffff"
             )

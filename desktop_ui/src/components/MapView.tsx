@@ -90,7 +90,7 @@ export const MapView: React.FC<MapViewProps> = React.memo(({
   // Carrega incidentes da API local
   const loadIncidents = async () => {
     try {
-      const res = await fetch('http://127.0.0.1:8765/api/incidents');
+      const res = await fetch('/api/incidents');
       if (res.ok) {
         const data = await res.json();
         setIncidents(data);
@@ -102,8 +102,9 @@ export const MapView: React.FC<MapViewProps> = React.memo(({
 
   useEffect(() => {
     loadIncidents();
-    const interval = setInterval(loadIncidents, 10000);
-    return () => clearInterval(interval);
+    const handleIncidentsUpdated = () => loadIncidents();
+    window.addEventListener('incidentsUpdated', handleIncidentsUpdated);
+    return () => window.removeEventListener('incidentsUpdated', handleIncidentsUpdated);
   }, []);
 
   // Inicialização do Mapa

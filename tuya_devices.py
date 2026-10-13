@@ -96,12 +96,18 @@ def atomic_write(path, data, prefix=".tmp-"):
 
 
 _session_write_lock = threading.Lock()
+on_session_saved = None
 
 
 def save_session(path, session):
     payload = json.dumps(session, indent=2).encode("utf-8")
     with _session_write_lock:
         atomic_write(path, payload, prefix=".session-")
+    if on_session_saved:
+        try:
+            on_session_saved(payload.decode("utf-8"))
+        except Exception:
+            pass
 
 
 class _SessionSaver:

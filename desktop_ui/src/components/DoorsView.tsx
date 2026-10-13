@@ -10,6 +10,7 @@ import {
   Clock,
   CheckCircle2,
   Lock,
+  ScanFace,
 } from 'lucide-react';
 
 interface DoorItem {
@@ -19,6 +20,11 @@ interface DoorItem {
   device_id?: string;
   scene_id?: string;
   scene_name?: string;
+  mode?: string;
+  host?: string;
+  port?: number;
+  door_id?: number;
+  is_local?: boolean;
   hotkey?: string;
   enabled?: boolean;
   cloud_online?: boolean;
@@ -43,7 +49,7 @@ interface DoorsViewProps {
   onDoorTriggered?: (doorName: string, success: boolean, msg: string) => void;
 }
 
-const API_BASE = 'http://127.0.0.1:8765';
+const API_BASE = '';
 
 export const DoorsView: React.FC<DoorsViewProps> = React.memo(({
   isDev,
@@ -84,8 +90,13 @@ export const DoorsView: React.FC<DoorsViewProps> = React.memo(({
   useEffect(() => {
     if (isDev) {
       fetchDoorsData();
-      const interval = setInterval(fetchDoorsData, 4000);
-      return () => clearInterval(interval);
+      const interval = setInterval(fetchDoorsData, 8000);
+      const handleDoorsUpdated = () => fetchDoorsData();
+      window.addEventListener('doorsUpdated', handleDoorsUpdated);
+      return () => {
+        clearInterval(interval);
+        window.removeEventListener('doorsUpdated', handleDoorsUpdated);
+      };
     }
   }, [isDev]);
 
@@ -226,17 +237,30 @@ export const DoorsView: React.FC<DoorsViewProps> = React.memo(({
         {doors.map((door) => {
           const isTriggering = triggeringId === door.id;
           const isSuccess = successId === door.id;
+          const isFacial =
+            door.mode === 'hikvision' ||
+            door.mode === 'facial' ||
+            door.mode === 'isapi' ||
+            door.name.toLowerCase().includes('facial') ||
+            (door.device_name && door.device_name.toLowerCase().includes('facial'));
           const isGarage =
-            door.name.toLowerCase().includes('portão') ||
-            door.name.toLowerCase().includes('garagem') ||
-            door.name.toLowerCase().includes('car');
+            !isFacial &&
+            (door.name.toLowerCase().includes('portão') ||
+              door.name.toLowerCase().includes('garagem') ||
+              door.name.toLowerCase().includes('car'));
+          const isDoorDisabled =
+            isTriggering || door.enabled === false || (!isFacial && !cloudStatus.connected);
 
           return (
             <div
               key={door.id}
               className={`bg-[#151722] border rounded-2xl p-5 shadow-xl transition-all relative overflow-hidden flex flex-col justify-between ${
-                isSuccess
+                door.enabled === false
+                  ? 'border-slate-800 opacity-60'
+                  : isSuccess
                   ? 'border-emerald-500/80 shadow-[0_0_25px_rgba(16,185,129,0.25)]'
+                  : isFacial
+                  ? 'border-cyan-500/30 hover:border-cyan-500/50'
                   : 'border-[#272b3c] hover:border-[#383e56]'
               }`}
             >
@@ -246,25 +270,44 @@ export const DoorsView: React.FC<DoorsViewProps> = React.memo(({
                   <div className="flex items-center gap-3">
                     <div
                       className={`w-11 h-11 rounded-xl flex items-center justify-center transition-all ${
-                        isSuccess
+                        door.enabled === false
+                          ? 'bg-slate-800 text-slate-500 border border-slate-700/60'
+                          : isSuccess
                           ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
+                          : isFacial
+                          ? 'bg-cyan-500/15 text-cyan-400 border border-cyan-500/30'
                           : 'bg-[#1e2230] text-amber-400 border border-[#353b52]'
                       }`}
                     >
-                      {isGarage ? (
-                        <Car className="w-5 h-5" />
+                      {door.enabled === false ? (
+                        <Lock className="w-5 h-5" />
                       ) : isSuccess ? (
                         <DoorOpen className="w-5 h-5" />
+                      ) : isFacial ? (
+                        <ScanFace className="w-5 h-5" />
+                      ) : isGarage ? (
+                        <Car className="w-5 h-5" />
                       ) : (
                         <DoorClosed className="w-5 h-5" />
                       )}
                     </div>
                     <div>
-                      <h3 className="font-extrabold text-sm text-white leading-tight">
-                        {door.name}
-                      </h3>
+                      <div className="flex items-center gap-1.5">
+                        <h3 className="font-extrabold text-sm text-white leading-tight">
+                          {door.name}
+                        </h3>
+                        {door.enabled === false ? (
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-slate-800 text-slate-400 border border-slate-700 font-mono">
+                            DESATIVADA
+                          </span>
+                        ) : isFacial ? (
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 font-mono">
+                            ISAPI
+                          </span>
+                        ) : null}
+                      </div>
                       <span className="text-[11px] text-slate-400 font-medium">
-                        {door.device_name || 'Fechadura Inteligente'}
+                        {door.device_name || (isFacial ? 'Terminal Facial Hikvision' : 'Fechadura Inteligente')}
                       </span>
                     </div>
                   </div>
@@ -284,11 +327,20 @@ export const DoorsView: React.FC<DoorsViewProps> = React.memo(({
                 {/* Status e Metadados */}
                 <div className="bg-[#1a1d2b] border border-white/5 rounded-xl p-2.5 text-xs text-slate-300 space-y-1 my-3">
                   <div className="flex items-center justify-between">
-                    <span className="text-slate-400 text-[11px]">Nuvem Tuya:</span>
-                    <span className="text-emerald-400 font-semibold flex items-center gap-1 text-[11px]">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                      Pronta para disparo
+                    <span className="text-slate-400 text-[11px]">
+                      {isFacial ? 'Terminal Facial:' : 'Nuvem Tuya:'}
                     </span>
+                    {isFacial ? (
+                      <span className="text-cyan-400 font-semibold flex items-center gap-1 text-[11px]">
+                        <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
+                        {door.host || '192.168.12.94'}{door.port && door.port !== 80 ? `:${door.port}` : ''}
+                      </span>
+                    ) : (
+                      <span className="text-emerald-400 font-semibold flex items-center gap-1 text-[11px]">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                        Pronta para disparo
+                      </span>
+                    )}
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-slate-400 text-[11px]">Último disparo:</span>
@@ -303,12 +355,16 @@ export const DoorsView: React.FC<DoorsViewProps> = React.memo(({
               <div className="pt-2">
                 <button
                   onClick={() => handleOpenDoor(door)}
-                  disabled={isTriggering || !cloudStatus.connected}
+                  disabled={isDoorDisabled}
                   className={`w-full py-3.5 px-4 rounded-xl font-extrabold text-xs tracking-wider transition-all shadow-lg flex items-center justify-center gap-2 cursor-pointer ${
-                    isSuccess
+                    door.enabled === false
+                      ? 'bg-slate-800/80 text-slate-500 border border-slate-700/50 cursor-not-allowed'
+                      : isSuccess
                       ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-[0_0_15px_rgba(16,185,129,0.5)]'
                       : isTriggering
                       ? 'bg-amber-700/60 text-amber-200 cursor-wait'
+                      : isFacial
+                      ? 'bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 active:scale-98 text-white shadow-[0_4px_16px_rgba(6,182,212,0.35)]'
                       : 'bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 active:scale-98 text-white shadow-[0_4px_16px_rgba(217,119,6,0.35)]'
                   }`}
                 >
@@ -320,12 +376,23 @@ export const DoorsView: React.FC<DoorsViewProps> = React.memo(({
                   ) : isSuccess ? (
                     <>
                       <CheckCircle2 className="w-4 h-4" />
-                      <span>PORTA ABERTA COM SUCESSO!</span>
+                      <span>{isFacial ? 'ACESSO FACIAL LIBERADO!' : 'PORTA ABERTA COM SUCESSO!'}</span>
+                    </>
+                  ) : door.enabled === false ? (
+                    <>
+                      <Lock className="w-4 h-4 text-slate-500" />
+                      <span>DISPOSITIVO DESATIVADO</span>
                     </>
                   ) : (
                     <>
-                      {isGarage ? <Car className="w-4 h-4" /> : <DoorOpen className="w-4 h-4" />}
-                      <span>{isGarage ? 'ABRIR PORTÃO' : 'ABRIR PORTA'}</span>
+                      {isFacial ? (
+                        <ScanFace className="w-4 h-4" />
+                      ) : isGarage ? (
+                        <Car className="w-4 h-4" />
+                      ) : (
+                        <DoorOpen className="w-4 h-4" />
+                      )}
+                      <span>{isFacial ? 'LIBERAR FACIAL' : isGarage ? 'ABRIR PORTÃO' : 'ABRIR PORTA'}</span>
                     </>
                   )}
                 </button>

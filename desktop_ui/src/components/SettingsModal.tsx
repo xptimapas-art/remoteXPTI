@@ -101,7 +101,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setDevError('');
 
     try {
-      const res = await fetch('http://127.0.0.1:8765/api/dev/login', {
+      const res = await fetch('/api/dev/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password: devPassword }),
@@ -124,7 +124,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const handleDevLogout = async () => {
     setDevLoading(true);
     try {
-      await fetch('http://127.0.0.1:8765/api/dev/logout', { method: 'POST' });
+      await fetch('/api/dev/logout', { method: 'POST' });
       onDevStatusChanged(false);
     } catch (err) {
       console.error('Erro ao sair do modo DEV:', err);
@@ -137,7 +137,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setSyncLoading(true);
     setSyncMessage('');
     try {
-      const res = await fetch('http://127.0.0.1:8765/api/sync/supabase', { method: 'POST' });
+      const res = await fetch('/api/sync/supabase', { method: 'POST' });
       const data = await res.json();
       if (data.success) {
         setSyncMessage(`✅ ${data.message || 'Sincronizado com sucesso!'}`);
@@ -155,7 +155,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const fetchReleasesList = async () => {
     setLoadingReleases(true);
     try {
-      const res = await fetch('http://127.0.0.1:8765/api/update/releases');
+      const res = await fetch('/api/update/releases');
       if (res.ok) {
         const data = await res.json();
         const list: ReleaseItem[] = data.releases || [];
@@ -183,7 +183,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setInstallingVersion(true);
     setInstallStatus(`⬇️ Baixando ${selectedTag}...`);
     try {
-      const res = await fetch('http://127.0.0.1:8765/api/update/install_version', {
+      const res = await fetch('/api/update/install_version', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tag: target.tag, download_url: target.download_url }),

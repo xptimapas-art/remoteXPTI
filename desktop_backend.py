@@ -161,8 +161,6 @@ def _save_onu_coordinates():
     except Exception as e:
         log.warning(f"[DesktopBackend] Falha ao salvar onu_coordinates.json: {e}")
 
-_load_onu_coordinates()
-
 def _enrich_ajin_telemetry(data: Dict[str, Any]) -> Dict[str, Any]:
     if not data or not isinstance(data, dict):
         return data
@@ -216,8 +214,6 @@ def _save_downtime_history():
     except Exception as e:
         log.warning(f"[DesktopBackend] Falha ao salvar downtime_history.json: {e}")
 
-_load_downtime_history()
-
 def check_all_servers_status():
     """Verifica a conectividade RDP de todos os servidores em paralelo com ThreadPoolExecutor."""
     servers = list(storage_mgr.servers)
@@ -255,6 +251,7 @@ def check_all_servers_status():
     if changed:
         _save_downtime_history()
         broadcast_ws({"type": "servers_status_updated"})
+        broadcast_ws({"type": "incidents_updated"})
 
 # Modelos Pydantic
 class ConnectRequest(BaseModel):
@@ -331,6 +328,36 @@ def sync_supabase_servers() -> tuple[bool, int, str]:
     if not CloudSyncManager.is_configured():
         return False, 0, "Supabase não configurado ou desabilitado"
     try:
+        try:
+            remote_doors_json = CloudSyncManager.fetch_doors_config()
+            if remote_doors_json and remote_doors_json.strip():
+                remote_doors_cfg = json.loads(remote_doors_json)
+                
+                # Preserva campos puramente locais para evitar loops e respeitar a preferência de cada cliente
+                local_doors = {d.get("id"): d for d in tuya_mgr.config.get("doors", [])}
+                for r_door in remote_doors_cfg.get("doors", []):
+                    r_id = r_door.get("id")
+                    if r_id in local_doors:
+                        r_door["last_triggered"] = local_doors[r_id].get("last_triggered")
+                        r_door["hotkey"] = local_doors[r_id].get("hotkey", "")
+                        r_door["enabled"] = local_doors[r_id].get("enabled", True)
+
+                # Preserva portas locais que não estão no remote (ex: terminal facial local exclusivo desta unidade)
+                remote_door_ids = {d.get("id") for d in remote_doors_cfg.get("doors", [])}
+                for l_id, l_door in local_doors.items():
+                    if l_id not in remote_door_ids:
+                        remote_doors_cfg.setdefault("doors", []).append(l_door)
+
+                # Preserva também o som e notificação da máquina local
+                remote_doors_cfg["feedback_sound"] = tuya_mgr.config.get("feedback_sound", True)
+                remote_doors_cfg["feedback_notification"] = tuya_mgr.config.get("feedback_notification", True)
+
+                if remote_doors_cfg != tuya_mgr.config:
+                    log.info("[DesktopBackend] doors_config na nuvem é diferente do local. Atualizando local...")
+                    tuya_mgr.save_config(remote_doors_cfg, push_to_cloud=False)
+        except Exception as e:
+            log.warning(f"[DesktopBackend] Erro ao sincronizar doors_config: {e}")
+
         remote = CloudSyncManager.fetch_servers()
         if remote is not None:
             changed, added, updated = storage_mgr.merge_cloud_servers(remote)
@@ -540,13 +567,24 @@ def get_doors_list():
         "cloud_status": tuya_mgr.get_cloud_status()
     }
 
+last_door_trigger = {}
+
 @app.post("/api/doors/{door_id}/open")
 def open_door_endpoint(door_id: str, req: Optional[DoorOpenRequest] = None):
     require_dev_access()
+    now = time.time()
+    if door_id in last_door_trigger and now - last_door_trigger[door_id] < 1.5:
+        raise HTTPException(status_code=429, detail="Aguarde um momento antes de disparar novamente.")
+    last_door_trigger[door_id] = now
+
     src = req.source if req and req.source else "Painel DEV"
     success, message = tuya_mgr.open_door(door_id, source=src)
     if not success:
+        if "Sem conexão com a internet" in message:
+            raise HTTPException(status_code=503, detail=message)
         raise HTTPException(status_code=500, detail=message)
+        
+    broadcast_ws({"type": "doors_updated"})
     return {
         "success": True,
         "message": message,
@@ -577,6 +615,7 @@ def save_doors_config(req: DoorConfigRequest):
         update_data["doors"] = req.doors
 
     tuya_mgr.save_config(update_data)
+    broadcast_ws({"type": "doors_updated"})
     return {
         "success": True,
         "config": tuya_mgr.config,
@@ -587,6 +626,7 @@ def save_doors_config(req: DoorConfigRequest):
 def sync_doors_cloud():
     require_dev_access()
     tuya_mgr._init_cloud_manager()
+    broadcast_ws({"type": "doors_updated"})
     return {
         "success": True,
         "cloud_status": tuya_mgr.get_cloud_status(),
@@ -760,14 +800,20 @@ def check_single_server(server_id: str):
     now = time.time()
     is_online, msg = RDPManager.check_connection(host, port, timeout=1.5)
 
+    changed = False
     if not is_online:
         if server_id not in server_downtime:
             server_downtime[server_id] = now
-            _save_downtime_history()
+            changed = True
     else:
         if server_id in server_downtime:
             server_downtime.pop(server_id, None)
-            _save_downtime_history()
+            changed = True
+            
+    if changed:
+        _save_downtime_history()
+        broadcast_ws({"type": "servers_status_updated"})
+        broadcast_ws({"type": "incidents_updated"})
 
     off_since = server_downtime.get(server_id)
     duration = int(now - off_since) if off_since else 0
@@ -909,9 +955,23 @@ dist_path = Path(__file__).parent / "desktop_ui" / "dist"
 if dist_path.exists():
     app.mount("/", StaticFiles(directory=str(dist_path), html=True), name="static")
 
+def _background_init_task():
+    try:
+        log.info("[DesktopBackend] Iniciando background init (ONUs, Downtime, Tuya)...")
+        _load_onu_coordinates()
+        _load_downtime_history()
+        
+        # Se __name__ != "__main__", o backend foi importado (ex: pelo launcher), logo está embutido
+        is_embedded = (__name__ != "__main__")
+        tuya_mgr.background_init(is_embedded=is_embedded)
+        log.info("[DesktopBackend] Background init concluído com sucesso.")
+    except Exception as e:
+        log.error(f"[DesktopBackend] Erro no background init: {e}")
+
 # Loop de contagem regressiva e broadcast periódico
 def _background_heartbeat():
-    # Sincronização inicial com Supabase na inicialização
+    # Sincronização e inicialização inicial na thread de background
+    threading.Thread(target=_background_init_task, daemon=True).start()
     threading.Thread(target=sync_supabase_servers, daemon=True).start()
 
     refresh_countdown = 10
@@ -964,7 +1024,25 @@ def start_backend_service(port: int = 8765):
     threading.Thread(target=_background_heartbeat, daemon=True).start()
     config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning", log_config=None)
     server = uvicorn.Server(config)
-    server.run()
+    try:
+        server.run()
+    except SystemExit as e:
+        if e.code == 3:
+            import ctypes
+            import os
+            ctypes.windll.user32.MessageBoxW(0, f"Erro ao iniciar o servidor local na porta {port}.\nTalvez a porta já esteja em uso por outro aplicativo.", "RemoteXPTI - Erro de Porta", 0x10)
+            os._exit(1)
+        raise
+    except OSError as e:
+        import ctypes
+        import os
+        ctypes.windll.user32.MessageBoxW(0, f"Erro ao iniciar o servidor local na porta {port}.\nTalvez a porta já esteja em uso por outro aplicativo.\n\nDetalhes: {e}", "RemoteXPTI - Erro de Porta", 0x10)
+        os._exit(1)
+    except Exception as e:
+        import ctypes
+        import os
+        ctypes.windll.user32.MessageBoxW(0, f"Erro inesperado ao iniciar o servidor na porta {port}.\n\nDetalhes: {e}", "RemoteXPTI - Erro do Backend", 0x10)
+        os._exit(1)
 
 if __name__ == "__main__":
     start_backend_service()

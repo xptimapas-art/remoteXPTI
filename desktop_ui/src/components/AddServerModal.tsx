@@ -40,7 +40,7 @@ export const AddServerModal: React.FC<AddServerModalProps> = ({
     setError('');
 
     try {
-      const res = await fetch('http://127.0.0.1:8765/api/servers/add', {
+      const res = await fetch('/api/servers/add', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

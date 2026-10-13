@@ -209,18 +209,75 @@ class SetupApp(ctk.CTk):
         
         try:
             # 0. Encerra qualquer instância aberta do RemoteXPTI para liberar o arquivo executável
-            self.lbl_progress.configure(text="Fechando instâncias abertas do RemoteXPTI...")
-            creation_flags = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
-            subprocess.run(["taskkill", "/F", "/IM", "RemoteXPTI.exe"], capture_output=True, creationflags=creation_flags)
-            time.sleep(0.5)
+            self.lbl_progress.configure(text="Passo 1: Fechando instâncias abertas do RemoteXPTI...")
+            current_pid = os.getpid()
+            try:
+                import psutil
+                for proc in psutil.process_iter(['pid', 'name']):
+                    try:
+                        if proc.info['name'] and proc.info['name'].lower() in ['remotexpti.exe', 'python.exe', 'pythonw.exe']:
+                            if proc.info['pid'] != current_pid:
+                                proc.kill()
+                    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                        pass
+            except ImportError:
+                # Fallback if psutil is somehow missing in the build
+                subprocess.run(["taskkill", "/F", "/IM", "RemoteXPTI.exe"], capture_output=True, creationflags=creation_flags)
+                subprocess.run(["taskkill", "/F", "/IM", "pythonw.exe"], capture_output=True, creationflags=creation_flags)
+                kill_script = f"Get-CimInstance Win32_Process -Filter \"Name = 'python.exe'\" | Where-Object ProcessId -ne {current_pid} | Stop-Process -Force"
+                subprocess.run(["powershell", "-NoProfile", "-Command", kill_script], capture_output=True, creationflags=creation_flags)
+            time.sleep(1.0)
 
-            # 1. Cria diretório de instalação se não existir
-            self.lbl_progress.configure(text="Preparando diretório de instalação...")
-            target_dir.mkdir(parents=True, exist_ok=True)
+            # Helper para arquivos read-only no rmtree
+            import stat
+            def remove_readonly(func, path, exc_info):
+                try:
+                    os.chmod(path, stat.S_IWRITE)
+                    func(path)
+                except Exception:
+                    pass
+
+            # 1. Limpeza de arquivos legados (V1) e cache
+            self.lbl_progress.configure(text="Passo 2: Removendo versão anterior e limpando cache...")
+            try:
+                if target_dir.exists() and target_dir.is_dir():
+                    for item in target_dir.iterdir():
+                        if item.name in ["servers.json", ".secret.key", "session.json", "doors_config.json"]:
+                            continue
+                        try:
+                            if item.is_dir():
+                                shutil.rmtree(item, onerror=remove_readonly)
+                            else:
+                                try:
+                                    item.unlink()
+                                except PermissionError:
+                                    os.chmod(item, stat.S_IWRITE)
+                                    item.unlink()
+                        except Exception:
+                            pass
+                
+                # %LOCALAPPDATA%\RemoteXPTI é a pasta de CONFIGURAÇÃO do usuário (sessão Tuya,
+                # portas, canal de update, chave, logs). NÃO apagar inteira: remove só caches legados da V1.
+                config_dir = Path(os.environ.get("LOCALAPPDATA", "")) / "RemoteXPTI"
+                if config_dir.exists() and config_dir.resolve() != target_dir.resolve():
+                    for legacy_name in ["map_cache", "tile_cache", "__pycache__"]:
+                        legacy_path = config_dir / legacy_name
+                        if legacy_path.exists():
+                            try:
+                                shutil.rmtree(legacy_path, onerror=remove_readonly)
+                            except Exception:
+                                pass
+            except Exception:
+                pass
+            
+            try:
+                target_dir.mkdir(parents=True, exist_ok=True)
+            except Exception:
+                pass
             time.sleep(0.2)
 
             # 2. Copia RemoteXPTI.exe embutido (com retry caso o Windows demore a liberar o processo)
-            self.lbl_progress.configure(text="Atualizando RemoteXPTI.exe...")
+            self.lbl_progress.configure(text="Passo 3: Copiando arquivos atualizados...")
             source_exe = get_bundle_resource("app_payload.bin")
             if not source_exe.exists():
                 source_exe = get_bundle_resource("RemoteXPTI.exe")
@@ -251,8 +308,14 @@ class SetupApp(ctk.CTk):
                 source_key = get_bundle_resource(".secret.key")
                 dest_key = target_dir / ".secret.key"
 
+                for tuya_file in ["session.json", "doors_config.json"]:
+                    src_tuya = get_bundle_resource(tuya_file)
+                    dst_tuya = target_dir / tuya_file
+                    if src_tuya.exists() and not dst_tuya.exists():
+                        shutil.copy2(src_tuya, dst_tuya)
+
                 if source_json.exists():
-                    self.lbl_progress.configure(text="Atualizando lista de servidores...")
+                    self.lbl_progress.configure(text="Passo 4: Atualizando configurações...")
                     # Se não existir, copia direto
                     if not dest_json.exists():
                         shutil.copy2(source_json, dest_json)
@@ -313,7 +376,7 @@ class SetupApp(ctk.CTk):
                             pass
 
             # 4. Cria atalhos
-            self.lbl_progress.configure(text="Criando atalhos no Windows...")
+            self.lbl_progress.configure(text="Passo 5: Criando atalhos no Windows...")
             
             dest_ico = dest_imagens / "app_icon.ico"
             if not dest_ico.exists():
@@ -321,18 +384,41 @@ class SetupApp(ctk.CTk):
             shortcut_icon = dest_ico if dest_ico.exists() else dest_exe
 
             # Atalho Desktop
+            userprofile = Path(os.environ.get("USERPROFILE", str(Path.home())))
+            desktop_candidates = [
+                userprofile / "Desktop",
+                userprofile / "OneDrive" / "Desktop",
+                userprofile / "OneDrive" / "Área de Trabalho",
+                userprofile / "Área de Trabalho",
+                Path(os.environ.get("PUBLIC", r"C:\Users\Public")) / "Desktop",
+            ]
+            real_desktop = None
+            try:
+                out = subprocess.run(
+                    ["powershell", "-NoProfile", "-Command", "[Environment]::GetFolderPath('Desktop')"],
+                    capture_output=True, text=True, timeout=10, creationflags=creation_flags
+                ).stdout.strip()
+                if out and Path(out).is_dir():
+                    real_desktop = Path(out)
+            except Exception:
+                pass
+
+            # Remove atalhos antigos/duplicados (ex.: V1 apontando para pythonw.exe)
+            for d in ([real_desktop] if real_desktop else []) + desktop_candidates:
+                try:
+                    if d and d.is_dir():
+                        for lnk in d.glob("RemoteXPTI*.lnk"):
+                            try:
+                                lnk.unlink()
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+
             if self.chk_desktop.get():
-                userprofile = Path(os.environ.get("USERPROFILE", str(Path.home())))
-                desktop_candidates = [
-                    userprofile / "Desktop",
-                    userprofile / "OneDrive" / "Desktop",
-                    userprofile / "OneDrive" / "Área de Trabalho",
-                    userprofile / "Área de Trabalho"
-                ]
-                for d in desktop_candidates:
-                    if d.exists() and d.is_dir():
-                        create_windows_shortcut(dest_exe, d / "RemoteXPTI.lnk", "RemoteXPTI - RDP Quick Launcher", shortcut_icon)
-                        break
+                targets = [real_desktop] if real_desktop else [d for d in desktop_candidates[:4] if d.is_dir()][:1]
+                for d in targets:
+                    create_windows_shortcut(dest_exe, d / "RemoteXPTI.lnk", "RemoteXPTI - RDP Quick Launcher", shortcut_icon)
 
             # Atalho Menu Iniciar
             if self.chk_startmenu.get():

@@ -45,7 +45,7 @@ export const EditServerModal: React.FC<EditServerModalProps> = ({
     setError('');
     setConfirmDelete(false);
 
-    fetch(`http://127.0.0.1:8765/api/servers/${serverId}`)
+    fetch(`/api/servers/${serverId}`)
       .then((res) => {
         if (!res.ok) throw new Error('Não foi possível carregar os dados do servidor');
         return res.json();
@@ -85,7 +85,7 @@ export const EditServerModal: React.FC<EditServerModalProps> = ({
     setError('');
 
     try {
-      const res = await fetch(`http://127.0.0.1:8765/api/servers/${serverId}`, {
+      const res = await fetch(`/api/servers/${serverId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -125,7 +125,7 @@ export const EditServerModal: React.FC<EditServerModalProps> = ({
 
     setSaving(true);
     try {
-      const res = await fetch(`http://127.0.0.1:8765/api/servers/${serverId}`, {
+      const res = await fetch(`/api/servers/${serverId}`, {
         method: 'DELETE',
       });
       if (!res.ok) throw new Error('Falha ao excluir servidor');
