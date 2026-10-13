@@ -706,7 +706,14 @@ def apply_update_restart():
     global updater_instance
     if not updater_instance:
         raise HTTPException(status_code=500, detail="Updater não inicializado")
-    if not updater_instance.update_ready or not updater_instance.downloaded_file or not updater_instance.downloaded_file.exists():
+    if not updater_instance.update_ready:
+        log.warning("[DesktopBackend] Tentativa de reiniciar mas nenhuma atualização está pronta.")
+        return {"status": "not_ready", "message": "Nenhuma atualização pronta para reiniciar."}
+
+    is_frozen = getattr(sys, "frozen", False)
+    target_file = Path(sys.executable).resolve() if is_frozen else updater_instance.downloaded_file
+    file_exists = (updater_instance.downloaded_file and updater_instance.downloaded_file.exists()) or (target_file and target_file.exists())
+    if not file_exists:
         log.warning("[DesktopBackend] Tentativa de reiniciar mas o arquivo baixado não está em disco. Disparando novo download...")
         updater_instance.update_ready = False
         threading.Thread(target=updater_instance.start_background_check, args=(True,), daemon=True).start()

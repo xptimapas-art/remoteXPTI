@@ -390,7 +390,9 @@ class SilentAutoUpdater:
                     is_frozen = getattr(sys, "frozen", False)
                     if is_frozen:
                         current_exe = Path(sys.executable).resolve()
-                        old_exe = current_exe.with_name(current_exe.name.replace('.exe', '.old.exe'))
+                        # Usa timestamp para nunca colidir com arquivo anterior (evita WinError 183 no Windows)
+                        import time
+                        old_exe = current_exe.with_name(f"{current_exe.stem}.old.{int(time.time())}.exe")
                         if old_exe.exists():
                             try:
                                 old_exe.unlink()
@@ -398,6 +400,7 @@ class SilentAutoUpdater:
                                 pass
                         current_exe.rename(old_exe)
                         temp_dest.replace(current_exe)
+                        self.downloaded_file = current_exe
                         log.info(f"[SilentUpdater] In-app swap executado com sucesso: {current_exe}")
                 except Exception as e:
                     log.error(f"[SilentUpdater] Erro no in-app swap: {e}")
@@ -416,8 +419,68 @@ class SilentAutoUpdater:
             self.is_downloading = False
 
     def apply_update_and_restart(self, cleanup_func: Optional[Callable[[], None]] = None):
-        """Aviso: não mais reinicia automaticamente. Apenas registra. A troca in-place já ocorreu."""
-        pass
+        """Aplica a atualização e reinicia o aplicativo para abrir a nova versão."""
+        log.info(f"[SilentUpdater] Aplicando atualização e reiniciando a aplicação para v{self.new_version}...")
+        func_to_clean = cleanup_func or self.cleanup_callback
+        if func_to_clean:
+            try:
+                log.info("[SilentUpdater] Executando rotina de limpeza pré-reinício...")
+                func_to_clean()
+            except Exception as e:
+                log.warning(f"[SilentUpdater] Erro na limpeza pré-reinício: {e}")
+
+        is_frozen = getattr(sys, "frozen", False)
+        current_exe = Path(sys.executable).resolve()
+
+        if is_frozen:
+            # Caso a troca in-place ainda não tenha ocorrido (ex: swap adiado ou exceção prévia)
+            if self.downloaded_file and self.downloaded_file.exists() and self.downloaded_file != current_exe:
+                try:
+                    import time
+                    old_exe = current_exe.with_name(f"{current_exe.stem}.old.{int(time.time())}.exe")
+                    if old_exe.exists():
+                        try:
+                            old_exe.unlink()
+                        except Exception:
+                            pass
+                    current_exe.rename(old_exe)
+                    self.downloaded_file.replace(current_exe)
+                    self.downloaded_file = current_exe
+                except Exception as e:
+                    log.error(f"[SilentUpdater] Falha ao substituir executável no restart: {e}")
+
+            # Spawna novo processo desanexado após 1s (liberando handles e mutex do processo atual)
+            cmd = f'cmd.exe /c "timeout /t 1 /nobreak >nul & start \"\" \"{str(current_exe)}\""'
+            try:
+                subprocess.Popen(cmd, shell=True)
+            except Exception as e:
+                log.error(f"[SilentUpdater] Falha ao iniciar novo processo: {e}")
+            time.sleep(0.3)
+            os._exit(0)
+        else:
+            # Modo Dev: atualiza version.py e reinicia o script Python
+            repo_dir = Path(__file__).parent.resolve()
+            version_file = repo_dir / "version.py"
+            if version_file.exists() and self.new_version:
+                try:
+                    raw = version_file.read_text(encoding="utf-8")
+                    import re
+                    raw = re.sub(r'CURRENT_VERSION\s*=\s*"[^"]+"', f'CURRENT_VERSION = "{self.new_version}"', raw)
+                    version_file.write_text(raw, encoding="utf-8")
+                    log.info(f"[SilentUpdater] version.py atualizado para {self.new_version}")
+                except Exception as e:
+                    log.warning(f"[SilentUpdater] Erro ao atualizar version.py em dev: {e}")
+
+            launch_script = repo_dir / "launch_modern_desktop.py"
+            py_exe = sys.executable
+            if launch_script.exists():
+                cmd = f'cmd.exe /c "timeout /t 1 /nobreak >nul & start \"\" \"{str(py_exe)}\" \"{str(launch_script)}\""'
+                try:
+                    subprocess.Popen(cmd, shell=True)
+                except Exception as e:
+                    log.error(f"[SilentUpdater] Falha ao reiniciar script dev: {e}")
+                time.sleep(0.3)
+                os._exit(0)
 
 
 if ctk is not None:

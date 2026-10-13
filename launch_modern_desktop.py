@@ -97,7 +97,7 @@ def main():
         current_exe = Path(sys.executable).resolve()
         is_frozen = getattr(sys, "frozen", False)
         target_dir = current_exe.parent if is_frozen else Path(__file__).parent.resolve()
-        for p in target_dir.glob("*.old.exe"):
+        for p in target_dir.glob("*.old*.exe"):
             try:
                 p.unlink()
                 _dbg(f"Deleted old executable: {p}")
@@ -106,26 +106,26 @@ def main():
     except Exception as e:
         _dbg(f"Failed finding old exes: {e}")
 
-    # Garante que apenas uma instÃ¢ncia rode simultaneamente (Mutex)
+    # Garante que apenas uma instância rode simultaneamente (Mutex)
     _mutex_name = "RemoteXPTI_SingleInstance_Mutex"
     _mutex = ctypes.windll.kernel32.CreateMutexW(None, False, _mutex_name)
     if ctypes.windll.kernel32.GetLastError() == 183: # ERROR_ALREADY_EXISTS
-        _dbg("Outra instÃ¢ncia jÃ¡ estÃ¡ rodando (Mutex detectado). Trazendo para o foco e saindo.")
+        _dbg("Outra instância já está rodando (Mutex detectado). Trazendo para o foco e saindo.")
         focus_existing_instance(title)
         sys.exit(0)
 
     try:
-        # Permite agrupamento e Ã­cone prÃ³prio na barra de tarefas do Windows
+        # Permite agrupamento e ícone próprio na barra de tarefas do Windows
         try:
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("XPTI.RemoteXPTI.Modern.App")
         except Exception as e:
             _dbg(f"SetCurrentProcessExplicitAppUserModelID: {e}")
 
-        # Se a janela grÃ¡fica jÃ¡ estiver aberta e visÃ­vel, restaura foco e encerra processo duplicado
+        # Se a janela gráfica já estiver aberta e visível, restaura foco e encerra processo duplicado
         has_win = focus_existing_instance(title)
         _dbg(f"focus_existing_instance: {has_win}")
         if has_win:
-            _dbg("Janela jÃ¡ visÃ­vel. Saindo.")
+            _dbg("Janela já visível. Saindo.")
             sys.exit(0)
 
         # 1. Inicia o backend FastAPI + WebSockets em segundo plano caso ainda nÃ£o esteja rodando

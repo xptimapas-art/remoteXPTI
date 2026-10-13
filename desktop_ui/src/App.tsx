@@ -325,6 +325,7 @@ export const App: React.FC = () => {
       {updateInfo.updateReady && !isBannerDismissed && (
         <UpdateBanner
           onDismiss={() => setIsBannerDismissed(true)}
+          onRestart={handleRestartUpdate}
         />
       )}
 

@@ -130,7 +130,7 @@ def main():
     # 3. Compilar o Instalador Gráfico Setup_RemoteXPTI.exe (Ainda em CTk para o Setup se quiser, mas o app é Moderno)
     print()
     print("[2/3] Compilando Setup_RemoteXPTI.exe (Instalador com Metadados)...")
-    run_command([
+    setup_cmd = [
         sys.executable, "-m", "PyInstaller",
         "--noconsole",
         "--onefile",
@@ -143,9 +143,14 @@ def main():
         "--add-data", "servers.json:.",
         "--add-data", ".secret.key:.",
         "--add-data", "imagens:imagens",
+    ]
+    if (base_dir / "doors_config.json").exists():
+        setup_cmd.extend(["--add-data", "doors_config.json:."])
+    setup_cmd.extend([
         "--name", "Setup_RemoteXPTI",
         "installer_gui.py"
     ])
+    run_command(setup_cmd)
 
     setup_exe = dist_dir / "Setup_RemoteXPTI.exe"
     sign_binary(setup_exe)
@@ -175,6 +180,8 @@ def main():
         z.write(app_exe, arcname="RemoteXPTI.exe")
         z.write(base_dir / "servers.json", arcname="servers.json")
         z.write(base_dir / ".secret.key", arcname=".secret.key")
+        if (base_dir / "doors_config.json").exists():
+            z.write(base_dir / "doors_config.json", arcname="doors_config.json")
         if cert_file.exists():
             z.write(cert_file, arcname="XPti_Tecnologia.cer")
         img_dir = base_dir / "imagens"
