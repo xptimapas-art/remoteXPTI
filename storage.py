@@ -158,7 +158,7 @@ class StorageManager:
                 "host": "127.0.0.1",
                 "port": 3389,
                 "username": "Administrador",
-                "password": self.vault.encrypt("123456"),
+                "password": self.vault.encrypt(""),
                 "group": "Demonstração",
                 "fullscreen": True,
                 "admin_mode": False,

@@ -1,53 +1,55 @@
-# 🚀 Guia: Como Distribuir para Clientes e Enviar Atualizações Automáticas (100% Executável .exe)
+# Distribuição e atualização do RemoteXPTI moderno
 
-Este guia explica como instalar o **RemoteXPTI** nos computadores dos clientes usando um **único arquivo .exe** (sem arquivos `.bat`) e como enviar atualizações com 1 clique pelo **GitHub Releases**.
+## Preparar o ambiente
 
----
+Windows 10/11, Python 3.12 e Node/npm. Use um ambiente Python dedicado:
 
-## 📦 1. Como Distribuir para os Clientes (Apenas 1 Arquivo .exe)
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements-build.txt
+```
 
-Você só precisa enviar um único arquivo para o cliente:
-- **`dist\Setup_RemoteXPTI.exe`**
+## Gerar os pacotes
 
-### O que o cliente faz:
-1. O cliente dá **dois cliques** em `Setup_RemoteXPTI.exe`.
-2. Um assistente gráfico elegante (no mesmo tema dark do AnyDesk) se abre.
-3. O cliente clica em **"Instalar Agora"**.
-4. O instalador:
-   - Extrai e instala o programa na pasta de aplicativos (`AppData\Programs\RemoteXPTI`).
-   - Importa automaticamente todos os **8 servidores** já pré-configurados.
-   - Cria os atalhos com ícone na **Área de Trabalho** e no **Menu Iniciar**.
-   - Abre o programa automaticamente ao clicar em "Concluir e Abrir".
-5. **Zero arquivos .bat, zero prompt de comando, zero telas pretas!**
+Atualize `CURRENT_VERSION` em `version.py` e execute:
 
----
+```powershell
+python build_all.py
+```
 
-## 🔄 2. Como Enviar Atualizações Automáticas via GitHub
+O comando instala o frontend pelo lockfile, compila a interface, executa testes e gera:
 
-Quando você adicionar novos servidores ou lançar uma versão nova:
+- `dist/RemoteXPTI.exe`
+- `dist/update-manifest.json`
+- `dist/Setup_RemoteXPTI.exe` e `dist/Setup_RemoteXPTI.zip`
+- `dist/RemoteXPTI_Portatil.zip`
 
-### Passo 1: Configure seu Repositório (apenas 1 vez)
-1. Abra o RemoteXPTI.
-2. Clique no botão **`🚀 Atualizações`** no topo.
-3. Digite o seu repositório no GitHub (exemplo: `seu-usuario/remoteXPTI`) e clique em **Salvar**.
+A distribuição contém configuração inicial vazia. Não envie arquivos de servidores, chaves ou sessões de produção como assets públicos.
 
-### Passo 2: Quando for lançar uma versão nova:
-1. Abra o arquivo **`version.py`** e altere o número (ex: `CURRENT_VERSION = "1.1.0"`).
-2. Execute no terminal:
-   ```bash
-   python build_all.py
-   ```
-   *(Ele vai compilar o novo `RemoteXPTI.exe` e o novo `Setup_RemoteXPTI.exe` automaticamente).*
-3. Acesse o seu repositório no GitHub no navegador:
-   - Vá em **Releases** > **Draft a new release**.
-   - Em **Tag version**, digite: `v1.1.0`.
-   - Em **Release title**, digite: `RemoteXPTI v1.1.0`.
-   - Escreva as notas da versão (ex: *"Novos servidores adicionados"*).
-   - Arraste o arquivo **`dist\RemoteXPTI.exe`** para a área de anexos da release.
-   - Clique em **Publish release**.
+Para exigir assinatura com um certificado de assinatura de código existente e confiável:
 
-### Passo 3: O que acontece nos computadores dos clientes:
-- Quando o cliente abrir o programa (ou clicar em **`🚀 Atualizações`**):
-  - O app avisa que há uma nova versão disponível (`v1.1.0`).
-  - O cliente clica em **`⬇️ Baixar e Atualizar Agora`**.
-  - O programa faz o download com barra de progresso, atualiza o executável e reabre sozinho na versão nova com 1 clique!
+```powershell
+$env:REMOTEXPTI_SIGN = '1'
+python build_all.py
+```
+
+Sem essa variável, o build informa que os binários estão sem assinatura. Certificados autoassinados não estabelecem confiança automaticamente nas máquinas dos clientes.
+
+## Publicar a release
+
+1. Use uma tag que corresponda exatamente à versão compilada, por exemplo `v2.1.9`.
+2. Para o canal público, publique como release estável. Para beta, use uma versão como `2.1.10b1` e marque prerelease.
+3. Anexe juntos `RemoteXPTI.exe` e `update-manifest.json`, preservando esses nomes. O manifesto deve ser do mesmo build e gerado depois da assinatura.
+4. Anexe o instalador/ZIP para instalação inicial e recuperação.
+5. Homologue a atualização numa instalação isolada antes de distribuir aos clientes.
+
+O updater consulta o repositório fixo definido em `version.py`. O canal público recebe também releases de correção, sem a antiga restrição de patch zero. O EXE fica intacto durante o download; após validação, o usuário solicita o reinício e um helper instala a nova versão. Se a versão nova não confirmar inicialização, tenta restaurar o backup.
+
+## Atualizar versões com updater quebrado
+
+Execute o novo instalador uma vez, escolhendo a pasta dedicada `RemoteXPTI` da instalação anterior. Ele preserva seus arquivos de dados e chaves nessa pasta. Passe a usar o atalho do EXE instalado.
+
+Rodar `launch_modern_desktop.py`, `run_modern.bat` ou `python main.py` executa o código de desenvolvimento; esse modo não instala updates de EXE nem altera o número da versão.
+
+Veja `CORRECOES_AUTO_UPDATE.md` para comportamento, validação e limitações.

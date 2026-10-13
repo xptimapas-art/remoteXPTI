@@ -17,6 +17,7 @@ interface TitleBarProps {
     currentVersion: string;
     newVersion: string;
     updateReady: boolean;
+    isApplying?: boolean;
     isDownloading?: boolean;
   };
   onRestartUpdate?: () => void;
@@ -54,10 +55,11 @@ export const TitleBar: React.FC<TitleBarProps> = ({
             {updateInfo?.updateReady ? (
               <button
                 onClick={onRestartUpdate}
+                disabled={updateInfo?.isApplying}
                 title={`Nova versão v${updateInfo.newVersion} pronta! Clique para reiniciar e atualizar.`}
                 className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-md bg-[#0066cc] hover:bg-[#0052a3] text-white border border-blue-400 shadow-[0_0_10px_rgba(0,102,204,0.6)] flex items-center gap-1 cursor-pointer animate-pulse transition-all"
               >
-                <span>🔄 Restart p/ v{updateInfo.newVersion}</span>
+                <span>{updateInfo.isApplying ? 'Instalando...' : `Reiniciar p/ v${updateInfo.newVersion}`}</span>
               </button>
             ) : updateInfo?.isDownloading ? (
               <button
@@ -78,7 +80,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({
                     : 'bg-[#1f2129] text-[#8e92a0] border border-[#2e323e] hover:text-white'
                 }`}
               >
-                v{updateInfo?.currentVersion || '1.6.30'} {isDev ? '[TESTER]' : ''}
+                v{updateInfo?.currentVersion || '—'} {isDev ? '[TESTER]' : ''}
               </button>
             )}
           </div>

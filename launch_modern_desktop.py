@@ -93,18 +93,7 @@ def main():
     title = "RemoteXPTI - RDP Quick Launcher"
     _dbg("Entrou em main()...")
     
-    try:
-        current_exe = Path(sys.executable).resolve()
-        is_frozen = getattr(sys, "frozen", False)
-        target_dir = current_exe.parent if is_frozen else Path(__file__).parent.resolve()
-        for p in target_dir.glob("*.old*.exe"):
-            try:
-                p.unlink()
-                _dbg(f"Deleted old executable: {p}")
-            except Exception as e:
-                _dbg(f"Failed to delete {p}: {e}")
-    except Exception as e:
-        _dbg(f"Failed finding old exes: {e}")
+    # O backup de atualização é preservado para recuperação.
 
     # Garante que apenas uma instância rode simultaneamente (Mutex)
     _mutex_name = "RemoteXPTI_SingleInstance_Mutex"
@@ -230,7 +219,6 @@ def main():
                     tray_icon.stop()
             except Exception:
                 pass
-            import os
             os._exit(0)
 
         def _trigger_door_tray(icon=None, item=None):
@@ -367,7 +355,6 @@ def main():
             except Exception:
                 pass
 
-        import os
         os._exit(0)
 
     except BaseException as e:

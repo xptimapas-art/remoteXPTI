@@ -1,3 +1,7 @@
+> Desktop moderno (2.1.9): execute `python launch_modern_desktop.py` para desenvolver. Para distribuir, use `python build_all.py` com `requirements-build.txt`. Consulte [o guia atualizado](COMO_DISTRIBUIR_E_ATUALIZAR.md) e [as correções do updater](CORRECOES_AUTO_UPDATE.md). O auto update funciona no EXE instalado; o modo Python não instala versões.
+>
+> As seções abaixo descrevem também a interface legada. A entrada de build foi consolidada no desktop moderno.
+
 # ⚡ RemoteXPTI - Gerenciador RDP Ágil (Estilo AnyDesk)
 
 O **RemoteXPTI** é um gerenciador de conexões de Área de Trabalho Remota (RDP) moderno, inspirado na interface intuitiva do AnyDesk (cartões de servidores, status de rede online/offline em tempo real, busca rápida e grupos). 
@@ -50,7 +54,7 @@ python main.py
 
 Para usar o programa em computadores que não possuem o Python instalado:
 
-1. Dê um duplo clique no arquivo **`build_exe.bat`** (ou execute via terminal).
+1. Instale `requirements-build.txt` e execute **`python build_all.py`** no terminal.
 2. Ao finalizar, o executável independente estará na pasta **`dist\RemoteXPTI.exe`**.
 
 ---

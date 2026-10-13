@@ -8,13 +8,14 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 import json
 import os
+import sys
 from pathlib import Path
 import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import uvicorn
@@ -26,7 +27,7 @@ from logger import log
 from rdp_manager import RDPManager
 from storage import StorageManager
 from tuya_access_manager import TuyaAccessManager
-from updater import SilentAutoUpdater
+from update_engine import SilentAutoUpdater
 from version import CURRENT_VERSION, APP_NAME, GITHUB_REPO
 
 config_mgr = ConfigManager()
@@ -35,13 +36,13 @@ tuya_mgr = TuyaAccessManager()
 # Inicialização FastAPI
 app = FastAPI(title="RemoteXPTI Modern Backend", version=CURRENT_VERSION)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+@app.middleware("http")
+async def protect_local_api(request, call_next):
+    from local_api_security import allow_local_request
+    if not allow_local_request(request.headers.get("host", ""), request.headers.get("origin"),
+                               request.headers.get("sec-fetch-site")):
+        return JSONResponse(status_code=403, content={"detail": "Origem não autorizada para a API local"})
+    return await call_next(request)
 
 storage_mgr = StorageManager()
 ajin_mgr = AjinManager()
@@ -306,7 +307,7 @@ class DevLoginRequest(BaseModel):
 
 class InstallVersionRequest(BaseModel):
     tag: str
-    download_url: str
+    download_url: str = ""
 
 class SetChannelRequest(BaseModel):
     channel: str
@@ -672,59 +673,41 @@ def refresh_all():
 # ==============================================================================
 @app.get("/api/update/status")
 def get_update_status():
-    global updater_instance
     if not updater_instance:
-        return {
-            "current_version": CURRENT_VERSION,
-            "new_version": "",
-            "is_checking": False,
-            "is_downloading": False,
-            "update_ready": False,
-            "channel": config_mgr.get_update_channel(),
-            "status_message": "Pronto"
-        }
-    return {
-        "current_version": CURRENT_VERSION,
-        "new_version": updater_instance.new_version,
-        "is_checking": updater_instance.is_checking,
-        "is_downloading": updater_instance.is_downloading,
-        "update_ready": updater_instance.update_ready,
-        "channel": config_mgr.get_update_channel(),
-        "status_message": getattr(updater_instance, "status_message", "Pronto")
-    }
+        raise HTTPException(status_code=503, detail="Updater não inicializado")
+    return {**updater_instance.snapshot(), "channel": config_mgr.get_update_channel()}
+
+@app.post("/api/update/healthy")
+def confirm_update_healthy():
+    from update_bootstrap import confirm_update_startup
+    try:
+        return {"confirmed": confirm_update_startup()}
+    except (ValueError, OSError, KeyError, IndexError) as exc:
+        log.error("[Updater] Confirmação de inicialização falhou: %s", exc)
+        raise HTTPException(status_code=409, detail="A versão instalada não corresponde ao update")
 
 @app.post("/api/update/check")
 def check_updates_manual():
-    global updater_instance
     if not updater_instance:
-        raise HTTPException(status_code=500, detail="Updater não inicializado")
-    threading.Thread(target=updater_instance.start_background_check, args=(True,), daemon=True).start()
-    return {"status": "started", "message": "Verificação de atualizações iniciada"}
+        raise HTTPException(status_code=503, detail="Updater não inicializado")
+    started = updater_instance.start_background_check(is_manual=True)
+    return {"status": "started" if started else updater_instance.state,
+            "message": updater_instance.status_message}
 
 @app.post("/api/update/restart")
 def apply_update_restart():
-    global updater_instance
     if not updater_instance:
-        raise HTTPException(status_code=500, detail="Updater não inicializado")
-    if not updater_instance.update_ready:
-        log.warning("[DesktopBackend] Tentativa de reiniciar mas nenhuma atualização está pronta.")
-        return {"status": "not_ready", "message": "Nenhuma atualização pronta para reiniciar."}
-
-    is_frozen = getattr(sys, "frozen", False)
-    target_file = Path(sys.executable).resolve() if is_frozen else updater_instance.downloaded_file
-    file_exists = (updater_instance.downloaded_file and updater_instance.downloaded_file.exists()) or (target_file and target_file.exists())
-    if not file_exists:
-        log.warning("[DesktopBackend] Tentativa de reiniciar mas o arquivo baixado não está em disco. Disparando novo download...")
-        updater_instance.update_ready = False
-        threading.Thread(target=updater_instance.start_background_check, args=(True,), daemon=True).start()
-        return {"status": "downloading", "message": "O arquivo de atualização não foi encontrado no disco. Baixando novamente..."}
-
-    def _do_restart():
-        time.sleep(0.1)
-        updater_instance.apply_update_and_restart(cleanup_func=_cleanup_before_restart)
-
-    threading.Thread(target=_do_restart, daemon=True).start()
-    return {"status": "restarting", "message": "Reiniciando aplicação para atualizar..."}
+        raise HTTPException(status_code=503, detail="Updater não inicializado")
+    try:
+        prepared = updater_instance.prepare_install()
+    except (ValueError, OSError) as exc:
+        updater_instance.notify_status(str(exc))
+        raise HTTPException(status_code=409, detail=str(exc))
+    def restart():
+        time.sleep(0.3)  # Permite que a resposta HTTP seja entregue.
+        updater_instance.launch_install(prepared, cleanup_func=_cleanup_before_restart)
+    threading.Thread(target=restart, daemon=True).start()
+    return {"status": "restarting", "message": "Instalando atualização e reiniciando..."}
 
 @app.get("/api/logs/path")
 def get_logs_path():
@@ -771,20 +754,20 @@ def install_specific_version(req: InstallVersionRequest):
     if not updater_instance:
         raise HTTPException(status_code=500, detail="Updater não inicializado")
 
-    def on_st(msg):
-        _on_updater_status(msg)
-
-    threading.Thread(
-        target=updater_instance.download_and_install_specific,
-        args=(req.tag, req.download_url, on_st),
-        daemon=True
-    ).start()
+    if not config_mgr.is_dev_authenticated():
+        raise HTTPException(status_code=403, detail="Instalação de versão específica exige login DEV")
+    try:
+        updater_instance.download_and_install_specific(req.tag, req.download_url)
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
     return {"status": "downloading", "tag": req.tag}
 
 @app.post("/api/update/channel")
 def set_update_channel(req: SetChannelRequest):
     if req.channel not in ("public", "beta_tester"):
         raise HTTPException(status_code=400, detail="Canal inválido")
+    if not config_mgr.is_dev_authenticated() and req.channel != "public":
+        raise HTTPException(status_code=403, detail="Canal beta exige login DEV")
     config_mgr.set_update_channel(req.channel)
     broadcast_ws({
         "type": "update_channel_changed",
@@ -921,6 +904,10 @@ def get_onu_locations():
 # Endpoint WebSocket para telemetria contínua
 @app.websocket("/ws/ajin")
 async def websocket_ajin_endpoint(websocket: WebSocket):
+    from local_api_security import allow_local_request
+    if not allow_local_request(websocket.headers.get("host", ""), websocket.headers.get("origin")):
+        await websocket.close(code=1008)
+        return
     await ws_manager.connect(websocket)
     try:
         # Envia estado inicial imediatamente ao conectar com coordenadas

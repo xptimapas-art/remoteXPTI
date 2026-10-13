@@ -28,7 +28,9 @@ export const App: React.FC = () => {
   const [rdpToast, setRdpToast] = useState<{ visible: boolean; name: string; host: string } | null>(null);
   const [doorToast, setDoorToast] = useState<{ visible: boolean; name: string; success: boolean; message: string } | null>(null);
   const [updateInfo, setUpdateInfo] = useState({
-    currentVersion: '1.6.30',
+    currentVersion: '—',
+    enabled: false,
+    isApplying: false,
     newVersion: '',
     updateReady: false,
     isChecking: false,
@@ -111,6 +113,8 @@ export const App: React.FC = () => {
           currentVersion: data.current_version || prev.currentVersion,
           newVersion: data.new_version || '',
           updateReady: Boolean(data.update_ready),
+          enabled: Boolean(data.enabled),
+          isApplying: Boolean(data.is_applying),
           isChecking: Boolean(data.is_checking),
           isDownloading: Boolean(data.is_downloading),
           channel: data.channel || 'public',
@@ -128,6 +132,7 @@ export const App: React.FC = () => {
     loadServers();
     loadTelemetry();
     loadUpdateStatus();
+    fetch(`${API_BASE}/api/update/healthy`, { method: 'POST' }).catch(console.error);
 
     const connectWebSocket = () => {
       const ws = new WebSocket(WS_URL);
@@ -261,39 +266,44 @@ export const App: React.FC = () => {
     }
   };
 
+  const updateRequest = async (path: string, body?: object) => {
+    const res = await fetch(`${API_BASE}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || data.message || 'Falha ao atualizar.');
+    return data;
+  };
+
+  const showUpdateError = (error: unknown) => {
+    const message = error instanceof Error ? error.message : 'Falha de comunicação com o aplicativo.';
+    setUpdateInfo((prev) => ({ ...prev, isChecking: false, isApplying: false, statusMessage: message }));
+    setIsSettingsModalOpen(true);
+  };
+
   const handleCheckUpdates = async () => {
     try {
-      setUpdateInfo((prev) => ({
-        ...prev,
-        isChecking: true,
-        statusMessage: 'Verificando atualizações...',
-      }));
-      await fetch(`${API_BASE}/api/update/check`, { method: 'POST' });
+      await updateRequest('/api/update/check');
       await loadUpdateStatus();
-    } catch (e) {
-      console.error('Erro ao verificar atualizações:', e);
-    }
+    } catch (error) { showUpdateError(error); }
   };
 
   const handleRestartUpdate = async () => {
+    if (updateInfo.isApplying) return;
     try {
-      await fetch(`${API_BASE}/api/update/restart`, { method: 'POST' });
-    } catch (e) {
-      console.error('Erro ao reiniciar para atualizar:', e);
-    }
+      const data = await updateRequest('/api/update/restart');
+      setUpdateInfo((prev) => ({ ...prev, isApplying: true, statusMessage: data.message }));
+    } catch (error) { showUpdateError(error); }
   };
-
 
   const handleChannelChange = async (channel: string) => {
     try {
-      await fetch(`${API_BASE}/api/update/channel`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ channel }),
-      });
+      await updateRequest('/api/update/channel', { channel });
       await loadUpdateStatus();
     } catch (e) {
-      console.error('Erro ao alterar canal de atualização:', e);
+      showUpdateError(e);
     }
   };
 
@@ -326,6 +336,7 @@ export const App: React.FC = () => {
         <UpdateBanner
           onDismiss={() => setIsBannerDismissed(true)}
           onRestart={handleRestartUpdate}
+          isApplying={updateInfo.isApplying}
         />
       )}
 

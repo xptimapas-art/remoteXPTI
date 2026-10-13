@@ -13,6 +13,7 @@ dist/
 # Dados sensíveis e senhas locais (proteção contra vazamento público)
 .secret.key
 servers.json
+!distribution/servers.json
 *.bak
 
 # Thumbnails de telas geradas localmente
@@ -28,3 +29,9 @@ cache/
 
 # Node / Modern Desktop UI
 desktop_ui/node_modules/
+
+# Configurações de dispositivos e sessões locais (revisar também o histórico).
+doors_config.json
+session.json
+tuya_vault.bin
+.test-artifacts/

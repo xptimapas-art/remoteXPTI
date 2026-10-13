@@ -8,37 +8,47 @@ import shutil
 import zipfile
 from pathlib import Path
 from version import CURRENT_VERSION
+from packaging.version import Version
 
 
 def run_command(cmd_list):
     print(f">> Executando: {' '.join(cmd_list)}")
-    res = subprocess.run(cmd_list)
+    res = subprocess.run(cmd_list, cwd=Path(__file__).parent.resolve())
     if res.returncode != 0:
         print(f"[ERRO] Falha no comando: {' '.join(cmd_list)}")
         sys.exit(res.returncode)
 
 
 def sign_binary(file_path: Path):
-    """Assina digitalmente o binário com certificado Authenticode e carimbo de data/hora DigiCert."""
-    if sys.platform != "win32":
+    """Assinatura opt-in; nunca cria certificados ou declara sucesso sem validação."""
+    import os
+    if os.environ.get("REMOTEXPTI_SIGN") != "1":
+        print(f"[SEM ASSINATURA] {file_path.name}; configure REMOTEXPTI_SIGN=1 para release assinada.")
         return
-    print(f">> Assinando digitalmente com Authenticode: {file_path.name}...")
-    ps_cmd = f"""
-    $cert = Get-ChildItem -Path 'Cert:\\CurrentUser\\My' | Where-Object {{ $_.Subject -like '*XPti Tecnologia*' }} | Select-Object -First 1
-    if (-not $cert) {{
-        $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject 'CN=XPti Tecnologia, O=XPti Tecnologia, C=BR' -CertStoreLocation 'Cert:\\CurrentUser\\My' -FriendlyName 'XPti Tecnologia Code Signing' -NotAfter (Get-Date).AddYears(5)
-    }}
-    Set-AuthenticodeSignature -FilePath '{str(file_path)}' -Certificate $cert -TimestampServer 'http://timestamp.digicert.com' -HashAlgorithm SHA256
+    literal = str(file_path).replace("'", "''")
+    ps_cmd = rf"""
+    $ErrorActionPreference = 'Stop'
+    $cert = Get-ChildItem -Path 'Cert:\CurrentUser\My' -CodeSigningCert | Where-Object {{ $_.Subject -like '*XPti Tecnologia*' }} | Select-Object -First 1
+    if (-not $cert) {{ throw 'Certificado de assinatura não encontrado.' }}
+    $result = Set-AuthenticodeSignature -FilePath '{literal}' -Certificate $cert -TimestampServer 'http://timestamp.digicert.com' -HashAlgorithm SHA256
+    if ($result.Status -ne 'Valid') {{ throw $result.StatusMessage }}
     """
-    try:
-        subprocess.run(["powershell", "-NoProfile", "-Command", ps_cmd], capture_output=True, text=True, timeout=20)
-        print(f"   [Assinatura OK] {file_path.name} assinado como 'XPti Tecnologia'!")
-    except Exception as e:
-        print(f"   [Aviso de Assinatura] Não foi possível aplicar: {e}")
+    subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", ps_cmd], check=True, timeout=60)
+    print(f"[ASSINATURA VALIDADA] {file_path.name}")
+
+
+def create_update_manifest(app_exe: Path):
+    import hashlib
+    import json
+    manifest = {"version": CURRENT_VERSION, "update_protocol": 1, "asset": "RemoteXPTI.exe",
+                "size": app_exe.stat().st_size, "sha256": hashlib.sha256(app_exe.read_bytes()).hexdigest()}
+    path = app_exe.parent / "update-manifest.json"
+    path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    return path
 
 
 def create_version_file(output_path: Path, file_desc: str, orig_name: str, version_str: str):
-    parts = [int(p) for p in version_str.split(".") if p.isdigit()]
+    parts = list(Version(version_str).release)
     while len(parts) < 4:
         parts.append(0)
     v_tuple = tuple(parts[:4])
@@ -77,12 +87,32 @@ def create_version_file(output_path: Path, file_desc: str, orig_name: str, versi
 
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="Build do RemoteXPTI moderno")
+    parser.add_argument('--reuse-frontend', action='store_true', help='Reutiliza o frontend já compilado; o pacote final ainda é verificado')
+    args = parser.parse_args()
     print("==================================================================")
     print(f"      Compilando RemoteXPTI v{CURRENT_VERSION} (Versão 2.0 Moderna)")
     print("==================================================================")
     print()
 
     base_dir = Path(__file__).parent.resolve()
+    # Falha antes de gerar um instalador que não consegue abrir.
+    import tkinter
+    try:
+        tkinter.Tcl()
+    except tkinter.TclError as exc:
+        raise RuntimeError("Tcl/Tk não está acessível neste ambiente. Execute o build em um ambiente Windows com Tcl/Tk funcional.") from exc
+    npm = shutil.which("npm.cmd" if sys.platform == "win32" else "npm")
+    if not npm:
+        raise RuntimeError("Node/npm é necessário para compilar a interface.")
+    if not args.reuse_frontend:
+        run_command([npm, "--cache", str(base_dir / ".test-artifacts" / "npm-cache"),
+                     "--prefix", str(base_dir / "desktop_ui"), "ci"])
+        run_command([npm, "--prefix", str(base_dir / "desktop_ui"), "run", "build"])
+    elif not (base_dir / 'desktop_ui' / 'dist' / 'index.html').exists():
+        raise RuntimeError('Frontend não compilado. Execute o build normal primeiro.')
+    run_command([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v"])
     v_app = base_dir / "version_app.txt"
     v_setup = base_dir / "version_setup.txt"
 
@@ -95,11 +125,12 @@ def main():
         sys.executable, "-m", "PyInstaller",
         "--noconsole",
         "--onefile",
-        "--clean",
         "--icon", "imagens/icon.ico",
         "--version-file", str(v_app), 
         "--add-data", "imagens:imagens",
         "--add-data", "desktop_ui/dist:desktop_ui/dist",
+        "--add-data", "update_helper.ps1:.",
+        "--hidden-import", "tuya_devices",
         "--hidden-import", "desktop_backend",
         "--hidden-import", "ajin_manager",
         "--hidden-import", "rdp_manager",
@@ -108,7 +139,6 @@ def main():
         "--hidden-import", "tuya_access_manager",
         "--hidden-import", "native_hotkeys",
         "--hidden-import", "config_manager",
-        "--hidden-import", "updater",
         "--hidden-import", "logger",
         "--collect-all", "webview",
         "--collect-all", "fastapi",
@@ -122,6 +152,7 @@ def main():
     dist_dir = base_dir / "dist"
     app_exe = dist_dir / "RemoteXPTI.exe"
     sign_binary(app_exe)
+    create_update_manifest(app_exe)
 
     # 2. Mascarar executável como binário de dados para não acionar alerta de dropper em antivírus
     payload_bin = dist_dir / "app_payload.bin"
@@ -134,18 +165,14 @@ def main():
         sys.executable, "-m", "PyInstaller",
         "--noconsole",
         "--onefile",
-        "--clean",
         "--icon", "imagens/icon.ico",
         "--version-file", str(v_setup),
         "--hidden-import", "psutil",
         "--collect-all", "customtkinter",
         "--add-data", f"{payload_bin}:.",
-        "--add-data", "servers.json:.",
-        "--add-data", ".secret.key:.",
+        "--add-data", "distribution/servers.json:.",
         "--add-data", "imagens:imagens",
     ]
-    if (base_dir / "doors_config.json").exists():
-        setup_cmd.extend(["--add-data", "doors_config.json:."])
     setup_cmd.extend([
         "--name", "Setup_RemoteXPTI",
         "installer_gui.py"
@@ -155,35 +182,17 @@ def main():
     setup_exe = dist_dir / "Setup_RemoteXPTI.exe"
     sign_binary(setup_exe)
 
-    # Exporta certificado da XPti Tecnologia para distribuição
-    cert_file = dist_dir / "XPti_Tecnologia.cer"
-    ps_export = f"""
-    $cert = Get-ChildItem -Path 'Cert:\\CurrentUser\\My' | Where-Object {{ $_.Subject -like '*XPti Tecnologia*' }} | Select-Object -First 1
-    if ($cert) {{ Export-Certificate -Cert $cert -FilePath '{str(cert_file)}' | Out-Null }}
-    """
-    try:
-        subprocess.run(["powershell", "-NoProfile", "-Command", ps_export], capture_output=True)
-    except Exception:
-        pass
-
     # 4. Criar pacotes .zip
     print()
     print("[3/3] Gerando pacotes ZIP seguros para download...")
     zip_setup = dist_dir / "Setup_RemoteXPTI.zip"
     with zipfile.ZipFile(zip_setup, "w", zipfile.ZIP_DEFLATED) as z:
         z.write(setup_exe, arcname="Setup_RemoteXPTI.exe")
-        if cert_file.exists():
-            z.write(cert_file, arcname="XPti_Tecnologia.cer")
 
     zip_portatil = dist_dir / "RemoteXPTI_Portatil.zip"
     with zipfile.ZipFile(zip_portatil, "w", zipfile.ZIP_DEFLATED) as z:
         z.write(app_exe, arcname="RemoteXPTI.exe")
-        z.write(base_dir / "servers.json", arcname="servers.json")
-        z.write(base_dir / ".secret.key", arcname=".secret.key")
-        if (base_dir / "doors_config.json").exists():
-            z.write(base_dir / "doors_config.json", arcname="doors_config.json")
-        if cert_file.exists():
-            z.write(cert_file, arcname="XPti_Tecnologia.cer")
+        z.write(base_dir / "distribution" / "servers.json", arcname="servers.json")
         img_dir = base_dir / "imagens"
         if img_dir.exists():
             for f in img_dir.iterdir():
@@ -191,6 +200,7 @@ def main():
                     z.write(f, arcname=f"imagens/{f.name}")
 
     # Limpeza de arquivos temporários de compilação
+    run_command([sys.executable, str(base_dir / "tools" / "verify_release.py"), str(dist_dir)])
     for tmp in [v_app, v_setup, payload_bin]:
         if tmp.exists():
             try:
@@ -204,7 +214,7 @@ def main():
     print("   1. dist/Setup_RemoteXPTI.zip (Recomendado para envio/download)")
     print("   2. dist/Setup_RemoteXPTI.exe (Instalador executável direto)")
     print("   3. dist/RemoteXPTI_Portatil.zip (Versão portátil completa)")
-    print("   4. dist/RemoteXPTI.exe (Executável avulso)")
+    print("   4. dist/RemoteXPTI.exe + dist/update-manifest.json (publique juntos)")
     print("==================================================================")
 
 if __name__ == "__main__":

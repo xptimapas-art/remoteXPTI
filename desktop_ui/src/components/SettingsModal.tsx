@@ -21,6 +21,8 @@ interface UpdateInfo {
   currentVersion: string;
   newVersion: string;
   updateReady: boolean;
+  enabled?: boolean;
+  isApplying?: boolean;
   isChecking: boolean;
   isDownloading: boolean;
   channel: string;
@@ -186,12 +188,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       const res = await fetch('/api/update/install_version', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tag: target.tag, download_url: target.download_url }),
+        body: JSON.stringify({ tag: target.tag }),
       });
       if (res.ok) {
-        setInstallStatus(`✅ Download iniciado! Acompanhe o progresso ou aguarde a reinicialização.`);
+        setInstallStatus(`Download iniciado. Quando terminar, clique em Reiniciar para instalar.`);
       } else {
-        setInstallStatus(`❌ Falha ao iniciar download de ${selectedTag}.`);
+        const data = await res.json();
+        setInstallStatus(data.detail || `Falha ao iniciar download de ${selectedTag}.`);
       }
     } catch (err) {
       setInstallStatus(`❌ Erro de comunicação com o servidor.`);
@@ -256,7 +259,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <Info className="w-3.5 h-3.5 text-cyan-400" /> Versão da Plataforma:
               </span>
               <span className="font-bold text-white font-mono flex items-center gap-1.5">
-                v{updateInfo?.currentVersion || '1.6.30'}
+                v{updateInfo?.currentVersion || '—'}
                 {isDev ? (
                   <span className="text-emerald-400 font-sans text-[10px] bg-emerald-950/80 border border-emerald-800/60 px-1.5 py-0.2 rounded font-bold">
                     [BETA TESTER]
@@ -280,7 +283,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <button
                 type="button"
                 onClick={onCheckUpdates}
-                disabled={updateInfo?.isChecking || updateInfo?.isDownloading}
+                disabled={!updateInfo?.enabled || updateInfo?.isChecking || updateInfo?.isDownloading || updateInfo?.isApplying}
                 className="px-3 py-1.5 bg-[#1f2432] hover:bg-[#2b3346] text-cyan-300 hover:text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer border border-cyan-500/30 disabled:opacity-50"
               >
                 <RefreshCw
@@ -324,10 +327,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <button
                   type="button"
                   onClick={onRestartUpdate}
+                  disabled={updateInfo?.isApplying}
                   className="px-3 py-1.5 bg-[#0066cc] hover:bg-[#0052a3] text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all shadow-md cursor-pointer shrink-0"
                 >
                   <RefreshCw className="w-3 h-3" />
-                  <span>Reiniciar Agora</span>
+                  <span>{updateInfo?.isApplying ? 'Instalando...' : 'Reiniciar Agora'}</span>
                 </button>
               </div>
             )}
@@ -396,7 +400,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           : 'bg-[#1a1c23] border-[#2e323e] text-slate-400 hover:text-white'
                       }`}
                     >
-                      Público (1.x.0)
+                      Público (estável)
                     </button>
                     <button
                       type="button"
@@ -407,7 +411,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           : 'bg-[#1a1c23] border-[#2e323e] text-slate-400 hover:text-white'
                       }`}
                     >
-                      Beta Tester (1.x.y)
+                      Beta Tester (inclui prévias)
                     </button>
                   </div>
                 </div>

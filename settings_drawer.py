@@ -178,7 +178,7 @@ class SettingsDrawer(ctk.CTkFrame):
             text_color=("gray15", "#e0e4ee")
         ).pack(anchor="w", padx=12, pady=(10, 2))
 
-        ch_desc = "Canal Beta Tester (1.x.y)" if active_channel == "beta_tester" else "Canal Beta Público (1.x.0)"
+        ch_desc = "Canal Beta Tester (inclui prévias)" if active_channel == "beta_tester" else "Canal Público (estável)"
         ctk.CTkLabel(
             card_update,
             text=f"Versão: v{self.current_version} • {ch_desc}\nVerificações silenciosas em segundo plano ativas.",
@@ -304,10 +304,10 @@ class SettingsDrawer(ctk.CTkFrame):
 
             seg_channel = ctk.CTkSegmentedButton(
                 card_dev,
-                values=["Canal Beta Público (1.x.0)", "Canal Beta Tester (1.x.y)"],
+                values=["Canal Público (estável)", "Canal Beta Tester (inclui prévias)"],
                 command=on_channel_changed
             )
-            seg_channel.set("Canal Beta Tester (1.x.y)" if active_channel == "beta_tester" else "Canal Beta Público (1.x.0)")
+            seg_channel.set("Canal Beta Tester (inclui prévias)" if active_channel == "beta_tester" else "Canal Público (estável)")
             seg_channel.pack(fill="x", padx=12, pady=(0, 8))
 
             # 2. Seletor de Versões do GitHub

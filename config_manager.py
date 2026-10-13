@@ -15,7 +15,7 @@ from logger import log
 
 # Salt fixo seguro do projeto para PBKDF2
 DEV_SALT = "RemoteXPTI_Salt_2026"
-# Hash PBKDF2 (100.000 iterações) da senha mestre do desenvolvedor: XPT1%1414
+# Hash da credencial DEV legada; não incluir a senha no código.
 DEV_PASSWORD_HASH = "d1a5398d82dbca928e51e31b09bd91707750ba9037888529b8f892721086b1cb"
 
 
@@ -49,7 +49,7 @@ class ConfigManager:
     def _init(self):
         self.file_path = get_config_file()
         self.data: Dict[str, Any] = {
-            "update_channel": "public",      # "public" (1.x.0) ou "beta_tester" (1.1.x)
+            "update_channel": "public",      # "public" (estável) ou "beta_tester" (inclui prerelease)
             "dev_authenticated": False,       # Se a sessão dev está ativa
             "dev_session_token": "",          # Token de sessão persistente
             "supabase_url": DEFAULT_SUPABASE_URL,

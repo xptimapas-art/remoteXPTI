@@ -158,7 +158,7 @@ export const DoorsSettingsModal: React.FC<DoorsSettingsModalProps> = ({
       port: 80,
       protocol: 'http',
       username: 'admin',
-      password: '#18.190%Floripa',
+      password: '',
       door_id: 1,
       hotkey: '',
       enabled: true,
@@ -179,7 +179,7 @@ export const DoorsSettingsModal: React.FC<DoorsSettingsModalProps> = ({
         if (!updated.port) updated.port = 80;
         if (!updated.protocol) updated.protocol = 'http';
         if (!updated.username) updated.username = 'admin';
-        if (!updated.password) updated.password = '#18.190%Floripa';
+        if (!updated.password) updated.password = '';
         if (updated.door_id === undefined) updated.door_id = 1;
         if (!updated.device_name || updated.device_name === 'Fechadura Tuya') {
           updated.device_name = 'Facial Hikvision (DS-K1T)';

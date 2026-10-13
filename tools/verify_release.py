@@ -1,0 +1,57 @@
+"""Valida os arquivos gerados sem executar o app ou o instalador."""
+import hashlib
+import json
+import sys
+import types
+import zipfile
+from pathlib import Path
+from PyInstaller.archive.readers import CArchiveReader
+
+
+def verify_release(directory):
+    app, setup = directory / 'RemoteXPTI.exe', directory / 'Setup_RemoteXPTI.exe'
+    manifest = json.loads((directory / 'update-manifest.json').read_text(encoding='utf-8'))
+    digest = hashlib.sha256(app.read_bytes()).hexdigest()
+    if digest != manifest['sha256'] or app.stat().st_size != manifest['size']:
+        raise RuntimeError('O manifesto não corresponde ao EXE final.')
+    forbidden = {'.secret.key', 'session.json', 'doors_config.json', 'tuya_vault.bin'}
+    for binary in (app, setup):
+        archive = CArchiveReader(str(binary))
+        names = {name.replace('\\', '/') for name in archive.toc}
+        if any(name.split('/')[-1] in forbidden for name in names):
+            raise RuntimeError(f'{binary.name} contém arquivos locais de credenciais.')
+        pyz = archive.open_embedded_archive('PYZ.pyz')
+        if binary == app:
+            required = {'desktop_backend', 'update_engine', 'update_bootstrap', 'local_api_security', 'tuya_devices'}
+            if not required.issubset(pyz.toc) or 'update_helper.ps1' not in names or 'desktop_ui/dist/index.html' not in names:
+                raise RuntimeError('Recursos do app/updater ausentes no pacote.')
+            functions = {c.co_name for c in pyz.extract('update_engine').co_consts if isinstance(c, types.CodeType)}
+            if 'launch_independent_process' not in functions:
+                raise RuntimeError('EXE gerado não contém a versão final do updater.')
+            if manifest['version'] not in pyz.extract('version').co_consts:
+                raise RuntimeError('A versão embutida não corresponde ao manifesto.')
+            frontend = directory.parent / 'desktop_ui' / 'dist'
+            for path in frontend.rglob('*'):
+                if not path.is_file():
+                    continue
+                name = 'desktop_ui/dist/' + path.relative_to(frontend).as_posix()
+                original = next((key for key in archive.toc if key.replace('\\', '/') == name), None)
+                if original is None or archive.extract(original) != path.read_bytes():
+                    raise RuntimeError('A interface empacotada não corresponde ao build final: ' + name)
+        else:
+            if not {'tkinter', 'customtkinter', 'install_safety'}.issubset(pyz.toc) or '_tcl_data/init.tcl' not in names or '_tk_data/tk.tcl' not in names:
+                raise RuntimeError('Instalador incompleto: Tcl/Tk não foi incluído.')
+            if json.loads(archive.extract('servers.json'))['servers']:
+                raise RuntimeError('Instalador contém lista de servidores de produção.')
+            if hashlib.sha256(archive.extract('app_payload.bin')).hexdigest() != digest:
+                raise RuntimeError('O instalador contém outro EXE.')
+    with zipfile.ZipFile(directory / 'RemoteXPTI_Portatil.zip') as package:
+        if forbidden.intersection(package.namelist()) or json.loads(package.read('servers.json'))['servers']:
+            raise RuntimeError('ZIP portátil contém dados locais de produção.')
+        if hashlib.sha256(package.read('RemoteXPTI.exe')).hexdigest() != digest:
+            raise RuntimeError('O ZIP contém outro EXE.')
+    print(f'Release {manifest["version"]}: manifesto, EXEs, Tcl/Tk e pacote portátil verificados.')
+
+
+if __name__ == '__main__':
+    verify_release(Path(sys.argv[1] if len(sys.argv) > 1 else 'dist').resolve())

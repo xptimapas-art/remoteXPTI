@@ -143,7 +143,7 @@ class TuyaAccessManager:
                                 "port": 80,
                                 "protocol": "http",
                                 "username": "admin",
-                                "password": "#18.190%Floripa",
+                                "password": "",
                                 "door_id": 1,
                                 "hotkey": "",
                                 "enabled": True,
@@ -189,7 +189,7 @@ class TuyaAccessManager:
                     "port": 80,
                     "protocol": "http",
                     "username": "admin",
-                    "password": "#18.190%Floripa",
+                    "password": "",
                     "door_id": 1,
                     "hotkey": "",
                     "enabled": True,
@@ -326,7 +326,7 @@ class TuyaAccessManager:
         raw_port = door.get("port") if door.get("port") not in (None, "") else (h_cfg.get("port") or file_cfg.get("port") or 80)
         raw_proto = door.get("protocol") or h_cfg.get("protocol") or file_cfg.get("protocol") or "http"
         raw_user = door.get("username") or h_cfg.get("username") or file_cfg.get("username") or "admin"
-        raw_pwd = door.get("password") if door.get("password") not in (None, "") else (h_cfg.get("password") or file_cfg.get("password") or "#18.190%Floripa")
+        raw_pwd = door.get("password") if door.get("password") not in (None, "") else (h_cfg.get("password") or file_cfg.get("password") or "")
         raw_target = door.get("door_no") if door.get("door_no") not in (None, "") else (door.get("door_id") or h_cfg.get("door_id") or file_cfg.get("door_id") or 1)
 
         try:
