@@ -13,6 +13,7 @@ import time
 import urllib.request
 from pathlib import Path
 import webview
+from windows_single_instance import WindowsSingleInstance
 from runtime_paths import (get_profile_dir, get_window_title, get_mutex_name,
                            get_app_user_model_id, is_development)
 
@@ -35,7 +36,7 @@ def _dbg(msg: str):
     except Exception:
         pass
 
-_dbg(f"MÃ³dulo carregado com argv: {sys.argv} (executable: {sys.executable})")
+_dbg(f"Módulo carregado (executable: {sys.executable})")
 
 def _start_backend():
     import desktop_backend
@@ -61,70 +62,24 @@ def is_backend_running(timeout=0.6) -> bool:
         pass
     return False
 
-def is_pid_alive(pid: int) -> bool:
-    if pid <= 0:
-        return False
-    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-    SYNCHRONIZE = 0x00100000
-    h_proc = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, False, pid)
-    if not h_proc:
-        return False
-    try:
-        exit_code = ctypes.c_ulong()
-        if ctypes.windll.kernel32.GetExitCodeProcess(h_proc, ctypes.byref(exit_code)):
-            STILL_ACTIVE = 259
-            return exit_code.value == STILL_ACTIVE
-        return False
-    finally:
-        ctypes.windll.kernel32.CloseHandle(h_proc)
-
-def focus_existing_instance(window_title: str) -> bool:
-    try:
-        hwnd = ctypes.windll.user32.FindWindowW(None, window_title)
-        if hwnd:
-            proc_id = ctypes.c_ulong()
-            ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(proc_id))
-            current_pid = os.getpid()
-            if proc_id.value == 0 or proc_id.value == current_pid:
-                return False
-            if not is_pid_alive(proc_id.value):
-                return False
-
-            SW_RESTORE = 9
-            ctypes.windll.user32.ShowWindow(hwnd, SW_RESTORE)
-            ctypes.windll.user32.SetForegroundWindow(hwnd)
-            return True
-    except Exception as e:
-        _dbg(f"focus_existing_instance exception: {e}")
-    return False
-
 def main():
     title = get_window_title()
     _dbg("Entrou em main()...")
     
     # O backup de atualização é preservado para recuperação.
 
-    # Garante que apenas uma instância rode simultaneamente (Mutex)
-    _mutex_name = get_mutex_name()
-    _mutex = ctypes.windll.kernel32.CreateMutexW(None, False, _mutex_name)
-    if ctypes.windll.kernel32.GetLastError() == 183: # ERROR_ALREADY_EXISTS
-        _dbg("Outra instância já está rodando (Mutex detectado). Trazendo para o foco e saindo.")
-        focus_existing_instance(title)
-        sys.exit(0)
-
+    instance = None
     try:
+        instance = WindowsSingleInstance(get_mutex_name())
+        if instance.already_running:
+            _dbg("Outra instância já está rodando (Mutex detectado). Trazendo para o foco e saindo.")
+            instance.focus(title)
+            return
         # Permite agrupamento e ícone próprio na barra de tarefas do Windows
         try:
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(get_app_user_model_id())
         except Exception as e:
             _dbg(f"SetCurrentProcessExplicitAppUserModelID: {e}")
-
-        # Se a janela gráfica já estiver aberta e visível, restaura foco e encerra processo duplicado
-        has_win = focus_existing_instance(title)
-        _dbg(f"focus_existing_instance: {has_win}")
-        if has_win:
-            _dbg("Janela já visível. Saindo.")
-            sys.exit(0)
 
         # 1. Inicia o backend FastAPI + WebSockets em segundo plano caso ainda nÃ£o esteja rodando
         bg_running = is_backend_running()
@@ -214,10 +169,7 @@ def main():
             try:
                 window.show()
                 window.restore()
-                hwnd = ctypes.windll.user32.FindWindowW(None, title)
-                if hwnd:
-                    ctypes.windll.user32.ShowWindow(hwnd, 9)
-                    ctypes.windll.user32.SetForegroundWindow(hwnd)
+                instance.focus(title, current_only=True)
             except Exception as e:
                 _dbg(f"show_window error: {e}")
 
@@ -378,6 +330,9 @@ def main():
         except:
             pass
         raise
+    finally:
+        if instance:
+            instance.close()
 
 if __name__ == "__main__":
     main()
