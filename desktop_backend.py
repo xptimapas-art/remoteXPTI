@@ -14,8 +14,8 @@ import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import uvicorn
@@ -29,11 +29,16 @@ from connection_health import ConnectionHealthMonitor, PROBE_TIMEOUT_SECONDS
 from rdp_manager import RDPManager
 from storage import StorageManager
 from tuya_access_manager import TuyaAccessManager
+from camera_snapshots import CameraSnapshots, CameraError
+from camera_streams import CameraStream
+from hotkey_capture import HotkeyCapture
 from update_engine import SilentAutoUpdater
 from version import CURRENT_VERSION, APP_NAME, GITHUB_REPO
 
 config_mgr = ConfigManager()
 tuya_mgr = TuyaAccessManager()
+camera_snapshots = CameraSnapshots()
+hotkey_capture = HotkeyCapture()
 
 # Inicialização FastAPI
 app = FastAPI(title="RemoteXPTI Modern Backend", version=CURRENT_VERSION)
@@ -320,6 +325,7 @@ class SetChannelRequest(BaseModel):
 
 class DoorConfigRequest(BaseModel):
     enabled: Optional[bool] = None
+    hotkeys_enabled: Optional[bool] = None
     feedback_sound: Optional[bool] = None
     feedback_notification: Optional[bool] = None
     user_code: Optional[str] = None
@@ -327,6 +333,11 @@ class DoorConfigRequest(BaseModel):
 
 class DoorOpenRequest(BaseModel):
     source: Optional[str] = "Painel DEV"
+
+class DoorEditRequest(BaseModel):
+    door: Dict[str, Any]
+    original: Optional[Dict[str, Any]] = None
+    delete: bool = False
 
 class QRLoginRequest(BaseModel):
     user_code: Optional[str] = None
@@ -622,6 +633,8 @@ def save_doors_config(req: DoorConfigRequest):
     update_data = {}
     if req.enabled is not None:
         update_data["enabled"] = req.enabled
+    if req.hotkeys_enabled is not None:
+        update_data["hotkeys_enabled"] = req.hotkeys_enabled
     if req.feedback_sound is not None:
         update_data["feedback_sound"] = req.feedback_sound
     if req.feedback_notification is not None:
@@ -631,13 +644,95 @@ def save_doors_config(req: DoorConfigRequest):
     if req.doors is not None:
         update_data["doors"] = req.doors
 
-    tuya_mgr.save_config(update_data)
+    try:
+        tuya_mgr.save_config(update_data)
+    except OSError:
+        raise HTTPException(status_code=500, detail="Não foi possível gravar a configuração. Tente novamente.")
     broadcast_ws({"type": "doors_updated"})
     return {
         "success": True,
         "config": tuya_mgr.config,
         "doors": tuya_mgr.get_doors()
     }
+
+def _resolve_door_camera(door_id: str):
+    door = tuya_mgr.get_door(door_id)
+    if not door:
+        raise HTTPException(status_code=404, detail="Acesso não encontrado.")
+    camera = door.get("camera") or {}
+    if camera.get("source") == "door" and door.get("mode") in ("hikvision", "facial", "isapi"):
+        connection = tuya_mgr._get_hikvision_config(door)
+    elif camera.get("source") == "external":
+        connection = {"host": camera.get("host"), "port": camera.get("port") or (443 if camera.get("protocol") == "https" else 80),
+                      "protocol": camera.get("protocol") or "http", "username": camera.get("username"), "password": camera.get("password")}
+    else:
+        raise HTTPException(status_code=404, detail="Nenhuma câmera vinculada a este acesso.")
+    return connection, camera
+
+@app.get("/api/doors/{door_id}/camera")
+def get_door_camera(door_id: str):
+    require_dev_access()
+    connection, camera = _resolve_door_camera(door_id)
+    try:
+        frame = camera_snapshots.get(connection, camera.get("channel", 1))
+    except CameraError as error:
+        raise HTTPException(status_code=error.status_code, detail=str(error))
+    return Response(content=frame, media_type="image/jpeg", headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
+
+@app.get("/api/doors/{door_id}/camera/stream")
+def get_door_camera_stream(door_id: str, request: Request):
+    require_dev_access()
+    connection, camera = _resolve_door_camera(door_id)
+    try:
+        stream = CameraStream(connection, camera.get("channel", 1), camera.get("rtsp_port", 554)).start()
+    except CameraError as error:
+        raise HTTPException(status_code=error.status_code, detail=str(error))
+
+    async def video_chunks():
+        try:
+            while not await request.is_disconnected():
+                if not config_mgr.is_dev_authenticated():
+                    break
+                chunk = await asyncio.to_thread(stream.read)
+                if chunk == b'':
+                    break
+                if chunk:
+                    yield chunk
+        finally:
+            stream.stop()
+    return StreamingResponse(video_chunks(), media_type=stream.mime,
+                             headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
+
+@app.post("/api/doors/hotkey-capture")
+def start_hotkey_capture():
+    require_dev_access()
+    try:
+        return hotkey_capture.start()
+    except RuntimeError as error:
+        raise HTTPException(status_code=409, detail=str(error))
+
+@app.get("/api/doors/hotkey-capture/{capture_id}")
+def get_hotkey_capture(capture_id: str):
+    require_dev_access()
+    return hotkey_capture.status(capture_id)
+
+@app.delete("/api/doors/hotkey-capture/{capture_id}")
+def cancel_hotkey_capture(capture_id: str):
+    require_dev_access()
+    hotkey_capture.cancel(capture_id)
+    return {"success": True}
+
+@app.put("/api/doors/{door_id}/config")
+def save_single_door_config(door_id: str, req: DoorEditRequest):
+    require_dev_access()
+    try:
+        tuya_mgr.save_door_config(door_id, req.door, req.original, delete=req.delete)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except OSError:
+        raise HTTPException(status_code=500, detail="Não foi possível gravar a configuração. Tente novamente.")
+    broadcast_ws({"type": "doors_updated"})
+    return {"success": True, "doors": tuya_mgr.get_doors()}
 
 @app.post("/api/doors/sync")
 def sync_doors_cloud():

@@ -24,6 +24,7 @@ export const App: React.FC = () => {
   const [editingServerId, setEditingServerId] = useState<string | null>(null);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [isDoorsSettingsOpen, setIsDoorsSettingsOpen] = useState(false);
+  const [doorSettingsTarget, setDoorSettingsTarget] = useState<string | null>(null);
   const [isDev, setIsDev] = useState(false);
   const [rdpToast, setRdpToast] = useState<{ visible: boolean; name: string; host: string } | null>(null);
   const [doorToast, setDoorToast] = useState<{ visible: boolean; name: string; success: boolean; message: string } | null>(null);
@@ -381,7 +382,7 @@ export const App: React.FC = () => {
           <DoorsView
             isDev={isDev}
             onOpenDevLogin={() => setIsSettingsModalOpen(true)}
-            onOpenDoorsSettings={() => setIsDoorsSettingsOpen(true)}
+            onOpenDoorsSettings={(doorId) => { setDoorSettingsTarget(doorId || null); setIsDoorsSettingsOpen(true); }}
             onDoorTriggered={(name, success, msg) => {
               setDoorToast({
                 visible: true,
@@ -431,11 +432,12 @@ export const App: React.FC = () => {
         onCheckUpdates={handleCheckUpdates}
         onRestartUpdate={handleRestartUpdate}
         onChannelChange={handleChannelChange}
-        onOpenDoorsSettings={() => setIsDoorsSettingsOpen(true)}
+        onOpenDoorsSettings={() => { setIsSettingsModalOpen(false); setDoorSettingsTarget(null); setIsDoorsSettingsOpen(true); }}
       />
 
       <DoorsSettingsModal
         isOpen={isDoorsSettingsOpen}
+        doorId={doorSettingsTarget}
         onClose={() => setIsDoorsSettingsOpen(false)}
       />
 

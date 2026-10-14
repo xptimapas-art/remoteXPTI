@@ -48,18 +48,20 @@ def create_update_manifest(app_exe: Path):
 
 
 def create_version_file(output_path: Path, file_desc: str, orig_name: str, version_str: str):
-    parts = list(Version(version_str).release)
+    parsed_version = Version(version_str)
+    parts = list(parsed_version.release)
     while len(parts) < 4:
         parts.append(0)
     v_tuple = tuple(parts[:4])
     v_str = ".".join(str(x) for x in v_tuple)
+    release_flags = 0x2 if parsed_version.is_prerelease else 0x0
 
     content = f'''VSVersionInfo(
   ffi=FixedFileInfo(
     filevers={v_tuple},
     prodvers={v_tuple},
     mask=0x3f,
-    flags=0x0,
+    flags={release_flags},
     OS=0x40004,
     fileType=0x1,
     subtype=0x0,
@@ -77,7 +79,7 @@ def create_version_file(output_path: Path, file_desc: str, orig_name: str, versi
         StringStruct('LegalCopyright', 'Copyright (C) 2026 XPti Tecnologia. Todos os direitos reservados.'),
         StringStruct('OriginalFilename', '{orig_name}'),
         StringStruct('ProductName', 'RemoteXPTI Modern'),
-        StringStruct('ProductVersion', '{v_str}')])
+        StringStruct('ProductVersion', '{version_str}')])
       ]), 
     VarFileInfo([VarStruct('Translation', [1046, 1200])])
   ]
@@ -97,6 +99,10 @@ def main():
     print()
 
     base_dir = Path(__file__).parent.resolve()
+    # Include runtime images, not user print PDFs or other unrelated files in this folder.
+    image_files = sorted(path for path in (base_dir / 'imagens').iterdir()
+                         if path.is_file() and path.suffix.lower() in {'.png', '.ico', '.svg', '.jpg', '.jpeg', '.webp'})
+    image_args = [argument for path in image_files for argument in ('--add-data', f'{path}:imagens')]
     # Falha antes de gerar um instalador que não consegue abrir.
     import tkinter
     try:
@@ -127,7 +133,7 @@ def main():
         "--onefile",
         "--icon", "imagens/icon.ico",
         "--version-file", str(v_app), 
-        "--add-data", "imagens:imagens",
+        *image_args,
         "--add-data", "desktop_ui/dist:desktop_ui/dist",
         "--add-data", "update_helper.ps1:.",
         "--hidden-import", "tuya_devices",
@@ -141,6 +147,7 @@ def main():
         "--hidden-import", "config_manager",
         "--hidden-import", "logger",
         "--collect-all", "webview",
+        "--collect-all", "av",
         "--collect-all", "fastapi",
         "--collect-all", "uvicorn",
         "--collect-all", "pystray",
@@ -171,7 +178,7 @@ def main():
         "--collect-all", "customtkinter",
         "--add-data", f"{payload_bin}:.",
         "--add-data", "distribution/servers.json:.",
-        "--add-data", "imagens:imagens",
+        *image_args,
     ]
     setup_cmd.extend([
         "--name", "Setup_RemoteXPTI",
@@ -193,11 +200,8 @@ def main():
     with zipfile.ZipFile(zip_portatil, "w", zipfile.ZIP_DEFLATED) as z:
         z.write(app_exe, arcname="RemoteXPTI.exe")
         z.write(base_dir / "distribution" / "servers.json", arcname="servers.json")
-        img_dir = base_dir / "imagens"
-        if img_dir.exists():
-            for f in img_dir.iterdir():
-                if f.is_file():
-                    z.write(f, arcname=f"imagens/{f.name}")
+        for image in image_files:
+            z.write(image, arcname=f"imagens/{image.name}")
 
     # Limpeza de arquivos temporários de compilação
     run_command([sys.executable, str(base_dir / "tools" / "verify_release.py"), str(dist_dir)])

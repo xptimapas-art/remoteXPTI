@@ -39,11 +39,11 @@ export const TitleBar: React.FC<TitleBarProps> = ({
   onRestartUpdate,
 }) => {
   return (
-    <header className="h-16 bg-[#16171d] border-b border-[#252836] flex items-center justify-between px-4 select-none z-50 shrink-0">
+    <header className={`h-16 bg-[#16171d] border-b border-[#252836] flex items-center justify-between px-4 select-none z-50 shrink-0 ${currentTab === 'doors' ? 'xa-titlebar' : ''}`}>
       {/* Brand: Logo Oficial XPti + Título e Subtítulo */}
       <div className="flex items-center space-x-3">
         <img
-          src="/imagens/XPti_negativo_color.png"
+          src="/imagens/xpti-facade-logo.svg"
           alt="XPti Logo"
           className="h-[38px] w-auto object-contain"
         />
@@ -91,7 +91,8 @@ export const TitleBar: React.FC<TitleBarProps> = ({
       </div>
 
       {/* Ações do Topo: Busca, Filtro de Grupo, Segmented View, Refresh, + Novo Servidor, Settings */}
-      <div className="flex items-center space-x-2">
+      <div className="xa-navigation flex items-center space-x-2">
+        {currentTab !== 'doors' && <>
         {/* Campo de Busca */}
         <div className="relative flex items-center">
           <Search className="w-3.5 h-3.5 text-[#8e92a0] absolute left-3 pointer-events-none" />
@@ -122,6 +123,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({
         </div>
 
         {/* Alternador Segmentado de Modo de Exibição (Grade AnyDesk / Mapa / AJIN) */}
+        </>}
         <div className="flex items-center h-[34px] bg-[#1a1c23] border border-[#2e323e] rounded-md p-0.5 space-x-0.5">
           <button
             onClick={() => setCurrentTab('servers')}
@@ -195,12 +197,13 @@ export const TitleBar: React.FC<TitleBarProps> = ({
               }`}
             >
               <DoorClosed className="w-3.5 h-3.5" />
-              <span>Portões</span>
+              <span>Portas e portões</span>
             </button>
           )}
         </div>
 
         {/* Botão Atualizar Status Manual */}
+        {currentTab !== 'doors' && <>
         <button
           title="Atualizar Status Geral"
           onClick={onRefresh}
@@ -218,6 +221,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({
         </button>
 
         {/* Botão Engrenagem de Configurações Gerais */}
+        </>}
         <button
           title="Configurações e Sincronização"
           onClick={onOpenSettings}

@@ -12,6 +12,8 @@ import json
 import base64
 import winsound
 import threading
+import tempfile
+from copy import deepcopy
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 
@@ -78,7 +80,7 @@ class TuyaAccessManager:
         return cls._instance
 
     def _init(self):
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._manager = None
         self._cloud_connected = False
         self._access_logs: List[Dict[str, Any]] = []
@@ -211,26 +213,73 @@ class TuyaAccessManager:
     def save_config(self, new_config: Optional[Dict[str, Any]] = None, push_to_cloud: bool = True):
         """Salva a configuração atualizada e recarrega listeners."""
         with self._lock:
+            updated = deepcopy(self.config)
             if new_config:
-                self.config.update(new_config)
+                updated.update(deepcopy(new_config))
+            temporary_path = None
             try:
-                with open(self.config_path, "w", encoding="utf-8") as f:
-                    json.dump(self.config, f, indent=2, ensure_ascii=False)
+                with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=self.config_path.parent,
+                                                 prefix=".doors-", suffix=".tmp", delete=False) as f:
+                    temporary_path = f.name
+                    json.dump(updated, f, indent=2, ensure_ascii=False)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(temporary_path, self.config_path)
+                self.config = updated
                 log.info(f"[TuyaAccess] Configuração de portas salva em {self.config_path}")
                 
                 if push_to_cloud:
+                    cloud_snapshot = deepcopy(updated)
                     def _push():
                         try:
                             from cloud_sync import CloudSyncManager
-                            CloudSyncManager.push_doors_config(self.config)
+                            CloudSyncManager.push_doors_config(cloud_snapshot)
                         except Exception as e:
                             log.error(f"[TuyaAccess] Falha ao fazer push da config de portas: {e}")
                     threading.Thread(target=_push, daemon=True).start()
             except Exception as e:
                 log.error(f"[TuyaAccess] Erro ao salvar config: {e}")
+                raise
+            finally:
+                if temporary_path and os.path.exists(temporary_path):
+                    os.unlink(temporary_path)
 
         # Recarrega os atalhos de teclado conforme a nova configuração
         self.reload_hotkeys()
+
+    def save_door_config(self, door_id: str, door: Dict[str, Any], original: Optional[Dict[str, Any]],
+                         delete: bool = False):
+        """Edita um acesso sem substituir os demais; rejeita formulários desatualizados."""
+        with self._lock:
+            doors = deepcopy(self.config.get("doors", []))
+            existing = next((item for item in doors if item.get("id") == door_id), None)
+            runtime_fields = {"last_triggered", "cloud_online", "is_local"}
+            def editable(item):
+                return {key: value for key, value in item.items() if key not in runtime_fields} if item is not None else None
+            if editable(existing) != editable(original):
+                raise ValueError("Este acesso foi alterado em outra janela. Feche e abra a configuração novamente.")
+            if door.get("id") != door_id:
+                raise ValueError("Identificador do acesso inválido.")
+            if delete:
+                if existing is None:
+                    raise ValueError("Este acesso não existe mais.")
+                doors.remove(existing)
+            else:
+                updated = {**(existing or {}), **deepcopy(editable(door))}
+                updated["name"] = str(updated.get("name", "")).strip()
+                if not updated["name"]:
+                    raise ValueError("Informe o nome do acesso.")
+                hotkey = normalize_hotkey_for_keyboard(str(updated.get("hotkey", "")))
+                if hotkey and updated.get("enabled", True) and any(
+                    item.get("id") != door_id and item.get("enabled", True)
+                    and normalize_hotkey_for_keyboard(str(item.get("hotkey", ""))) == hotkey for item in doors
+                ):
+                    raise ValueError("Este atalho já está em uso por outro acesso.")
+                if existing is None:
+                    doors.append(updated)
+                else:
+                    doors[doors.index(existing)] = updated
+            self.save_config({"doors": doors})
 
     def _init_cloud_manager(self, force_sync: bool = False):
         """Inicializa e mantém em cache o cliente da Nuvem Tuya."""
@@ -271,10 +320,12 @@ class TuyaAccessManager:
         """Retorna o status atual da conexão com a nuvem Tuya."""
         has_session = self.session_path.exists()
         session_info: Dict[str, Any] = {}
+        session_revision = ""
         if has_session:
             try:
                 with open(self.session_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
+                    session_revision = str(os.fstat(f.fileno()).st_mtime_ns)
                     session_info = {
                         "user_code": data.get("user_code", DEFAULT_USER_CODE),
                         "endpoint": data.get("endpoint", ""),
@@ -286,10 +337,12 @@ class TuyaAccessManager:
 
         return {
             "connected": self._cloud_connected,
+            "session_revision": session_revision,
             "has_session_file": has_session,
             "session_info": session_info,
             "total_doors": len(self.config.get("doors", [])),
             "global_enabled": bool(self.config.get("enabled", True)),
+            "hotkeys_enabled": bool(self.config.get("hotkeys_enabled", True)),
         }
 
     def get_doors(self) -> List[Dict[str, Any]]:
@@ -457,6 +510,8 @@ class TuyaAccessManager:
         Retorna (sucesso, mensagem).
         """
         door = self.get_door(door_id)
+        if not self.config.get("enabled", True):
+            return False, "Os acionamentos estão desativados nas configurações."
         if not door:
             msg = f"Porta '{door_id}' não encontrada nas configurações."
             log.error(f"[TuyaAccess] {msg}")
@@ -620,7 +675,7 @@ class TuyaAccessManager:
             if not self._native_hotkeys:
                 return
                 
-            if not self.config.get("enabled", True):
+            if not self.config.get("enabled", True) or not self.config.get("hotkeys_enabled", True):
                 self._native_hotkeys.update_bindings([])
                 log.info("[TuyaAccess] Módulo de portas desabilitado. Atalhos suspensos.")
                 return
@@ -634,6 +689,8 @@ class TuyaAccessManager:
     # -------------------------------------------------------------
     def generate_qr_login(self, user_code: Optional[str] = None) -> Dict[str, Any]:
         """Gera um token novo e o QR Code em base64 para login visual."""
+        if self._polling_qr_thread and self._polling_qr_thread.is_alive():
+            return {"success": False, "error": "Já existe um QR Code aguardando confirmação. Use o código atual ou aguarde expirar."}
         code = user_code or self.config.get("user_code", DEFAULT_USER_CODE)
         try:
             import tuya_devices

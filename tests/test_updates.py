@@ -72,6 +72,28 @@ class UpdateTests(unittest.TestCase):
         self.assertEqual((ROOT / 'version.py').read_bytes(), original)
         self.assertEqual(updater.state, 'disabled')
 
+    def test_beta_release_is_selected_only_for_authenticated_beta_channel(self):
+        from config_manager import ConfigManager
+        manager = object.__new__(ConfigManager)
+        releases = [
+            {'tag': 'v2.1.12-beta.1', 'is_public': False, 'download_url': engine.release_url('v2.1.12-beta.1', 'RemoteXPTI.exe')},
+            {'tag': 'v2.1.11', 'is_public': True, 'download_url': engine.release_url('v2.1.11', 'RemoteXPTI.exe')},
+        ]
+        for authenticated, channel, expected in [(False, 'beta_tester', 'v2.1.11'),
+                                                  (True, 'public', 'v2.1.11'),
+                                                  (True, 'beta_tester', 'v2.1.12-beta.1')]:
+            with self.subTest(authenticated=authenticated, channel=channel):
+                manager.data = {'dev_authenticated': authenticated, 'update_channel': channel}
+                with patch('config_manager.ConfigManager', return_value=manager), \
+                        patch.object(engine.SilentAutoUpdater, 'fetch_all_releases', return_value=releases):
+                    self.assertEqual(self.updater()._get_latest_release_info()[0], expected)
+
+    def test_beta_manifest_matches_tag_and_promotes_to_final_version(self):
+        engine.validate_manifest({**self.manifest, 'version': '2.1.12-beta.1'}, 'v2.1.12-beta.1')
+        self.assertGreater(engine.release_version('2.1.12-beta.1'), engine.release_version('2.1.11'))
+        self.assertLess(engine.release_version('2.1.12-beta.1'), engine.release_version('2.1.12'))
+        self.assertFalse(engine.is_public_version('2.1.12-beta.1'))
+
     def test_external_download_rejected(self):
         with self.assertRaises(ValueError):
             engine.validate_download_url('https://example.com/RemoteXPTI.exe', 'v2.1.9')

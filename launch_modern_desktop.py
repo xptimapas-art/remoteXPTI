@@ -1,6 +1,13 @@
+import sys
+
+if len(sys.argv) > 1 and sys.argv[1] == '--verify-video-runtime':
+    if len(sys.argv) != 3:
+        raise SystemExit(2)
+    from video_runtime_check import check_video_runtime
+    raise SystemExit(0 if check_video_runtime(sys.argv[2]) else 1)
+
 import ctypes
 import os
-import sys
 import threading
 import time
 import urllib.request
@@ -276,7 +283,7 @@ def main():
                     import json
                     with open(cfg_path, "r", encoding="utf-8") as f:
                         cfg = json.load(f)
-                    if cfg.get("enabled", True):
+                    if cfg.get("enabled", True) and cfg.get("hotkeys_enabled", True):
                         desktop_hotkey_mgr.update_bindings(cfg.get("doors", []))
                     else:
                         desktop_hotkey_mgr.update_bindings([])

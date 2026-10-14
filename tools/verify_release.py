@@ -4,6 +4,8 @@ import json
 import sys
 import types
 import zipfile
+import subprocess
+import tempfile
 from pathlib import Path
 from PyInstaller.archive.readers import CArchiveReader
 
@@ -14,7 +16,7 @@ def verify_release(directory):
     digest = hashlib.sha256(app.read_bytes()).hexdigest()
     if digest != manifest['sha256'] or app.stat().st_size != manifest['size']:
         raise RuntimeError('O manifesto não corresponde ao EXE final.')
-    forbidden = {'.secret.key', 'session.json', 'doors_config.json', 'tuya_vault.bin'}
+    forbidden = {'.secret.key', 'session.json', 'doors_config.json', 'tuya_vault.bin', 'camera-test-targets.json'}
     for binary in (app, setup):
         archive = CArchiveReader(str(binary))
         names = {name.replace('\\', '/') for name in archive.toc}
@@ -23,7 +25,7 @@ def verify_release(directory):
         pyz = archive.open_embedded_archive('PYZ.pyz')
         if binary == app:
             required = {'desktop_backend', 'update_engine', 'update_bootstrap', 'local_api_security',
-                        'tuya_devices', 'runtime_paths', 'connection_health'}
+                        'tuya_devices', 'runtime_paths', 'connection_health', 'camera_snapshots', 'camera_streams', 'av', 'hotkey_capture', 'video_runtime_check'}
             if not required.issubset(pyz.toc) or 'update_helper.ps1' not in names or 'desktop_ui/dist/index.html' not in names:
                 raise RuntimeError('Recursos do app/updater ausentes no pacote.')
             functions = {c.co_name for c in pyz.extract('update_engine').co_consts if isinstance(c, types.CodeType)}
@@ -31,6 +33,8 @@ def verify_release(directory):
                 raise RuntimeError('EXE gerado não contém a versão final do updater.')
             if manifest['version'] not in pyz.extract('version').co_consts:
                 raise RuntimeError('A versão embutida não corresponde ao manifesto.')
+            if not any(name.startswith('av.libs/') and name.lower().endswith('.dll') for name in names):
+                raise RuntimeError('Bibliotecas nativas de vídeo não foram incluídas no EXE.')
             # Exercise the actual packaged filter, without networking or client profiles.
             health = types.ModuleType('release_connection_health')
             sys.modules[health.__name__] = health
@@ -67,6 +71,15 @@ def verify_release(directory):
             raise RuntimeError('ZIP portátil contém dados locais de produção.')
         if hashlib.sha256(package.read('RemoteXPTI.exe')).hexdigest() != digest:
             raise RuntimeError('O ZIP contém outro EXE.')
+    # Run an offline branch before any GUI, profile, cloud or device initialization.
+    with tempfile.TemporaryDirectory(prefix='remotexpti-video-check-') as temp:
+        result_path = Path(temp) / 'video-runtime.json'
+        completed = subprocess.run([str(app), '--verify-video-runtime', str(result_path)], timeout=40)
+        result = json.loads(result_path.read_text('utf-8')) if result_path.exists() else {}
+        if completed.returncode != 0 or not result.get('success') or result.get('version') != manifest['version'] \
+                or result.get('h264_decoder') != 'h264' or not result.get('rtsp_input') or not result.get('mp4_output'):
+            raise RuntimeError('O EXE final não carregou o decoder H.264 e os formatos RTSP/MP4 empacotados.')
+        print('Vídeo no EXE: bibliotecas nativas, H.264, RTSP e MP4 carregados sem acessar dispositivos.')
     print(f'Release {manifest["version"]}: manifesto, EXEs, Tcl/Tk e pacote portátil verificados.')
 
 
