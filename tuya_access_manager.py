@@ -218,6 +218,13 @@ class TuyaAccessManager:
             updated = deepcopy(self.config)
             if new_config:
                 updated.update(deepcopy(new_config))
+            if push_to_cloud:
+                from cloud_sync import CloudSyncManager
+                if CloudSyncManager.can_share_doors():
+                    # Publish before reporting the edit as saved; failed or
+                    # conflicting writes keep the local form and data intact.
+                    if not CloudSyncManager.push_doors_config(updated):
+                        raise ValueError("Não foi possível compartilhar as alterações. Habilite a sincronização e tente novamente.")
             temporary_path = None
             try:
                 with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=self.config_path.parent,
@@ -230,15 +237,6 @@ class TuyaAccessManager:
                 self.config = updated
                 log.info(f"[TuyaAccess] Configuração de portas salva em {self.config_path}")
                 
-                if push_to_cloud:
-                    cloud_snapshot = deepcopy(updated)
-                    def _push():
-                        try:
-                            from cloud_sync import CloudSyncManager
-                            CloudSyncManager.push_doors_config(cloud_snapshot)
-                        except Exception as e:
-                            log.error(f"[TuyaAccess] Falha ao fazer push da config de portas: {e}")
-                    threading.Thread(target=_push, daemon=True).start()
             except Exception as e:
                 log.error(f"[TuyaAccess] Erro ao salvar config: {e}")
                 raise
@@ -255,7 +253,7 @@ class TuyaAccessManager:
         with self._lock:
             doors = deepcopy(self.config.get("doors", []))
             existing = next((item for item in doors if item.get("id") == door_id), None)
-            runtime_fields = {"last_triggered", "cloud_online", "is_local"}
+            runtime_fields = {"last_triggered", "cloud_online", "is_local", "_cloud_managed"}
             def editable(item):
                 return {key: value for key, value in item.items() if key not in runtime_fields} if item is not None else None
             if editable(existing) != editable(original):
@@ -356,6 +354,7 @@ class TuyaAccessManager:
             "total_doors": len(self.config.get("doors", [])),
             "global_enabled": bool(self.config.get("enabled", True)),
             "hotkeys_enabled": bool(self.config.get("hotkeys_enabled", True)),
+            "config_sync_unlocked": bool(ConfigManager().get_doors_sync_key()),
         }
 
     def get_doors(self) -> List[Dict[str, Any]]:

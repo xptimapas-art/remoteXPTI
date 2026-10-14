@@ -58,6 +58,7 @@ class ConfigManager:
             # The DEV uses the same Tuya login as clients. Token rotation must
             # propagate even while server/access configuration writes are off.
             "tuya_session_sync_enabled": True,
+            "doors_config_sync_enabled": True,
         }
         self.load()
 
@@ -110,6 +111,11 @@ class ConfigManager:
         """Valida a senha de desenvolvedor e ativa a sessão persistente."""
         computed = self._hash_password(password.strip())
         if secrets.compare_digest(computed, DEV_PASSWORD_HASH):
+            from shared_doors import password_key, protect_key
+            try:
+                self.data["doors_sync_key"] = protect_key(password_key(password))
+            except OSError:
+                log.warning("[ConfigManager] Não foi possível proteger a chave de sincronização neste Windows.")
             self.data["dev_authenticated"] = True
             self.data["dev_session_token"] = self._generate_session_token()
             self.data["update_channel"] = "beta_tester"
@@ -124,12 +130,22 @@ class ConfigManager:
         """Encerra a sessão de desenvolvedor e retorna ao canal público padrão."""
         self.data["dev_authenticated"] = False
         self.data["dev_session_token"] = ""
+        self.data.pop("doors_sync_key", None)
         self.data["update_channel"] = "public"
         self.save()
         log.info("[ConfigManager] Sessão de desenvolvedor encerrada. Retornado para canal 'public'.")
 
     def is_dev_authenticated(self) -> bool:
         return bool(self.data.get("dev_authenticated", False))
+
+    def get_doors_sync_key(self):
+        if not self.is_dev_authenticated() or not self.data.get("doors_sync_key"):
+            return None
+        from shared_doors import protect_key
+        try:
+            return protect_key(self.data["doors_sync_key"], decrypt=True)
+        except (OSError, ValueError):
+            return None
 
     def get_update_channel(self) -> str:
         # Se não for dev autenticado, força estritamente 'public'
@@ -155,6 +171,7 @@ class ConfigManager:
             "key": key,
             "enabled": bool(enabled and url and key),
             "session_sync_enabled": bool(self.data.get("tuya_session_sync_enabled", enabled) and url and key),
+            "doors_sync_enabled": bool(self.data.get("doors_config_sync_enabled", True) and url and key),
         }
 
     def set_supabase_config(self, url: str, key: str, enabled: bool = True):

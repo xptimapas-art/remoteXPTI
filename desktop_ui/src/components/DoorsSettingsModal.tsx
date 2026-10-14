@@ -20,6 +20,8 @@ export function DoorsSettingsModal({ isOpen, doorId = null, onClose, onSaved }: 
   const [error, setError] = useState('');
   const [deleting, setDeleting] = useState(false);
   const [qrLoading, setQrLoading] = useState(false);
+  const [syncPassword, setSyncPassword] = useState('');
+  const [unlocking, setUnlocking] = useState(false);
   const [qr, setQr] = useState<{ qr_image_data?: string; instructions?: string; session_revision?: string } | null>(null);
   const lifecycle = useRef<AbortController | null>(null);
   const isNew = doorId === 'new';
@@ -28,7 +30,7 @@ export function DoorsSettingsModal({ isOpen, doorId = null, onClose, onSaved }: 
   useEffect(() => {
     if (!isOpen) return;
     const controller = new AbortController(); lifecycle.current = controller;
-    setLoading(true); setError(''); setDeleting(false); setQr(null); setDoor(null); setOriginal(null);
+    setLoading(true); setError(''); setDeleting(false); setQr(null); setDoor(null); setOriginal(null); setSyncPassword('');
     fetch('/api/doors/config', { signal: controller.signal }).then(readResponse<ConfigResponse>).then(data => {
       if (controller.signal.aborted) return;
       setConfig(data.config || {}); setCloud(data.cloud_status || {});
@@ -94,6 +96,17 @@ export function DoorsSettingsModal({ isOpen, doorId = null, onClose, onSaved }: 
     } catch (exception) { if (!signal?.aborted) setError(exception instanceof Error ? exception.message : 'Falha ao gerar QR Code.'); }
     finally { setQrLoading(false); }
   };
+  const unlockSync = async () => {
+    if (unlocking || !syncPassword) return;
+    setUnlocking(true); setError('');
+    try {
+      const data = await fetch('/api/doors/shared-sync', { method:'POST', signal:lifecycle.current?.signal,
+        headers:{'Content-Type':'application/json'}, body:JSON.stringify({password:syncPassword}) }).then(readResponse<ConfigResponse>);
+      setCloud(data.cloud_status); setConfig(data.config); setSyncPassword('');
+      window.dispatchEvent(new Event('doorsUpdated'));
+    } catch (exception) { setError(exception instanceof Error ? exception.message : 'Não foi possível habilitar a sincronização.'); }
+    finally { setUnlocking(false); }
+  };
   if (!isOpen) return null;
   const field = (label: string, key: 'host' | 'username' | 'password' | 'scene_id' | 'home_id' | 'device_id', type = 'text') => <label className="xa-field"><span>{label}</span>
     <input type={type} autoComplete={type === 'password' ? 'new-password' : 'off'} value={String(door?.[key] || '')} onChange={event => change(key, event.target.value)} /></label>;
@@ -139,6 +152,11 @@ export function DoorsSettingsModal({ isOpen, doorId = null, onClose, onSaved }: 
           <label className="xa-check"><input type="checkbox" checked={config.hotkeys_enabled !== false} onChange={event => setConfig(current => ({ ...current, hotkeys_enabled: event.target.checked }))} />Atalhos globais de teclado</label>
           <label className="xa-check"><input type="checkbox" checked={config.feedback_sound !== false} onChange={event => setConfig(current => ({ ...current, feedback_sound: event.target.checked }))} />Som de confirmação</label>
           <label className="xa-check"><input type="checkbox" checked={config.feedback_notification !== false} onChange={event => setConfig(current => ({ ...current, feedback_notification: event.target.checked }))} />Notificação de acionamento</label>
+          <div className="xa-section"><h3>Portas e câmeras da empresa</h3>
+            <p>{cloud.config_sync_unlocked ? 'Sincronização habilitada. As alterações salvas serão compartilhadas com os PCs autorizados.' : 'Confirme a senha DEV uma vez neste PC para compartilhar e receber portas e câmeras.'}</p>
+            {!cloud.config_sync_unlocked && <><label className="xa-field"><span>Senha DEV</span><input type="password" autoComplete="off" value={syncPassword} onChange={event=>setSyncPassword(event.target.value)} /></label>
+              <button type="button" disabled={unlocking || !syncPassword} onClick={()=>void unlockSync()}>{unlocking ? 'Habilitando…' : 'Habilitar sincronização'}</button></>}
+          </div>
           <div className="xa-section"><h3>Conta Tuya</h3><p>Conta {cloud.connected ? 'conectada' : 'desconectada'}</p>
             <details><summary>Conectar ou trocar conta</summary><label className="xa-field"><span>Código do usuário Tuya</span><input autoComplete="off" value={config.user_code || ''} onChange={event => setConfig(current => ({ ...current, user_code: event.target.value }))} /></label>
               <p className="xa-hint">Informe o código da conta e escaneie o QR Code no Tuya Smart.</p><button type="button" onClick={() => void generateQr()}><QrCode />{qrLoading ? 'Gerando…' : 'Gerar QR Code'}</button>

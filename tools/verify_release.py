@@ -25,7 +25,7 @@ def verify_release(directory):
         pyz = archive.open_embedded_archive('PYZ.pyz')
         if binary == app:
             required = {'desktop_backend', 'update_engine', 'update_bootstrap', 'local_api_security',
-                        'tuya_devices', 'runtime_paths', 'windows_single_instance', 'connection_health', 'camera_snapshots', 'camera_streams', 'av', 'hotkey_capture', 'video_runtime_check'}
+                        'tuya_devices', 'runtime_paths', 'windows_single_instance', 'connection_health', 'camera_snapshots', 'camera_streams', 'av', 'hotkey_capture', 'video_runtime_check', 'shared_doors', 'desktop_window'}
             if not required.issubset(pyz.toc) or 'update_helper.ps1' not in names or 'desktop_ui/dist/index.html' not in names:
                 raise RuntimeError('Recursos do app/updater ausentes no pacote.')
             functions = {c.co_name for c in pyz.extract('update_engine').co_consts if isinstance(c, types.CodeType)}

@@ -111,10 +111,10 @@ def main():
         </html>
         """
 
-        # Only the source DEV receives the proposed chrome during visual evaluation.
-        integrated = is_development()
+        # Client and DEV share the same window chrome; their profiles stay separate.
+        integrated = True
         from desktop_window import DesktopWindow
-        window_api = DesktopWindow() if integrated else None
+        window_api = DesktopWindow(development=is_development())
         window = webview.create_window(
             title=title,
             url=URL if bg_running else None,

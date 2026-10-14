@@ -342,42 +342,29 @@ class DoorEditRequest(BaseModel):
 class QRLoginRequest(BaseModel):
     user_code: Optional[str] = None
 
-def sync_supabase_servers() -> tuple[bool, int, str]:
-    if not CloudSyncManager.is_configured():
-        return False, 0, "Supabase não configurado ou desabilitado"
+def sync_shared_doors() -> bool:
+    if not CloudSyncManager.can_share_doors():
+        return False
     try:
-        try:
-            remote_doors_json = CloudSyncManager.fetch_doors_config()
-            if remote_doors_json and remote_doors_json.strip():
-                remote_doors_cfg = json.loads(remote_doors_json)
-                
-                # Preserva campos puramente locais para evitar loops e respeitar a preferência de cada cliente
-                local_doors = {d.get("id"): d for d in tuya_mgr.config.get("doors", [])}
-                for r_door in remote_doors_cfg.get("doors", []):
-                    r_id = r_door.get("id")
-                    if r_id in local_doors:
-                        r_door["last_triggered"] = local_doors[r_id].get("last_triggered")
-                        r_door["hotkey"] = local_doors[r_id].get("hotkey", "")
-                        r_door["enabled"] = local_doors[r_id].get("enabled", True)
+        raw = CloudSyncManager.fetch_doors_config()
+        if not raw:
+            return False
+        from shared_doors import merge_config
+        with tuya_mgr._lock:
+            merged = merge_config(tuya_mgr.config, json.loads(raw))
+            if merged != tuya_mgr.config:
+                tuya_mgr.save_config(merged, push_to_cloud=False)
+        return True
+    except Exception as error:
+        log.warning(f"[DesktopBackend] Falha ao sincronizar portas: {type(error).__name__}")
+        return False
 
-                # Preserva portas locais que não estão no remote (ex: terminal facial local exclusivo desta unidade)
-                remote_door_ids = {d.get("id") for d in remote_doors_cfg.get("doors", [])}
-                for l_id, l_door in local_doors.items():
-                    if l_id not in remote_door_ids:
-                        remote_doors_cfg.setdefault("doors", []).append(l_door)
 
-                # Preserva também o som e notificação da máquina local
-                remote_doors_cfg["feedback_sound"] = tuya_mgr.config.get("feedback_sound", True)
-                remote_doors_cfg["feedback_notification"] = tuya_mgr.config.get("feedback_notification", True)
-                remote_doors_cfg["enabled"] = tuya_mgr.config.get("enabled", True)
-                remote_doors_cfg["hotkeys_enabled"] = tuya_mgr.config.get("hotkeys_enabled", True)
-
-                if remote_doors_cfg != tuya_mgr.config:
-                    log.info("[DesktopBackend] doors_config na nuvem é diferente do local. Atualizando local...")
-                    tuya_mgr.save_config(remote_doors_cfg, push_to_cloud=False)
-        except Exception as e:
-            log.warning(f"[DesktopBackend] Erro ao sincronizar doors_config: {e}")
-
+def sync_supabase_servers() -> tuple[bool, int, str]:
+    doors_synced = sync_shared_doors()
+    if not CloudSyncManager.is_configured():
+        return doors_synced, 0, "Portas sincronizadas" if doors_synced else "Sincronização de servidores desabilitada"
+    try:
         remote = CloudSyncManager.fetch_servers()
         if remote is not None:
             changed, added, updated = storage_mgr.merge_cloud_servers(remote)
@@ -648,6 +635,8 @@ def save_doors_config(req: DoorConfigRequest):
 
     try:
         tuya_mgr.save_config(update_data)
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error))
     except OSError:
         raise HTTPException(status_code=500, detail="Não foi possível gravar a configuração. Tente novamente.")
     broadcast_ws({"type": "doors_updated"})
@@ -740,12 +729,29 @@ def save_single_door_config(door_id: str, req: DoorEditRequest):
 def sync_doors_cloud():
     require_dev_access()
     tuya_mgr._init_cloud_manager(force_sync=True)
+    sync_shared_doors()
     broadcast_ws({"type": "doors_updated"})
     return {
         "success": True,
         "cloud_status": tuya_mgr.get_cloud_status(),
         "doors": tuya_mgr.get_doors()
     }
+
+
+@app.post("/api/doors/shared-sync")
+def unlock_shared_doors(req: DevLoginRequest):
+    require_dev_access()
+    if not config_mgr.authenticate_dev(req.password):
+        raise HTTPException(status_code=403, detail="Senha DEV incorreta.")
+    if not CloudSyncManager.can_share_doors():
+        raise HTTPException(status_code=503, detail="Não foi possível habilitar a sincronização neste PC.")
+    sync_shared_doors()
+    try:
+        tuya_mgr.save_config(push_to_cloud=True)
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error))
+    broadcast_ws({"type":"doors_updated"})
+    return {"success":True,"cloud_status":tuya_mgr.get_cloud_status(),"config":tuya_mgr.config}
 
 @app.get("/api/doors/logs")
 def get_doors_access_logs():

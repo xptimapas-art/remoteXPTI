@@ -33,6 +33,7 @@ class DoorConfigurationTests(unittest.TestCase):
         self.manager.reload_hotkeys = MagicMock()
         # Prevent threads and remote synchronization; only local fixture files are used.
         self.start = patch('tuya_access_manager.threading.Thread').start()
+        patch('cloud_sync.CloudSyncManager.can_share_doors', return_value=False).start()
         self.addCleanup(patch.stopall)
 
     def edit(self, change=None, original=None, delete=False):

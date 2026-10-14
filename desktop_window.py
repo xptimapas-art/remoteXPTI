@@ -1,10 +1,11 @@
-"""Private pywebview bridge for the source DEV window's custom title bar."""
+"""Private pywebview bridge for the shared client and DEV title bar."""
 import ctypes
 from ctypes import wintypes as w
 
 
 class DesktopWindow:
-    def __init__(self):
+    def __init__(self, development=False):
+        self._development = bool(development)
         self._window = None
         self._user = None
         self._procedure = None
@@ -23,7 +24,7 @@ class DesktopWindow:
                 action()
             except Exception:
                 import logging
-                logging.getLogger('desktop_window').exception('Falha na operação da janela DEV')
+                logging.getLogger('desktop_window').exception('Falha na operação da janela')
         self._window.native.BeginInvoke(Action(run))
 
     def _install_frame(self):
@@ -66,7 +67,8 @@ class DesktopWindow:
         self._on_ui(install)
 
     def window_state(self):
-        return {'integrated': True, 'maximized': bool(self._user and self._user.IsZoomed(self._hwnd))}
+        return {'integrated': True, 'development': self._development,
+                'maximized': bool(self._user and self._user.IsZoomed(self._hwnd))}
 
     def _publish_state(self):
         import json

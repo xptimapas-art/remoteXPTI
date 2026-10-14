@@ -6,6 +6,12 @@ from desktop_window import DesktopWindow
 
 
 class DesktopDragTests(unittest.TestCase):
+    def test_integrated_frame_does_not_label_installed_clients_as_development(self):
+        for development in (False, True):
+            state = DesktopWindow(development=development).window_state()
+            self.assertTrue(state['integrated'])
+            self.assertEqual(state['development'], development)
+
     def test_native_drag_uses_clicked_screen_position_including_negative_monitors(self):
         for x, y in [(350, 180), (-1920, 120), (40, -600)]:
             with self.subTest(x=x, y=y):

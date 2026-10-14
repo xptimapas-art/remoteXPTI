@@ -99,7 +99,7 @@ class SingleInstanceTests(unittest.TestCase):
 
 
 class LauncherInstanceTests(unittest.TestCase):
-    def launcher(self, running):
+    def launcher(self, running, development=True):
         source = Path(__file__).resolve().parents[1] / 'launch_modern_desktop.py'
         tree = ast.parse(source.read_text('utf-8'))
         main = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == 'main')
@@ -108,7 +108,7 @@ class LauncherInstanceTests(unittest.TestCase):
                      'get_mutex_name': lambda: 'fixture', 'get_window_title': lambda: 'fixture',
                      'get_app_user_model_id': lambda: 'fixture', '_dbg': MagicMock(),
                      'ctypes': MagicMock(), 'webview': MagicMock(), 'is_backend_running': lambda: True,
-                     'is_development': lambda: True,
+                     'is_development': lambda: development,
                      'URL': 'http://127.0.0.1:1'}
         exec(compile(ast.Module(body=[main], type_ignores=[]), str(source), 'exec'), namespace)
         return namespace, guard
@@ -128,6 +128,18 @@ class LauncherInstanceTests(unittest.TestCase):
         guard.focus.assert_called_once_with('fixture')
         namespace['webview'].create_window.assert_not_called()
         guard.close.assert_called_once()
+
+    def test_installed_client_and_development_use_the_same_integrated_frame(self):
+        for development in (False, True):
+            with self.subTest(development=development):
+                namespace, guard = self.launcher(False, development)
+                namespace['webview'].create_window.side_effect = SystemExit('window requested')
+                with self.assertRaisesRegex(SystemExit, 'window requested'):
+                    namespace['main']()
+                options = namespace['webview'].create_window.call_args.kwargs
+                self.assertTrue(options['frameless'])
+                self.assertIsNotNone(options['js_api'])
+                self.assertEqual(options['js_api'].window_state()['development'], development)
 
 
 if __name__ == '__main__':

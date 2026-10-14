@@ -1,5 +1,5 @@
 import type { MouseEvent } from 'react';
-import { Search, RotateCw, Settings, DoorClosed, LayoutGrid, Map, Router, Plus } from 'lucide-react';
+import { Search, RotateCw, Ellipsis, DoorClosed, LayoutGrid, Map, Router, Plus } from 'lucide-react';
 import { useDesktopWindow } from './desktopWindow';
 import './TitleBar.css';
 
@@ -14,7 +14,7 @@ interface TitleBarProps {
 }
 export function TitleBar({ currentTab, setCurrentTab, searchTerm, setSearchTerm, selectedGroup,
   setSelectedGroup, groups, isDev, onRefresh, onAddServer, onOpenSettings, updateInfo, onRestartUpdate }: TitleBarProps) {
-  const { integrated, maximized, api } = useDesktopWindow();
+  const { integrated, maximized, development, api } = useDesktopWindow();
   const interactive = (target: EventTarget) => (target as HTMLElement).closest('button,input,select,a,label');
   const drag = (event: MouseEvent<HTMLElement>) => {
     if (event.button === 0 && integrated && !interactive(event.target) && event.detail === 1) void api?.begin_drag().catch(console.error);
@@ -28,16 +28,18 @@ export function TitleBar({ currentTab, setCurrentTab, searchTerm, setSearchTerm,
     <header className={`xpti-titlebar ${integrated ? 'xpti-titlebar-integrated' : ''}`} onMouseDown={drag} onDoubleClick={maximize}>
       <span className="xpti-titlebar-network" aria-hidden="true" />
       <div className="xpti-brand"><img src="/imagens/xpti-facade-logo.svg" alt="XPTI · Tecnologias em Segurança" draggable={false} />
-        <span className="xpti-product"><span className="xpti-product-name">RemoteXPTI</span>{integrated && <small>DEV</small>}</span></div>
+        <span className="xpti-product"><span className="xpti-product-name">RemoteXPTI</span>{development && <small>DEV</small>}</span></div>
       <nav className="xpti-tabs" aria-label="Navegação principal">{tabs.map(({id,label,Icon}) =>
         <button key={id} type="button" aria-current={currentTab === id ? 'page' : undefined} onClick={() => setCurrentTab(id)} title={label}>
           <Icon aria-hidden="true" /><span>{label}</span></button>)}</nav>
       <div className="xpti-titlebar-space" />
+      <div className="xpti-titlebar-actions">
       {updateInfo?.updateReady ? <button className="xpti-update-ready" onClick={onRestartUpdate} disabled={updateInfo.isApplying}>
         {updateInfo.isApplying ? 'Instalando…' : `Reiniciar para ${updateInfo.newVersion}`}</button>
       : <button type="button" className="xpti-version" onClick={onOpenSettings} title={`v${updateInfo?.currentVersion || '—'}${isDev ? ' · Beta Tester' : ''}`}>
         {updateInfo?.isDownloading ? 'Baixando…' : `v${updateInfo?.currentVersion || '—'}`}</button>}
-      <button type="button" className="xpti-settings" title="Configurações e Sincronização" aria-label="Configurações" onClick={onOpenSettings}><Settings aria-hidden="true" /></button>
+      <button type="button" className="xpti-settings" title="Configurações e Sincronização" aria-label="Configurações" onClick={onOpenSettings}><Ellipsis aria-hidden="true" /></button>
+      </div>
       {integrated && <div className="xpti-window-controls" aria-label="Controles da janela">
         <button type="button" aria-label="Minimizar" title="Minimizar" onClick={() => void api?.minimize().catch(console.error)}><span className="xpti-system-icon" aria-hidden="true">{'\uE921'}</span></button>
         <button type="button" aria-label={maximized ? 'Restaurar janela' : 'Maximizar'} title={maximized ? 'Restaurar' : 'Maximizar'}

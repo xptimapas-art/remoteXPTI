@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 
-interface WindowState { integrated: boolean; maximized: boolean }
+interface WindowState { integrated: boolean; maximized: boolean; development: boolean }
 interface NativeWindowApi {
   window_state(): Promise<WindowState>;
   minimize(): Promise<void>;
@@ -14,7 +14,7 @@ declare global {
 }
 
 export function useDesktopWindow() {
-  const [state, setState] = useState<WindowState>({ integrated: false, maximized: false });
+  const [state, setState] = useState<WindowState>({ integrated: false, maximized: false, development: false });
   useEffect(() => {
     let active = true;
     const ready = () => {

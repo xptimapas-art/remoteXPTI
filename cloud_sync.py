@@ -22,6 +22,61 @@ class CloudSyncManager:
         return bool(cfg.get("enabled") and cfg.get("url") and cfg.get("key"))
 
     @staticmethod
+    def can_share_doors() -> bool:
+        manager = ConfigManager()
+        cfg = manager.get_supabase_config()
+        return bool(cfg.get("doors_sync_enabled") and manager.get_doors_sync_key())
+
+    @classmethod
+    def _read_doors_notes(cls, cfg):
+        url = f"{cls._clean_base_url(cfg['url'])}/rest/v1/servers?id=eq.eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee&select=notes"
+        req = urllib.request.Request(url, headers=cls._get_headers(cfg["key"]))
+        with urllib.request.urlopen(req, timeout=8.0) as response:
+            rows = json.loads(response.read().decode("utf-8"))
+        return rows[0].get("notes") if rows else None
+
+    @classmethod
+    def _push_shared_doors(cls, config, cfg):
+        from shared_doors import FIELD, decrypt_config, encrypt_config, revision, shared_config
+        key = ConfigManager().get_doors_sync_key()
+        if not key:
+            return False
+        try:
+            previous = cls._read_doors_notes(cfg)
+            old = json.loads(previous) if previous else {}
+            if FIELD in old:
+                existing = decrypt_config(old, key)
+                if existing == shared_config(config):
+                    config["_shared_revision"] = revision(previous)
+                    return True
+                if config.get("_shared_revision") != revision(previous):
+                    raise ValueError("As portas foram alteradas em outro PC. Atualize antes de salvar.")
+            # Old clients keep their Tuya scenes; private camera/facial settings
+            # are present only inside the authenticated encrypted payload.
+            safe_fields = ("id", "name", "mode", "home_id", "scene_id", "scene_name", "device_id", "device_name", "hotkey")
+            envelope = {"doors": [{k:d[k] for k in safe_fields if k in d}
+                       for d in config.get("doors", []) if d.get("mode") == "cloud_scene"],
+                        FIELD: encrypt_config(config, key)}
+            notes = json.dumps(envelope, ensure_ascii=False)
+            if previous is None:
+                raise ValueError("Registro compartilhado de portas ausente.")
+            filters = urllib.parse.urlencode({"id":"eq.eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee", "notes":"eq."+previous})
+            url = f"{cls._clean_base_url(cfg['url'])}/rest/v1/servers?{filters}"
+            headers = {**cls._get_headers(cfg["key"]), "Prefer":"return=representation"}
+            req = urllib.request.Request(url, data=json.dumps({"notes":notes}).encode(), headers=headers, method="PATCH")
+            with urllib.request.urlopen(req, timeout=8.0) as response:
+                updated = json.loads(response.read().decode("utf-8"))
+            if len(updated) != 1:
+                raise ValueError("As portas mudaram durante o envio. Atualize antes de salvar.")
+            config["_shared_revision"] = revision(notes)
+            return True
+        except ValueError:
+            raise
+        except Exception as error:
+            log.warning(f"[CloudSync] Falha na sincronização de portas: {type(error).__name__}")
+            raise ValueError("Não foi possível enviar as portas. Verifique a conexão e tente novamente.") from None
+
+    @staticmethod
     def _get_headers(key: str) -> Dict[str, str]:
         return {
             "apikey": key,
@@ -252,6 +307,23 @@ class CloudSyncManager:
     def fetch_doors_config(cls) -> Optional[str]:
         """Busca a configuração de portas atualizada no Supabase (embutida na tabela servers)."""
         cfg = ConfigManager().get_supabase_config()
+        if cfg.get("doors_sync_enabled"):
+            if not cls.can_share_doors():
+                return None
+            from shared_doors import FIELD, decrypt_config, revision
+            try:
+                notes = cls._read_doors_notes(cfg)
+                if not notes:
+                    return None
+                envelope = json.loads(notes)
+                if FIELD not in envelope:
+                    return None  # First encrypted publish keeps the author's local cameras.
+                data = decrypt_config(envelope, ConfigManager().get_doors_sync_key())
+                data["_shared_revision"] = revision(notes)
+                return json.dumps(data)
+            except Exception as error:
+                log.warning(f"[CloudSync] Falha ao ler portas compartilhadas: {type(error).__name__}")
+                return None
         if not cfg.get("enabled") or not cfg.get("url") or not cfg.get("key"):
             return None
 
@@ -276,6 +348,8 @@ class CloudSyncManager:
     def push_doors_config(cls, config_dict: dict) -> bool:
         """Envia a configuração de portas para o Supabase (usando a tabela servers)."""
         cfg = ConfigManager().get_supabase_config()
+        if cfg.get("doors_sync_enabled"):
+            return cls._push_shared_doors(config_dict, cfg)
         if not cfg.get("enabled") or not cfg.get("url") or not cfg.get("key"):
             return False
 

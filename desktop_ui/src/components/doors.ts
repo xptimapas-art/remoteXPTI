@@ -13,7 +13,7 @@ export interface DoorsConfig {
   enabled?: boolean; hotkeys_enabled?: boolean; feedback_sound?: boolean; feedback_notification?: boolean;
   user_code?: string; doors?: DoorConfig[];
 }
-export interface CloudStatus { connected?: boolean; global_enabled?: boolean; hotkeys_enabled?: boolean; session_revision?: string }
+export interface CloudStatus { connected?: boolean; global_enabled?: boolean; hotkeys_enabled?: boolean; session_revision?: string; config_sync_unlocked?: boolean }
 export const isFacialDoor = (door: DoorConfig) => ['hikvision', 'facial', 'isapi'].includes(door.mode || '');
 export const openDoorLabel = (door: DoorConfig) => /port[aã]o|garagem/i.test(door.name) ? 'Abrir Portão' : 'Abrir Porta';
 export async function readResponse<T>(response: Response): Promise<T> {
