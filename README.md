@@ -1,4 +1,4 @@
-> Desktop moderno (2.1.10): use `run_development.bat` para desenvolver e `run_client.bat` para abrir a instalação cliente. Consulte [os ambientes separados](AMBIENTES_CLIENTE_E_DESENVOLVIMENTO.md). Para distribuir, use `python build_all.py` com `requirements-build.txt`. Consulte [o guia atualizado](COMO_DISTRIBUIR_E_ATUALIZAR.md) e [as correções do updater](CORRECOES_AUTO_UPDATE.md). O auto update funciona no EXE instalado; o modo Python não instala versões.
+> Desktop moderno (2.1.11): use `run_development.bat` para desenvolver e `run_client.bat` para abrir a instalação cliente. Consulte [os ambientes separados](AMBIENTES_CLIENTE_E_DESENVOLVIMENTO.md). Para distribuir, use `python build_all.py` com `requirements-build.txt`. Consulte [o guia atualizado](COMO_DISTRIBUIR_E_ATUALIZAR.md) e [as correções do updater](CORRECOES_AUTO_UPDATE.md). O auto update funciona no EXE instalado; o modo Python não instala versões.
 >
 > As seções abaixo descrevem também a interface legada. A entrada de build foi consolidada no desktop moderno.
 

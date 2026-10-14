@@ -110,7 +110,7 @@ export const ServersView: React.FC<ServersViewProps> = React.memo(({
           {servers.some((s) => s.is_online === false) && (
             <span className="px-2 py-0.5 rounded bg-red-950/70 text-red-300 border border-red-800/60 text-[11px] font-medium flex items-center gap-1.5 animate-pulse">
               <span className="w-2 h-2 rounded-full bg-red-500 inline-block shadow-[0_0_6px_rgba(239,68,68,0.9)]" />
-              {servers.filter((s) => s.is_online === false).length} em falha (LOSS)
+              {servers.filter((s) => s.is_online === false).length} com falha RDP confirmada
             </span>
           )}
         </div>
@@ -265,7 +265,7 @@ export const ServersView: React.FC<ServersViewProps> = React.memo(({
                   {/* Badge de LOSS em Destaque Vermelho quando Offline */}
                   {isOffline && (
                     <span
-                      title={`Offline há ${formatLossDuration(s.offline_since ? now - s.offline_since : s.duration_seconds)} (${s.status_msg || ''})`}
+                      title={`Porta RDP sem resposta há ${formatLossDuration(s.offline_since ? now - s.offline_since : s.duration_seconds)} (${s.status_msg || ''})`}
                       style={{
                         fontSize: '9px',
                         fontWeight: 700,
@@ -284,7 +284,7 @@ export const ServersView: React.FC<ServersViewProps> = React.memo(({
                         whiteSpace: 'nowrap',
                       }}
                     >
-                      ⚠️ LOSS {formatLossDuration(s.offline_since ? now - s.offline_since : s.duration_seconds)}
+                      ⚠️ RDP {formatLossDuration(s.offline_since ? now - s.offline_since : s.duration_seconds)}
                     </span>
                   )}
                 </div>

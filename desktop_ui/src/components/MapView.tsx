@@ -571,7 +571,7 @@ export const MapView: React.FC<MapViewProps> = React.memo(({
               <div className="flex items-center gap-2">
                 <span className="text-sm">⚠️</span>
                 <span className="text-[11px] font-black uppercase tracking-wider text-[#ff5c5c]">
-                  SERVIDORES EM FALHA / LOSS
+                  FALHAS RDP CONFIRMADAS
                 </span>
                 <span className="px-2 py-0.5 rounded-full bg-[#e03131] text-white font-mono text-[11px] font-bold leading-none shadow-[0_0_6px_rgba(224,49,49,0.5)]">
                   {incidents.length}
@@ -592,7 +592,7 @@ export const MapView: React.FC<MapViewProps> = React.memo(({
                 <div
                   key={inc.id}
                   onClick={() => handleIncidentClick(inc)}
-                  title="Clique para localizar no mapa"
+                  title="Falha persistente no teste da porta RDP. Clique para localizar no mapa."
                   className="px-3 py-2 rounded-lg bg-[#20222a]/90 hover:bg-[#282a35] border border-white/5 hover:border-red-500/40 transition-all cursor-pointer flex items-center justify-between group"
                 >
                   <div className="flex items-center gap-2 min-w-0 mr-2">

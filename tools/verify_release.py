@@ -22,7 +22,8 @@ def verify_release(directory):
             raise RuntimeError(f'{binary.name} contém arquivos locais de credenciais.')
         pyz = archive.open_embedded_archive('PYZ.pyz')
         if binary == app:
-            required = {'desktop_backend', 'update_engine', 'update_bootstrap', 'local_api_security', 'tuya_devices'}
+            required = {'desktop_backend', 'update_engine', 'update_bootstrap', 'local_api_security',
+                        'tuya_devices', 'runtime_paths', 'connection_health'}
             if not required.issubset(pyz.toc) or 'update_helper.ps1' not in names or 'desktop_ui/dist/index.html' not in names:
                 raise RuntimeError('Recursos do app/updater ausentes no pacote.')
             functions = {c.co_name for c in pyz.extract('update_engine').co_consts if isinstance(c, types.CodeType)}
@@ -30,6 +31,22 @@ def verify_release(directory):
                 raise RuntimeError('EXE gerado não contém a versão final do updater.')
             if manifest['version'] not in pyz.extract('version').co_consts:
                 raise RuntimeError('A versão embutida não corresponde ao manifesto.')
+            # Exercise the actual packaged filter, without networking or client profiles.
+            health = types.ModuleType('release_connection_health')
+            sys.modules[health.__name__] = health
+            try:
+                exec(pyz.extract('connection_health'), health.__dict__)
+                clock = [0.0]
+                monitor = health.ConnectionHealthMonitor(clock=lambda: clock[0], wall_clock=lambda: 1000 + clock[0])
+                for timestamp, reachable, online in ((0, False, True), (30, False, True),
+                                                       (60, False, False), (90, True, False),
+                                                       (120, True, True)):
+                    clock[0] = timestamp
+                    status, _ = monitor.observe('fixture', reachable, 'probe')
+                    if status['is_online'] != online:
+                        raise RuntimeError('Filtro de falsos alertas incorreto no EXE final.')
+            finally:
+                sys.modules.pop(health.__name__, None)
             frontend = directory.parent / 'desktop_ui' / 'dist'
             for path in frontend.rglob('*'):
                 if not path.is_file():

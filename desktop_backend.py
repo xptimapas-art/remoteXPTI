@@ -25,6 +25,7 @@ from cloud_sync import CloudSyncManager
 from config_manager import ConfigManager
 from logger import log
 from runtime_paths import get_profile_dir, get_data_dir
+from connection_health import ConnectionHealthMonitor, PROBE_TIMEOUT_SECONDS
 from rdp_manager import RDPManager
 from storage import StorageManager
 from tuya_access_manager import TuyaAccessManager
@@ -127,6 +128,8 @@ updater_instance = SilentAutoUpdater(
 async def on_startup():
     global main_event_loop
     main_event_loop = asyncio.get_running_loop()
+    _load_downtime_history()
+    threading.Thread(target=_background_heartbeat, daemon=True).start()
 
 # Cache de coordenadas de ONUs da Ajin
 onu_coordinates: Dict[str, Dict[str, Any]] = {}
@@ -192,6 +195,10 @@ ajin_mgr.add_listener(_on_ajin_updated)
 # Cache de status e rastreamento de downtime de servidores
 server_status_cache: Dict[str, Dict[str, Any]] = {}
 server_downtime: Dict[str, float] = {}
+health_monitor = ConnectionHealthMonitor()
+status_lock = threading.RLock()
+status_scan_lock = threading.Lock()
+server_probe_locks: Dict[str, Any] = {}
 
 def _load_downtime_history():
     global server_downtime
@@ -202,7 +209,9 @@ def _load_downtime_history():
             with open(hist_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 if isinstance(data, dict):
-                    server_downtime = {str(k): float(v) for k, v in data.items()}
+                    with status_lock:
+                        health_monitor.restore(data)
+                        server_downtime = health_monitor.downtime()
                     log.info(f"[DesktopBackend] Downtime histórico carregado: {len(server_downtime)} servidores em falha.")
     except Exception as e:
         log.warning(f"[DesktopBackend] Falha ao carregar downtime_history.json: {e}")
@@ -211,49 +220,45 @@ def _save_downtime_history():
     try:
         from config_manager import get_config_dir
         hist_file = get_config_dir() / "downtime_history.json"
-        with open(hist_file, "w", encoding="utf-8") as f:
-            json.dump(server_downtime, f, indent=2)
+        with status_lock:
+            from update_engine import write_json_atomic
+            write_json_atomic(hist_file, server_downtime)
     except Exception as e:
         log.warning(f"[DesktopBackend] Falha ao salvar downtime_history.json: {e}")
 
+def _check_server_status(srv):
+    global server_downtime
+    server_id = srv['id']
+    with status_lock:
+        probe_lock = server_probe_locks.setdefault(server_id, threading.Lock())
+    # Manual checks and scheduled scans use the same per-server lock and filter.
+    with probe_lock:
+        target = (srv.get('host', ''), int(srv.get('port', 3389)))
+        reachable, message = RDPManager.check_connection(*target, timeout=PROBE_TIMEOUT_SECONDS)
+        with status_lock:
+            current = storage_mgr.get_server(server_id)
+            if not current or (current.get('host', ''), int(current.get('port', 3389))) != target:
+                return server_status_cache.get(server_id, {}), False
+            status, changed = health_monitor.observe(server_id, reachable, message, target=target)
+            server_status_cache[server_id] = status
+            server_downtime = health_monitor.downtime()
+            return status, changed
+
+
 def check_all_servers_status():
-    """Verifica a conectividade RDP de todos os servidores em paralelo com ThreadPoolExecutor."""
-    servers = list(storage_mgr.servers)
-    now = time.time()
-    changed = False
-
-    def _check_one(srv):
-        nonlocal changed
-        s_id = srv["id"]
-        host = srv.get("host", "")
-        port = int(srv.get("port", 3389))
-        is_online, msg = RDPManager.check_connection(host, port, timeout=1.3)
-
-        if not is_online:
-            if s_id not in server_downtime:
-                server_downtime[s_id] = now
-                changed = True
-        else:
-            if s_id in server_downtime:
-                server_downtime.pop(s_id, None)
-                changed = True
-
-        off_since = server_downtime.get(s_id)
-        duration = int(now - off_since) if off_since else 0
-        server_status_cache[s_id] = {
-            "is_online": is_online,
-            "msg": msg,
-            "offline_since": off_since,
-            "duration_seconds": duration
-        }
-
-    with ThreadPoolExecutor(max_workers=20) as executor:
-        list(executor.map(_check_one, servers))
-
-    if changed:
-        _save_downtime_history()
+    """Confirm connectivity changes without overlapping scans or single-probe incidents."""
+    if not status_scan_lock.acquire(blocking=False):
+        return
+    try:
+        servers = list(storage_mgr.servers)
+        with ThreadPoolExecutor(max_workers=20) as executor:
+            results = list(executor.map(_check_server_status, servers))
+        if any(changed for _, changed in results):
+            _save_downtime_history()
+            broadcast_ws({"type": "incidents_updated"})
         broadcast_ws({"type": "servers_status_updated"})
-        broadcast_ws({"type": "incidents_updated"})
+    finally:
+        status_scan_lock.release()
 
 # Modelos Pydantic
 class ConnectRequest(BaseModel):
@@ -506,11 +511,21 @@ def toggle_favorite(server_id: str):
 
 @app.delete("/api/servers/{server_id}")
 def delete_server(server_id: str):
+    global server_downtime
     srv = storage_mgr.get_server(server_id)
     is_corp = srv and srv.get("scope") == "corporate"
     ok = storage_mgr.delete_server(server_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Servidor não encontrado")
+    with status_lock:
+        was_offline = server_id in server_downtime
+        health_monitor.forget(server_id)
+        server_status_cache.pop(server_id, None)
+        server_downtime = health_monitor.downtime()
+        if was_offline:
+            _save_downtime_history()
+    if was_offline:
+        broadcast_ws({"type": "incidents_updated"})
 
     if (config_mgr.is_dev_authenticated() or is_corp) and CloudSyncManager.is_configured():
         def _del():
@@ -786,35 +801,10 @@ def check_single_server(server_id: str):
     srv = storage_mgr.get_server(server_id)
     if not srv:
         raise HTTPException(status_code=404, detail="Servidor não encontrado")
-    host = srv.get("host", "")
-    port = int(srv.get("port", 3389))
-    now = time.time()
-    is_online, msg = RDPManager.check_connection(host, port, timeout=1.5)
-
-    changed = False
-    if not is_online:
-        if server_id not in server_downtime:
-            server_downtime[server_id] = now
-            changed = True
-    else:
-        if server_id in server_downtime:
-            server_downtime.pop(server_id, None)
-            changed = True
-            
+    stat, changed = _check_server_status(srv)
     if changed:
         _save_downtime_history()
-        broadcast_ws({"type": "servers_status_updated"})
         broadcast_ws({"type": "incidents_updated"})
-
-    off_since = server_downtime.get(server_id)
-    duration = int(now - off_since) if off_since else 0
-    stat = {
-        "is_online": is_online,
-        "msg": msg,
-        "offline_since": off_since,
-        "duration_seconds": duration
-    }
-    server_status_cache[server_id] = stat
     broadcast_ws({"type": "servers_status_updated"})
     return stat
 
@@ -954,7 +944,6 @@ def _background_init_task():
     try:
         log.info("[DesktopBackend] Iniciando background init (ONUs, Downtime, Tuya)...")
         _load_onu_coordinates()
-        _load_downtime_history()
         
         # Se __name__ != "__main__", o backend foi importado (ex: pelo launcher), logo está embutido
         is_embedded = (__name__ != "__main__")
@@ -1016,7 +1005,6 @@ def _background_heartbeat():
 
 def start_backend_service(port: int = 8765):
     """Inicia o servidor Uvicorn em uma thread separada."""
-    threading.Thread(target=_background_heartbeat, daemon=True).start()
     config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning", log_config=None)
     server = uvicorn.Server(config)
     try:
