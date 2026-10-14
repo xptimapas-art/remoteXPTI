@@ -41,7 +41,9 @@ interface TelemetryData {
   coleta_formatted: string;
   server: { online: boolean; ip: string; checked_at: string };
   olt: { modelo: string; ip: string };
-  ports: Record<string, { online: number; total: number; label: string }>;
+  ports: { port: string; online: number; total: number }[] | Record<string, { online: number; total: number; label?: string }>;
+  collector?: { status: 'connecting' | 'online' | 'unavailable'; endpoint: string; checked_at?: string };
+  stale?: boolean;
   rows: ONUItem[];
 }
 
@@ -349,6 +351,21 @@ export const AjinView: React.FC<AjinViewProps> = React.memo(({
     <div className="flex-1 flex overflow-hidden bg-[#0d1117] p-3 gap-3">
       {/* PAINEL ESQUERDO: CONTROLES E TABELA DE ONUs */}
       <div className="flex-1 flex flex-col min-w-0 bg-[#161b22] rounded-xl border border-[#30363d] overflow-hidden shadow-lg">
+        {telemetry.stale && (
+          <div role="status" className="px-3 py-2 border-b border-amber-800 bg-amber-950/40 text-xs text-amber-200 flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 shrink-0" />
+            <span>
+              {telemetry.collector?.status === 'connecting'
+                ? 'Conectando ao coletor AJIN.'
+                : telemetry.collector?.status === 'unavailable'
+                  ? 'Sem conexão com o coletor AJIN.'
+                  : 'O coletor está acessível, mas a coleta está atrasada.'}
+              {' '}{telemetry.rows?.length
+                ? `Exibindo a última coleta salva: ${telemetry.coleta_formatted}. Os status abaixo são dessa coleta.`
+                : 'Aguardando dados dos dispositivos.'}
+            </span>
+          </div>
+        )}
         {/* Barra Superior de Filtros */}
         <div className="p-3 border-b border-[#30363d] flex items-center justify-between gap-3 bg-[#11151c]">
           <div className="flex items-center gap-2 flex-1 max-w-md">
@@ -450,6 +467,17 @@ export const AjinView: React.FC<AjinViewProps> = React.memo(({
               </tr>
             </thead>
             <tbody className="divide-y divide-[#21262d] text-xs">
+              {!filteredRows.length && (
+                <tr><td colSpan={8} className="px-3 py-10 text-center text-slate-400">
+                  {telemetry.rows?.length
+                    ? 'Nenhum dispositivo corresponde aos filtros.'
+                    : telemetry.collector?.status === 'unavailable'
+                      ? 'Coletor indisponível. O app tentará conectar novamente automaticamente.'
+                      : telemetry.collector?.status === 'connecting'
+                        ? 'Conectando ao coletor AJIN…'
+                        : 'Nenhum dispositivo recebido do coletor.'}
+                </td></tr>
+              )}
               {filteredRows.map((row) => (
                 <ONURow 
                   key={`${row.port}-${row.id}`} 
@@ -482,7 +510,7 @@ export const AjinView: React.FC<AjinViewProps> = React.memo(({
           <div className="p-4 flex items-center justify-between hover:bg-[#307cd1] transition-colors">
             <Radio className="w-8 h-8 opacity-90" />
             <div className="text-right">
-              <div className="text-3xl font-extrabold tracking-tight">{telemetry.total || 39}</div>
+              <div className="text-3xl font-extrabold tracking-tight">{telemetry.total ?? 0}</div>
               <div className="text-xs font-bold uppercase tracking-wider opacity-90">Total</div>
             </div>
           </div>
@@ -491,7 +519,7 @@ export const AjinView: React.FC<AjinViewProps> = React.memo(({
           <div className="p-4 flex items-center justify-between hover:bg-[#307cd1] transition-colors">
             <CheckCircle2 className="w-8 h-8 opacity-90" />
             <div className="text-right">
-              <div className="text-3xl font-extrabold tracking-tight">{telemetry.online || 36}</div>
+              <div className="text-3xl font-extrabold tracking-tight">{telemetry.online ?? 0}</div>
               <div className="text-xs font-bold uppercase tracking-wider opacity-90">Em Funcionamento</div>
             </div>
           </div>
@@ -500,7 +528,7 @@ export const AjinView: React.FC<AjinViewProps> = React.memo(({
           <div className="p-4 flex items-center justify-between hover:bg-[#307cd1] transition-colors">
             <XCircle className="w-8 h-8 opacity-90" />
             <div className="text-right">
-              <div className="text-3xl font-extrabold tracking-tight">{telemetry.offline || 3}</div>
+              <div className="text-3xl font-extrabold tracking-tight">{telemetry.offline ?? 0}</div>
               <div className="text-xs font-bold uppercase tracking-wider opacity-90 whitespace-nowrap">
                 Fora de Funcionamento
               </div>
@@ -515,18 +543,15 @@ export const AjinView: React.FC<AjinViewProps> = React.memo(({
               <span className="text-xs font-bold uppercase tracking-wider opacity-90">Portas PON</span>
             </div>
             <div className="space-y-1.5 text-xs font-mono">
-              <div className="flex justify-between">
-                <span className="opacity-90">Slot1-PON1</span>
-                <span className="font-bold">11 / 11</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="opacity-90">Slot2-PON1</span>
-                <span className="font-bold">10 / 11</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="opacity-90">Slot2-PON2</span>
-                <span className="font-bold">15 / 17</span>
-              </div>
+              {(Array.isArray(telemetry.ports)
+                ? telemetry.ports
+                : Object.entries(telemetry.ports || {}).map(([port, counts]) => ({ port, ...counts }))
+              ).map((port) => (
+                <div key={port.port} className="flex justify-between">
+                  <span className="opacity-90">{port.port}</span>
+                  <span className="font-bold">{port.online} / {port.total}</span>
+                </div>
+              ))}
             </div>
           </div>
 
@@ -547,12 +572,12 @@ export const AjinView: React.FC<AjinViewProps> = React.memo(({
 
           {/* 6. Servidor Coletor */}
           <div className="p-4 flex items-center justify-between hover:bg-[#307cd1] transition-colors">
-            <Globe className={`w-7 h-7 ${telemetry.server?.online !== false ? 'text-emerald-300' : 'text-rose-300'}`} />
+            <Globe className={`w-7 h-7 ${telemetry.collector?.status === 'online' ? 'text-emerald-300' : 'text-rose-300'}`} />
             <div className="text-right">
-              <div className={`text-xs font-bold ${telemetry.server?.online !== false ? 'text-emerald-300' : 'text-rose-300'}`}>
-                {telemetry.server?.online !== false ? 'Ping OK' : 'Sem Resposta'}
+              <div className={`text-xs font-bold ${telemetry.collector?.status === 'online' ? 'text-emerald-300' : 'text-rose-300'}`}>
+                {telemetry.collector?.status === 'online' ? 'API conectada' : telemetry.collector?.status === 'connecting' ? 'Conectando…' : 'API indisponível'}
               </div>
-              <div className="text-[11px] font-mono opacity-90">{telemetry.server?.ip || '192.168.190.187'}</div>
+              <div className="text-[11px] font-mono opacity-90">{telemetry.collector?.endpoint || telemetry.server?.ip || '192.168.190.187'}</div>
               <div className="text-[10px] font-bold uppercase tracking-wider opacity-90">Servidor Coletor</div>
             </div>
           </div>

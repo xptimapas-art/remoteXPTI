@@ -111,6 +111,10 @@ def main():
         </html>
         """
 
+        # Only the source DEV receives the proposed chrome during visual evaluation.
+        integrated = is_development()
+        from desktop_window import DesktopWindow
+        window_api = DesktopWindow() if integrated else None
         window = webview.create_window(
             title=title,
             url=URL if bg_running else None,
@@ -120,7 +124,13 @@ def main():
             min_size=(940, 620),
             background_color="#16171d",
             text_select=False,
+            frameless=integrated,
+            easy_drag=False,
+            js_api=window_api,
         )
+        if window_api:
+            window_api._bind(window)
+            window.events.shown += window_api._install_frame
 
         if not bg_running:
             def _wait_and_load():

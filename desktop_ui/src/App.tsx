@@ -50,13 +50,15 @@ export const App: React.FC = () => {
   } | null>(null);
 
   const [telemetry, setTelemetry] = useState<any>({
-    total: 39,
-    online: 36,
-    offline: 3,
-    total_cameras: 64,
+    total: 0,
+    online: 0,
+    offline: 0,
+    total_cameras: 0,
     active_problems: 0,
-    coleta_formatted: '25/09/2026 12:01:09',
-    server: { online: true, ip: '192.168.190.187', checked_at: '-' },
+    coleta_formatted: '-',
+    collector: { status: 'connecting', endpoint: '192.168.190.187:3000' },
+    stale: true,
+    server: { online: false, ip: '192.168.190.187', checked_at: '-' },
     olt: { modelo: 'C-Data FD1108S', ip: '192.168.1.100' },
     ports: {},
     rows: [],

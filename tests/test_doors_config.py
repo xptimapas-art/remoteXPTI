@@ -19,6 +19,8 @@ class DoorConfigurationTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.manager = object.__new__(TuyaAccessManager)
         self.manager._lock = threading.RLock()
+        self.manager._cloud_lock = threading.RLock()
+        self.manager._door_trigger_lock = threading.Lock()
         self.manager.config_path = Path(self.temp.name) / 'doors_config.json'
         self.manager.config = {
             'enabled': True, 'feedback_sound': False, 'unknown_preference': 'keep',

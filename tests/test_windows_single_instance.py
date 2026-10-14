@@ -108,6 +108,7 @@ class LauncherInstanceTests(unittest.TestCase):
                      'get_mutex_name': lambda: 'fixture', 'get_window_title': lambda: 'fixture',
                      'get_app_user_model_id': lambda: 'fixture', '_dbg': MagicMock(),
                      'ctypes': MagicMock(), 'webview': MagicMock(), 'is_backend_running': lambda: True,
+                     'is_development': lambda: True,
                      'URL': 'http://127.0.0.1:1'}
         exec(compile(ast.Module(body=[main], type_ignores=[]), str(source), 'exec'), namespace)
         return namespace, guard

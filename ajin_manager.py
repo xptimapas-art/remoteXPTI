@@ -5,6 +5,7 @@ com cache em disco, polling em segundo plano e zero sobrecarga de CPU.
 """
 
 import csv
+from datetime import datetime
 import json
 import os
 from pathlib import Path
@@ -18,7 +19,8 @@ import urllib.request
 from logger import log
 from runtime_paths import get_profile_dir
 
-DEFAULT_HUB_HOST = "192.168.12.10:3000"
+DEFAULT_HUB_HOST = "192.168.190.187:3000"
+FALLBACK_HUB_HOST = "192.168.12.10:3000"
 
 
 class AjinManager:
@@ -35,6 +37,9 @@ class AjinManager:
     def _init(self):
         self._lock = threading.Lock()
         self.hub_host = DEFAULT_HUB_HOST
+        self._active_hub_host = None
+        self._collector_status = "connecting"
+        self._checked_at = None
         self._telemetry: Dict[str, Any] = {
             "total": 0,
             "online": 0,
@@ -103,7 +108,20 @@ class AjinManager:
 
     def get_data(self) -> Dict[str, Any]:
         with self._lock:
-            return dict(self._telemetry)
+            data = dict(self._telemetry)
+            data["collector"] = {
+                "status": self._collector_status,
+                "endpoint": self._active_hub_host or self.hub_host,
+                "checked_at": self._checked_at,
+            }
+        data["stale"] = data["collector"]["status"] != "online"
+        stamp = str(data.get("coleta_formatted", "")).replace(" às ", " ")
+        try:
+            collected = datetime.strptime(stamp, "%d/%m/%Y %H:%M:%S")
+            data["stale"] |= (datetime.now() - collected).total_seconds() > 300
+        except ValueError:
+            pass
+        return data
 
     def fetch_telemetry_async(
         self,
@@ -111,62 +129,76 @@ class AjinManager:
         callback: Optional[Callable[[bool], None]] = None,
     ):
         """Dispara a busca em thread separada para nunca travar a interface."""
-        now = time.time()
-        if (
-            not force
-            and (now - self._last_fetch_time) < 3.0
-            and self._telemetry.get("rows")
-        ):
+        now = time.monotonic()
+        with self._lock:
+            recent = not force and (now - self._last_fetch_time) < 3.0 and self._collector_status == "online"
+            if not recent:
+                if self._is_fetching:
+                    return
+                self._is_fetching = True
+        if recent:
             if callback:
                 callback(True)
             return
 
-        if self._is_fetching:
-            return
-
         def _worker():
-            self._is_fetching = True
             ok = False
             try:
                 res = self._fetch_from_hub()
-                if res:
-                    with self._lock:
-                        self._telemetry = res
-                    self._last_fetch_time = time.time()
-                    self._save_disk_cache()
-                    self._notify_listeners()
-                    ok = True
+                self._validate_telemetry(res)
+                with self._lock:
+                    self._telemetry = res
+                    self._last_fetch_time = time.monotonic()
+                    self._collector_status = "online"
+                    self._checked_at = datetime.now().isoformat(timespec="seconds")
+                self._save_disk_cache()
+                ok = True
             except Exception as e:
+                with self._lock:
+                    self._collector_status = "unavailable"
+                    self._checked_at = datetime.now().isoformat(timespec="seconds")
                 log.warning(f"[AjinManager] Falha ao sincronizar telemetria: {e}")
             finally:
-                self._is_fetching = False
+                # Failure is also an update: show cached data as outdated.
+                self._notify_listeners()
+                with self._lock:
+                    self._is_fetching = False
                 if callback:
                     callback(ok)
 
         threading.Thread(target=_worker, daemon=True).start()
 
     def _fetch_from_hub(self) -> Optional[Dict[str, Any]]:
-        """Faz a requisição ultraleve ao servidor da empresa."""
-        url = f"http://{self.hub_host}/data"
-        req = urllib.request.Request(
-            url, headers={"User-Agent": "RemoteXPTI-Client/1.0"}
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=4.0) as resp:
-                if resp.status == 200:
-                    raw = resp.read().decode("utf-8")
-                    return json.loads(raw)
-        except Exception as e:
-            # Fallback para IP ZeroTier da Ajin se LAN falhar
-            fallback_url = "http://192.168.190.187:3000/data"
+        """Tenta o servidor AJIN e, depois, o painel LAN legado."""
+        last_error = None
+        for host in dict.fromkeys((self.hub_host, FALLBACK_HUB_HOST)):
+            req = urllib.request.Request(
+                f"http://{host}/data", headers={"User-Agent": "RemoteXPTI-Client/1.0"}
+            )
             try:
-                with urllib.request.urlopen(fallback_url, timeout=3.0) as resp:
-                    if resp.status == 200:
-                        return json.loads(resp.read().decode("utf-8"))
-            except Exception:
-                pass
-            raise e
-        return None
+                with urllib.request.urlopen(req, timeout=4.0) as resp:
+                    if resp.status != 200:
+                        raise ValueError("Resposta inesperada do coletor AJIN")
+                    data = json.loads(resp.read().decode("utf-8"))
+                    self._validate_telemetry(data)
+                    with self._lock:
+                        self._active_hub_host = host
+                    return data
+            except Exception as exc:
+                last_error = exc
+        raise last_error
+
+    @staticmethod
+    def _validate_telemetry(data):
+        if not isinstance(data, dict) or not isinstance(data.get("rows"), list) or any(
+            not isinstance(row, dict) for row in data["rows"]
+        ):
+            raise ValueError("Telemetria AJIN inválida: lista de dispositivos ausente")
+
+    def _hub_url(self, path):
+        with self._lock:
+            host = self._active_hub_host or self.hub_host
+        return f"http://{host}{path}"
 
     def update_label(
         self,
@@ -176,7 +208,7 @@ class AjinManager:
         desc: Optional[str] = None,
     ) -> bool:
         """Envia atualização de nome de ponto ou rua para o servidor hub."""
-        url = f"http://{self.hub_host}/label"
+        url = self._hub_url("/label")
         payload = json.dumps(
             {"port": port, "id": str(onu_id), "name": name, "desc": desc}
         ).encode("utf-8")
@@ -202,7 +234,7 @@ class AjinManager:
 
     def delete_onu(self, port: str, onu_id: str) -> bool:
         """Remove ou ignora uma ONU do monitoramento."""
-        url = f"http://{self.hub_host}/delete_onu"
+        url = self._hub_url("/delete_onu")
         payload = json.dumps({"port": port, "id": str(onu_id)}).encode("utf-8")
         req = urllib.request.Request(
             url,
@@ -224,7 +256,7 @@ class AjinManager:
 
     def trigger_camera_sync(self) -> bool:
         """Dispara a sincronização de câmeras via ARP no servidor."""
-        url = f"http://{self.hub_host}/api/sync_cameras"
+        url = self._hub_url("/api/sync_cameras")
         req = urllib.request.Request(
             url,
             data=b"{}",
@@ -242,7 +274,7 @@ class AjinManager:
 
     def ping_camera(self, ip: str) -> bool:
         """Testa conectividade de uma câmera via API do hub."""
-        url = f"http://{self.hub_host}/api/ping_camera?ip={urllib.parse.quote(ip)}"
+        url = self._hub_url(f"/api/ping_camera?ip={urllib.parse.quote(ip)}")
         try:
             with urllib.request.urlopen(url, timeout=3.0) as resp:
                 if resp.status == 200:

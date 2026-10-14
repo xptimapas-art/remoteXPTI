@@ -1,235 +1,61 @@
-import React from 'react';
-import { Search, ChevronDown, RotateCw, Settings, DoorClosed } from 'lucide-react';
+import type { MouseEvent } from 'react';
+import { Search, RotateCw, Settings, DoorClosed, LayoutGrid, Map, Router, Plus } from 'lucide-react';
+import { useDesktopWindow } from './desktopWindow';
+import './TitleBar.css';
 
 interface TitleBarProps {
   currentTab: 'servers' | 'map' | 'ajin' | 'doors';
   setCurrentTab: (tab: 'servers' | 'map' | 'ajin' | 'doors') => void;
-  searchTerm: string;
-  setSearchTerm: (term: string) => void;
-  selectedGroup: string;
-  setSelectedGroup: (group: string) => void;
-  groups: string[];
-  isDev: boolean;
-  onRefresh: () => void;
-  onAddServer: () => void;
-  onOpenSettings: () => void;
-  updateInfo?: {
-    currentVersion: string;
-    newVersion: string;
-    updateReady: boolean;
-    isApplying?: boolean;
-    isDownloading?: boolean;
-  };
+  searchTerm: string; setSearchTerm: (term: string) => void;
+  selectedGroup: string; setSelectedGroup: (group: string) => void; groups: string[];
+  isDev: boolean; onRefresh: () => void; onAddServer: () => void; onOpenSettings: () => void;
+  updateInfo?: { currentVersion: string; newVersion: string; updateReady: boolean; isApplying?: boolean; isDownloading?: boolean };
   onRestartUpdate?: () => void;
 }
-
-export const TitleBar: React.FC<TitleBarProps> = ({
-  currentTab,
-  setCurrentTab,
-  searchTerm,
-  setSearchTerm,
-  selectedGroup,
-  setSelectedGroup,
-  groups,
-  isDev,
-  onRefresh,
-  onAddServer,
-  onOpenSettings,
-  updateInfo,
-  onRestartUpdate,
-}) => {
-  return (
-    <header className={`h-16 bg-[#16171d] border-b border-[#252836] flex items-center justify-between px-4 select-none z-50 shrink-0 ${currentTab === 'doors' ? 'xa-titlebar' : ''}`}>
-      {/* Brand: Logo Oficial XPti + Título e Subtítulo */}
-      <div className="flex items-center space-x-3">
-        <img
-          src="/imagens/xpti-facade-logo.svg"
-          alt="XPti Logo"
-          className="h-[38px] w-auto object-contain"
-        />
-        <div className="flex flex-col justify-center leading-none">
-          <div className="flex items-center space-x-2">
-            <span className="text-[17px] font-bold text-white tracking-normal font-sans">
-              RemoteXPTI
-            </span>
-            {updateInfo?.updateReady ? (
-              <button
-                onClick={onRestartUpdate}
-                disabled={updateInfo?.isApplying}
-                title={`Nova versão v${updateInfo.newVersion} pronta! Clique para reiniciar e atualizar.`}
-                className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-md bg-[#0066cc] hover:bg-[#0052a3] text-white border border-blue-400 shadow-[0_0_10px_rgba(0,102,204,0.6)] flex items-center gap-1 cursor-pointer animate-pulse transition-all"
-              >
-                <span>{updateInfo.isApplying ? 'Instalando...' : `Reiniciar p/ v${updateInfo.newVersion}`}</span>
-              </button>
-            ) : updateInfo?.isDownloading ? (
-              <button
-                onClick={onOpenSettings}
-                title="Baixando atualização em segundo plano..."
-                className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-blue-900/50 text-cyan-300 border border-blue-500/40 flex items-center gap-1 cursor-pointer"
-              >
-                <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping" />
-                <span>Baixando...</span>
-              </button>
-            ) : (
-              <button
-                onClick={onOpenSettings}
-                title={isDev ? 'Modo Desenvolvedor Ativo (BETA TESTER)' : 'Clique para Configurações & Login DEV'}
-                className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded cursor-pointer transition-all ${
-                  isDev
-                    ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 hover:bg-emerald-500/30'
-                    : 'bg-[#1f2129] text-[#8e92a0] border border-[#2e323e] hover:text-white'
-                }`}
-              >
-                v{updateInfo?.currentVersion || '—'} {isDev ? '[TESTER]' : ''}
-              </button>
-            )}
-          </div>
-          <span className="text-[10px] text-[#8e92a0] mt-0.5 tracking-wide">
-            RDP Quick Launcher
-          </span>
-        </div>
-      </div>
-
-      {/* Ações do Topo: Busca, Filtro de Grupo, Segmented View, Refresh, + Novo Servidor, Settings */}
-      <div className="xa-navigation flex items-center space-x-2">
-        {currentTab !== 'doors' && <>
-        {/* Campo de Busca */}
-        <div className="relative flex items-center">
-          <Search className="w-3.5 h-3.5 text-[#8e92a0] absolute left-3 pointer-events-none" />
-          <input
-            type="text"
-            placeholder="Buscar servidor, IP ou grupo..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-[230px] h-[34px] bg-[#1f2129] border border-[#2e323e] focus:border-[#0066cc] rounded-md pl-8 pr-3 text-xs text-white placeholder-[#8e92a0] outline-none transition-colors"
-          />
-        </div>
-
-        {/* Filtro de Grupos */}
-        <div className="relative flex items-center">
-          <select
-            value={selectedGroup}
-            onChange={(e) => setSelectedGroup(e.target.value)}
-            className="h-[34px] min-w-[135px] max-w-[180px] bg-[#1f2129] border border-[#2e323e] focus:border-[#0066cc] rounded-md pl-3 pr-7 text-xs text-white outline-none cursor-pointer appearance-none font-medium"
-          >
-            <option value="Todos os Grupos">Todos os Grupos</option>
-            {groups.map((grp) => (
-              <option key={grp} value={grp}>
-                {grp}
-              </option>
-            ))}
-          </select>
-          <ChevronDown className="w-3.5 h-3.5 text-[#8e92a0] absolute right-2 pointer-events-none" />
-        </div>
-
-        {/* Alternador Segmentado de Modo de Exibição (Grade AnyDesk / Mapa / AJIN) */}
-        </>}
-        <div className="flex items-center h-[34px] bg-[#1a1c23] border border-[#2e323e] rounded-md p-0.5 space-x-0.5">
-          <button
-            onClick={() => setCurrentTab('servers')}
-            title="Grade de Servidores"
-            className={`h-full px-3.5 rounded flex items-center space-x-1.5 text-xs font-bold transition-all ${
-              currentTab === 'servers'
-                ? 'bg-[#0066cc] text-white shadow-sm'
-                : 'text-[#a0a5b5] hover:text-white hover:bg-[#252836]'
-            }`}
-          >
-            <img
-              src="/imagens/icon_grid.png"
-              alt=""
-              className="w-3.5 h-3.5 object-contain brightness-110"
-              onError={(e) => {
-                (e.target as HTMLElement).style.display = 'none';
-              }}
-            />
-            <span>Grade</span>
-          </button>
-
-          <button
-            onClick={() => setCurrentTab('map')}
-            title="Mapa Interativo"
-            className={`h-full px-3.5 rounded flex items-center space-x-1.5 text-xs font-bold transition-all ${
-              currentTab === 'map'
-                ? 'bg-[#0066cc] text-white shadow-sm'
-                : 'text-[#a0a5b5] hover:text-white hover:bg-[#252836]'
-            }`}
-          >
-            <img
-              src="/imagens/icon_map.png"
-              alt=""
-              className="w-3.5 h-3.5 object-contain brightness-110"
-              onError={(e) => {
-                (e.target as HTMLElement).style.display = 'none';
-              }}
-            />
-            <span>Mapa</span>
-          </button>
-
-          <button
-            onClick={() => setCurrentTab('ajin')}
-            title="Telemetria e Monitoramento AJIN"
-            className={`h-full px-3.5 rounded flex items-center space-x-1.5 text-xs font-bold transition-all ${
-              currentTab === 'ajin'
-                ? 'bg-[#0066cc] text-white shadow-sm'
-                : 'text-[#a0a5b5] hover:text-white hover:bg-[#252836]'
-            }`}
-          >
-            <img
-              src="/imagens/icon_ajin.png"
-              alt=""
-              className="w-3.5 h-3.5 object-contain brightness-110"
-              onError={(e) => {
-                (e.target as HTMLElement).style.display = 'none';
-              }}
-            />
-            <span>AJIN</span>
-          </button>
-
-          {/* Modo DEV Exclusivo: Controle de Portões e Acesso Tuya */}
-          {isDev && (
-            <button
-              onClick={() => setCurrentTab('doors')}
-              title="Controle de Portões"
-              className={`h-full px-3.5 rounded flex items-center space-x-1.5 text-xs font-bold transition-all ${
-                currentTab === 'doors'
-                  ? 'bg-[#0066cc] text-white shadow-sm'
-                  : 'text-[#a0a5b5] hover:text-white hover:bg-[#252836]'
-              }`}
-            >
-              <DoorClosed className="w-3.5 h-3.5" />
-              <span>Portas e portões</span>
-            </button>
-          )}
-        </div>
-
-        {/* Botão Atualizar Status Manual */}
-        {currentTab !== 'doors' && <>
-        <button
-          title="Atualizar Status Geral"
-          onClick={onRefresh}
-          className="w-[36px] h-[34px] bg-[#262832] hover:bg-[#343644] active:bg-[#1f2129] text-white rounded-md flex items-center justify-center transition-colors border border-[#353846]"
-        >
-          <RotateCw className="w-4 h-4 text-slate-300 hover:text-white" />
-        </button>
-
-        {/* Botão + Novo Servidor */}
-        <button
-          onClick={onAddServer}
-          className="h-[34px] px-3.5 bg-[#0066cc] hover:bg-[#0052a3] active:bg-[#004080] text-white text-xs font-bold rounded-md flex items-center space-x-1 transition-colors shadow-sm"
-        >
-          <span>+ Novo Servidor</span>
-        </button>
-
-        {/* Botão Engrenagem de Configurações Gerais */}
-        </>}
-        <button
-          title="Configurações e Sincronização"
-          onClick={onOpenSettings}
-          className="w-[36px] h-[34px] bg-[#262832] hover:bg-[#343644] active:bg-[#1f2129] text-white rounded-md flex items-center justify-center transition-colors border border-[#353846]"
-        >
-          <Settings className="w-4 h-4 text-slate-300 hover:text-white" />
-        </button>
-      </div>
+export function TitleBar({ currentTab, setCurrentTab, searchTerm, setSearchTerm, selectedGroup,
+  setSelectedGroup, groups, isDev, onRefresh, onAddServer, onOpenSettings, updateInfo, onRestartUpdate }: TitleBarProps) {
+  const { integrated, maximized, api } = useDesktopWindow();
+  const interactive = (target: EventTarget) => (target as HTMLElement).closest('button,input,select,a,label');
+  const drag = (event: MouseEvent<HTMLElement>) => {
+    if (event.button === 0 && integrated && !interactive(event.target) && event.detail === 1) void api?.begin_drag().catch(console.error);
+  };
+  const maximize = (event: MouseEvent<HTMLElement>) => {
+    if (integrated && !interactive(event.target)) void api?.toggle_maximize().catch(console.error);
+  };
+  const tabs = [{ id:'servers' as const,label:'Grade',Icon:LayoutGrid },{ id:'map' as const,label:'Mapa',Icon:Map },
+    { id:'ajin' as const,label:'AJIN',Icon:Router },...(isDev ? [{ id:'doors' as const,label:'Portas e portões',Icon:DoorClosed }] : [])];
+  return <>
+    <header className={`xpti-titlebar ${integrated ? 'xpti-titlebar-integrated' : ''}`} onMouseDown={drag} onDoubleClick={maximize}>
+      <span className="xpti-titlebar-network" aria-hidden="true" />
+      <div className="xpti-brand"><img src="/imagens/xpti-facade-logo.svg" alt="XPTI · Tecnologias em Segurança" draggable={false} />
+        <span className="xpti-product"><span className="xpti-product-name">RemoteXPTI</span>{integrated && <small>DEV</small>}</span></div>
+      <nav className="xpti-tabs" aria-label="Navegação principal">{tabs.map(({id,label,Icon}) =>
+        <button key={id} type="button" aria-current={currentTab === id ? 'page' : undefined} onClick={() => setCurrentTab(id)} title={label}>
+          <Icon aria-hidden="true" /><span>{label}</span></button>)}</nav>
+      <div className="xpti-titlebar-space" />
+      {updateInfo?.updateReady ? <button className="xpti-update-ready" onClick={onRestartUpdate} disabled={updateInfo.isApplying}>
+        {updateInfo.isApplying ? 'Instalando…' : `Reiniciar para ${updateInfo.newVersion}`}</button>
+      : <button type="button" className="xpti-version" onClick={onOpenSettings} title={`v${updateInfo?.currentVersion || '—'}${isDev ? ' · Beta Tester' : ''}`}>
+        {updateInfo?.isDownloading ? 'Baixando…' : `v${updateInfo?.currentVersion || '—'}`}</button>}
+      <button type="button" className="xpti-settings" title="Configurações e Sincronização" aria-label="Configurações" onClick={onOpenSettings}><Settings aria-hidden="true" /></button>
+      {integrated && <div className="xpti-window-controls" aria-label="Controles da janela">
+        <button type="button" aria-label="Minimizar" title="Minimizar" onClick={() => void api?.minimize().catch(console.error)}><span className="xpti-system-icon" aria-hidden="true">{'\uE921'}</span></button>
+        <button type="button" aria-label={maximized ? 'Restaurar janela' : 'Maximizar'} title={maximized ? 'Restaurar' : 'Maximizar'}
+          onClick={() => void api?.toggle_maximize().catch(console.error)}><span className="xpti-system-icon" aria-hidden="true">{maximized ? '\uE923' : '\uE922'}</span></button>
+        <button type="button" className="xpti-window-close" aria-label="Fechar janela" title="Fechar" onClick={() => void api?.close().catch(console.error)}><span className="xpti-system-icon" aria-hidden="true">{'\uE8BB'}</span></button>
+      </div>}
     </header>
-  );
-};
+    {currentTab !== 'doors' && <div className="xpti-server-tools" aria-label="Ferramentas de servidores">
+      <label className="xpti-search"><Search aria-hidden="true" /><input aria-label="Buscar servidor" placeholder="Buscar servidor, IP ou grupo…" value={searchTerm} onChange={event => setSearchTerm(event.target.value)} /></label>
+      <select aria-label="Filtrar grupo" value={selectedGroup} onChange={event => setSelectedGroup(event.target.value)}>
+        <option value="Todos os Grupos">Todos os Grupos</option>{groups.map(group => <option key={group} value={group}>{group}</option>)}</select>
+      <div className="xpti-tools-spacer" />
+      <button type="button" title="Atualizar Status Geral" aria-label="Atualizar Status Geral" onClick={onRefresh}><RotateCw aria-hidden="true" /></button>
+      <button type="button" className="xpti-add-server" onClick={onAddServer}><Plus aria-hidden="true" />Novo servidor</button>
+    </div>}
+    {integrated && !maximized && <div className="xpti-resize-edges" aria-hidden="true">
+      {['n','ne','e','se','s','sw','w','nw'].map(edge => <div key={edge} className={`xpti-resize-${edge}`}
+        onMouseDown={event => { if(event.button === 0) {event.preventDefault();void api?.begin_resize(edge).catch(console.error);} }} />)}
+    </div>}
+  </>;
+}

@@ -7,6 +7,7 @@ Funciona via HTTPS REST padrão com urllib.request (zero dependências pesadas).
 import json
 import urllib.request
 import urllib.error
+import urllib.parse
 from typing import List, Dict, Any, Optional, Tuple
 from config_manager import ConfigManager
 from logger import log
@@ -153,7 +154,7 @@ class CloudSyncManager:
     def fetch_tuya_session(cls) -> Optional[str]:
         """Busca a sessão Tuya atualizada no Supabase (embutida na tabela servers)."""
         cfg = ConfigManager().get_supabase_config()
-        if not cfg.get("enabled") or not cfg.get("url") or not cfg.get("key"):
+        if not cfg.get("session_sync_enabled", cfg.get("enabled")) or not cfg.get("url") or not cfg.get("key"):
             return None
 
         clean_url = cls._clean_base_url(cfg["url"])
@@ -178,13 +179,43 @@ class CloudSyncManager:
     def push_tuya_session(cls, session_json_str: str) -> bool:
         """Envia a sessão Tuya atualizada para o Supabase (usando a tabela servers)."""
         cfg = ConfigManager().get_supabase_config()
-        if not cfg.get("enabled") or not cfg.get("url") or not cfg.get("key"):
+        if not cfg.get("session_sync_enabled", cfg.get("enabled")) or not cfg.get("url") or not cfg.get("key"):
+            return False
+
+        from tuya_devices import valid_session, session_timestamp
+        try:
+            incoming = json.loads(session_json_str)
+            if not valid_session(incoming):
+                return False
+            previous = cls.fetch_tuya_session()
+            if previous:
+                current = json.loads(previous)
+                if session_timestamp(current) > session_timestamp(incoming):
+                    log.info("[CloudSync] Sessão local antiga: mantida a sessão Tuya mais nova na nuvem.")
+                    return False
+                if current == incoming:
+                    return True
+                # Conditional update: another client's renewal cannot be overwritten
+                # between this read and write. Only the session record is touched.
+                filters = urllib.parse.urlencode({
+                    "id": "eq.ffffffff-ffff-ffff-ffff-ffffffffffff", "notes": "eq." + previous,
+                })
+                url = f"{cls._clean_base_url(cfg['url'])}/rest/v1/servers?{filters}"
+                headers = cls._get_headers(cfg["key"])
+                headers["Prefer"] = "return=representation"
+                req = urllib.request.Request(url, data=json.dumps({"notes": session_json_str}).encode("utf-8"),
+                                             headers=headers, method="PATCH")
+                with urllib.request.urlopen(req, timeout=8.0) as response:
+                    updated = json.loads(response.read().decode("utf-8"))
+                    return response.status == 200 and isinstance(updated, list) and len(updated) == 1
+        except Exception as error:
+            log.warning(f"[CloudSync] Falha ao atualizar sessão Tuya compartilhada: {type(error).__name__}")
             return False
 
         clean_url = cls._clean_base_url(cfg["url"])
         url = f"{clean_url}/rest/v1/servers?on_conflict=id"
         headers = cls._get_headers(cfg["key"])
-        headers["Prefer"] = "resolution=merge-duplicates"
+        headers["Prefer"] = "resolution=ignore-duplicates,return=representation"
 
         # Usa a tabela de servidores existente para não precisar criar tabela nova
         payload = {
@@ -209,7 +240,8 @@ class CloudSyncManager:
             json_data = json.dumps([payload], ensure_ascii=False).encode("utf-8")
             req = urllib.request.Request(url, data=json_data, headers=headers, method="POST")
             with urllib.request.urlopen(req, timeout=8.0) as resp:
-                if resp.status in (200, 201):
+                inserted = json.loads(resp.read().decode("utf-8"))
+                if resp.status in (200, 201) and isinstance(inserted, list) and len(inserted) == 1:
                     log.info("[CloudSync] tuya_config atualizado com sucesso no Supabase.")
                     return True
         except Exception as e:
@@ -255,6 +287,8 @@ class CloudSyncManager:
         # Portas de rede local (ex: Facial Hikvision ISAPI de rede local)
         # são restritas a esta empresa/máquina e NÃO devem ser enviadas para o Supabase
         clean_config = dict(config_dict)
+        for local_preference in ("enabled", "hotkeys_enabled", "feedback_sound", "feedback_notification"):
+            clean_config.pop(local_preference, None)
         if "doors" in clean_config and isinstance(clean_config["doors"], list):
             clean_config["doors"] = [
                 d for d in clean_config["doors"]

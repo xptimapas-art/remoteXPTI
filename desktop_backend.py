@@ -369,6 +369,8 @@ def sync_supabase_servers() -> tuple[bool, int, str]:
                 # Preserva também o som e notificação da máquina local
                 remote_doors_cfg["feedback_sound"] = tuya_mgr.config.get("feedback_sound", True)
                 remote_doors_cfg["feedback_notification"] = tuya_mgr.config.get("feedback_notification", True)
+                remote_doors_cfg["enabled"] = tuya_mgr.config.get("enabled", True)
+                remote_doors_cfg["hotkeys_enabled"] = tuya_mgr.config.get("hotkeys_enabled", True)
 
                 if remote_doors_cfg != tuya_mgr.config:
                     log.info("[DesktopBackend] doors_config na nuvem é diferente do local. Atualizando local...")
@@ -737,7 +739,7 @@ def save_single_door_config(door_id: str, req: DoorEditRequest):
 @app.post("/api/doors/sync")
 def sync_doors_cloud():
     require_dev_access()
-    tuya_mgr._init_cloud_manager()
+    tuya_mgr._init_cloud_manager(force_sync=True)
     broadcast_ws({"type": "doors_updated"})
     return {
         "success": True,

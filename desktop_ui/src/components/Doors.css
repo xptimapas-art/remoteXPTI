@@ -69,11 +69,6 @@
 @container (max-width:720px) {.xa-grid {grid-template-columns:repeat(2,minmax(0,1fr))}}
 @container (max-width:420px) {.xa-grid {grid-template-columns:1fr}}
 @media (max-width:540px) {.xa-page {padding:14px}.xa-fields {grid-template-columns:1fr}.xa-full {grid-column:auto}}
-.xa-titlebar {background:#142a3c;border-bottom:3px solid #df163f;gap:12px;min-height:64px;height:auto;padding-top:10px;padding-bottom:10px;flex-wrap:wrap}
-.xa-titlebar .xa-navigation>div {background:transparent;border-color:transparent}
-.xa-titlebar .xa-navigation>div button {background:transparent;box-shadow:none;border-radius:2px;font-weight:500}
-.xa-titlebar .xa-navigation>div button:hover {background:#ffffff12}
-.xa-titlebar .xa-navigation>div button:last-child {color:white;background:#ffffff12}
 .xpti-access .xa-camera {padding:0;overflow:hidden}
 .xa-camera-feed {width:100%;height:100%;position:relative;overflow:hidden;background:#111316}
 .xa-camera-feed img {width:100%;height:100%;object-fit:contain;display:block}
@@ -85,7 +80,6 @@
 .xa-camera-large {padding:0;display:block;aspect-ratio:16/9}
 .xa-hotkey-control {display:flex;gap:5px}
 .xa-hotkey-control>button:first-child {flex:1;justify-content:flex-start;min-width:0;min-height:34px}
-.xa-titlebar {background-color:#111316;background-image:url('/imagens/xpti-facade-ribbon.svg');background-repeat:no-repeat;background-position:right center;background-size:auto 100%;padding-right:55px}
 .xa-camera-feed {position:absolute;inset:0}
 .xa-camera-large {position:relative}
 .xa-camera-feed video {width:100%;height:100%;object-fit:contain;display:block;position:absolute;inset:0}

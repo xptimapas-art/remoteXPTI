@@ -45,6 +45,28 @@ DEFAULT_QR_PNG = os.path.join(os.getcwd(), "tuya-login-qr.png")
 # Device attributes exposed by tuya_sharing.CustomerDevice.
 TOKEN_FIELDS = ("t", "uid", "expire_time", "access_token", "refresh_token")
 
+
+def session_timestamp(session):
+    try:
+        return int((session or {}).get("token_info", {}).get("t") or 0)
+    except (TypeError, ValueError, AttributeError):
+        return 0
+
+
+def session_expires_at(session):
+    """SDK stores a timestamp in milliseconds and a lifetime in seconds."""
+    try:
+        token = session.get("token_info", {})
+        return session_timestamp(session) / 1000 + float(token.get("expire_time") or 0)
+    except (TypeError, ValueError, AttributeError):
+        return 0
+
+
+def valid_session(session):
+    return isinstance(session, dict) and all(session.get(key) for key in (
+        "user_code", "terminal_id", "endpoint", "token_info"
+    )) and isinstance(session["token_info"], dict) and all(session["token_info"].get(key) for key in ("access_token", "refresh_token")) and session_timestamp(session) > 0
+
 # Request timeout for the SDK (seconds)
 REQUEST_TIMEOUT_SECONDS = 60
 

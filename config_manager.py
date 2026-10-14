@@ -55,6 +55,9 @@ class ConfigManager:
             "supabase_url": DEFAULT_SUPABASE_URL,
             "supabase_key": DEFAULT_SUPABASE_KEY,
             "cloud_sync_enabled": not is_development(),
+            # The DEV uses the same Tuya login as clients. Token rotation must
+            # propagate even while server/access configuration writes are off.
+            "tuya_session_sync_enabled": True,
         }
         self.load()
 
@@ -150,7 +153,8 @@ class ConfigManager:
         return {
             "url": url,
             "key": key,
-            "enabled": bool(enabled and url and key)
+            "enabled": bool(enabled and url and key),
+            "session_sync_enabled": bool(self.data.get("tuya_session_sync_enabled", enabled) and url and key),
         }
 
     def set_supabase_config(self, url: str, key: str, enabled: bool = True):

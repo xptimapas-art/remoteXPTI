@@ -33,6 +33,9 @@ def verify_release(directory):
                 raise RuntimeError('EXE gerado não contém a versão final do updater.')
             if manifest['version'] not in pyz.extract('version').co_consts:
                 raise RuntimeError('A versão embutida não corresponde ao manifesto.')
+            session_helpers = {c.co_name for c in pyz.extract('tuya_devices').co_consts if isinstance(c, types.CodeType)}
+            if not {'session_expires_at', 'session_timestamp', 'valid_session'}.issubset(session_helpers):
+                raise RuntimeError('EXE gerado não contém a correção da sessão Tuya compartilhada.')
             if not any(name.startswith('av.libs/') and name.lower().endswith('.dll') for name in names):
                 raise RuntimeError('Bibliotecas nativas de vídeo não foram incluídas no EXE.')
             # Exercise the actual packaged filter, without networking or client profiles.

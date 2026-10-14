@@ -93,6 +93,9 @@ def main():
     parser = argparse.ArgumentParser(description="Build do RemoteXPTI moderno")
     parser.add_argument('--reuse-frontend', action='store_true', help='Reutiliza o frontend já compilado; o pacote final ainda é verificado')
     args = parser.parse_args()
+    release_version = Version(CURRENT_VERSION)
+    if not release_version.is_prerelease and release_version.release[-1] != 0:
+        raise RuntimeError("Versões estáveis devem terminar em .0; a última casa é reservada aos testes beta.")
     print("==================================================================")
     print(f"      Compilando RemoteXPTI v{CURRENT_VERSION} (Versão 2.0 Moderna)")
     print("==================================================================")
