@@ -6,6 +6,8 @@ import time
 import urllib.request
 from pathlib import Path
 import webview
+from runtime_paths import (get_profile_dir, get_window_title, get_mutex_name,
+                           get_app_user_model_id, is_development)
 
 import socket
 
@@ -19,7 +21,7 @@ URL = f"http://127.0.0.1:{PORT}"
 
 def _dbg(msg: str):
     try:
-        debug_file = Path(os.environ.get("LOCALAPPDATA", "")) / "RemoteXPTI" / "logs" / "launch_debug.txt"
+        debug_file = get_profile_dir() / "logs" / "launch_debug.txt"
         debug_file.parent.mkdir(parents=True, exist_ok=True)
         with open(debug_file, "a", encoding="utf-8") as f:
             f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}\n")
@@ -90,13 +92,13 @@ def focus_existing_instance(window_title: str) -> bool:
     return False
 
 def main():
-    title = "RemoteXPTI - RDP Quick Launcher"
+    title = get_window_title()
     _dbg("Entrou em main()...")
     
     # O backup de atualização é preservado para recuperação.
 
     # Garante que apenas uma instância rode simultaneamente (Mutex)
-    _mutex_name = "RemoteXPTI_SingleInstance_Mutex"
+    _mutex_name = get_mutex_name()
     _mutex = ctypes.windll.kernel32.CreateMutexW(None, False, _mutex_name)
     if ctypes.windll.kernel32.GetLastError() == 183: # ERROR_ALREADY_EXISTS
         _dbg("Outra instância já está rodando (Mutex detectado). Trazendo para o foco e saindo.")
@@ -106,7 +108,7 @@ def main():
     try:
         # Permite agrupamento e ícone próprio na barra de tarefas do Windows
         try:
-            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("XPTI.RemoteXPTI.Modern.App")
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(get_app_user_model_id())
         except Exception as e:
             _dbg(f"SetCurrentProcessExplicitAppUserModelID: {e}")
 
@@ -178,7 +180,7 @@ def main():
                 else:
                     _dbg("Erro: backend nÃ£o respondeu a tempo ou falhou!")
                     try:
-                        log_path = str(Path(os.environ.get("LOCALAPPDATA", "")) / "RemoteXPTI" / "logs" / "launch_debug.txt")
+                        log_path = str(get_profile_dir() / "logs" / "launch_debug.txt")
                         # 0x15 = MB_RETRYCANCEL (5) + MB_ICONERROR (0x10)
                         resp = ctypes.windll.user32.MessageBoxW(0, f"O backend não respondeu (timeout 90s) ou falhou ao iniciar.\n\nVerifique os logs em:\n{log_path}\n\nDeseja tentar novamente?", "Erro ao iniciar - RemoteXPTI", 0x15)
                         if resp == 4: # IDRETRY
@@ -267,7 +269,7 @@ def main():
 
         def _sync_desktop_hotkeys():
             cfg_path = get_config_dir() / "doors_config.json"
-            if not cfg_path.exists():
+            if not cfg_path.exists() and not is_development():
                 cfg_path = Path(__file__).parent / "doors_config.json"
             if cfg_path.exists():
                 try:
@@ -321,7 +323,7 @@ def main():
                 tray_img = Image.new("RGBA", (32, 32), (0, 102, 204, 255))
 
             tray_menu = pystray.Menu(
-                pystray.MenuItem("Abrir RemoteXPTI", _show_window, default=True),
+                pystray.MenuItem("Abrir " + ("RemoteXPTI DEV" if is_development() else "RemoteXPTI"), _show_window, default=True),
                 pystray.MenuItem("Acionar Porta Operacional [DEV]", _trigger_door_tray),
                 pystray.MenuItem("Acionar Facial Hikvision [DEV]", _trigger_facial_tray),
                 pystray.Menu.SEPARATOR,
@@ -331,7 +333,7 @@ def main():
             tray_icon = pystray.Icon(
                 "RemoteXPTI",
                 tray_img,
-                "RemoteXPTI - RDP Quick Launcher",
+                title,
                 tray_menu,
             )
             tray_icon.run_detached()

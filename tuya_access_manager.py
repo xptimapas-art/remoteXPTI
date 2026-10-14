@@ -17,6 +17,7 @@ from typing import Dict, Any, List, Optional, Tuple
 
 from logger import log
 from config_manager import ConfigManager, get_config_dir
+from runtime_paths import is_development
 from native_hotkeys import NativeHotkeyManager
 
 # Arquivo de configuração de portas e sessão
@@ -100,6 +101,8 @@ class TuyaAccessManager:
     def _resolve_config_path(self) -> Path:
         """Localiza o arquivo doors_config.json em %LOCALAPPDATA% ou na pasta do app."""
         appdata_path = get_config_dir() / CONFIG_FILENAME
+        if is_development():
+            return appdata_path
         local_path = Path(__file__).parent / CONFIG_FILENAME
         if appdata_path.exists():
             return appdata_path
@@ -110,6 +113,8 @@ class TuyaAccessManager:
     def _resolve_session_path(self) -> Path:
         """Localiza session.json com credenciais da Tuya."""
         appdata_path = get_config_dir() / SESSION_FILENAME
+        if is_development():
+            return appdata_path
         local_path = Path(__file__).parent / SESSION_FILENAME
         vscode_test_path = Path("c:/Users/XPTI/Documents/vscode/abrir porta tuya/session.json")
 
@@ -160,6 +165,10 @@ class TuyaAccessManager:
                 log.error(f"[TuyaAccess] Erro ao carregar {self.config_path}: {e}")
 
         # Configuração padrão caso não exista arquivo
+        if is_development():
+            return {"enabled": False, "feedback_sound": False,
+                    "feedback_notification": False, "user_code": "",
+                    "facial_initialized": True, "doors": []}
         default_cfg = {
             "enabled": True,
             "feedback_sound": True,

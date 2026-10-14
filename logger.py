@@ -11,6 +11,7 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 import subprocess
 import platform
+from runtime_paths import get_profile_dir
 
 class StreamToLogger:
     """Redireciona saídas padrão (print / stdout / stderr) diretamente para o logger."""
@@ -40,8 +41,7 @@ class StreamToLogger:
         return False
 
 def get_logs_dir() -> Path:
-    local_appdata = os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))
-    logs_dir = Path(local_appdata) / "RemoteXPTI" / "logs"
+    logs_dir = get_profile_dir() / "logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
     return logs_dir
 

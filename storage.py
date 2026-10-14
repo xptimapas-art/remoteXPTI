@@ -13,11 +13,12 @@ except ImportError:
     HAS_CRYPTO = False
 
 from logger import log
+from runtime_paths import get_data_dir
 
 def get_app_dir() -> Path:
-    if getattr(sys, "frozen", False):
-        return Path(sys.executable).parent
-    return Path(__file__).parent.resolve()
+    app_dir = get_data_dir()
+    app_dir.mkdir(parents=True, exist_ok=True)
+    return app_dir
 
 DATA_FILE = get_app_dir() / "servers.json"
 KEY_FILE = get_app_dir() / ".secret.key"

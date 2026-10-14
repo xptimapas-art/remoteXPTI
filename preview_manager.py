@@ -10,11 +10,10 @@ from functools import lru_cache
 from typing import Optional, Tuple
 from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageEnhance
 import customtkinter as ctk
+from runtime_paths import get_data_dir
 
 def get_app_dir() -> Path:
-    if getattr(sys, "frozen", False):
-        return Path(sys.executable).parent
-    return Path(__file__).parent.resolve()
+    return get_data_dir()
 
 def get_thumbnails_dir() -> Path:
     base = get_app_dir() / "thumbnails"

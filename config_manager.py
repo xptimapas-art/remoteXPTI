@@ -12,6 +12,7 @@ import secrets
 from pathlib import Path
 from typing import Dict, Any, Optional
 from logger import log
+from runtime_paths import get_profile_dir, is_development
 
 # Salt fixo seguro do projeto para PBKDF2
 DEV_SALT = "RemoteXPTI_Salt_2026"
@@ -25,8 +26,7 @@ DEFAULT_SUPABASE_KEY = "sb_publishable_11nb3dWkWx2N8fY-bGK4Jw_YjVBJ3L1"
 
 
 def get_config_dir() -> Path:
-    local_appdata = os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))
-    c_dir = Path(local_appdata) / "RemoteXPTI"
+    c_dir = get_profile_dir()
     c_dir.mkdir(parents=True, exist_ok=True)
     return c_dir
 
@@ -54,7 +54,7 @@ class ConfigManager:
             "dev_session_token": "",          # Token de sessão persistente
             "supabase_url": DEFAULT_SUPABASE_URL,
             "supabase_key": DEFAULT_SUPABASE_KEY,
-            "cloud_sync_enabled": True,
+            "cloud_sync_enabled": not is_development(),
         }
         self.load()
 
@@ -67,14 +67,12 @@ class ConfigManager:
             except Exception as e:
                 log.warning(f"[ConfigManager] Erro ao carregar {self.file_path}: {e}")
 
-        # Migração automática: se o cliente possui URL/Key vazios ou desabilitados de versões anteriores,
-        # injeta as credenciais corporativas oficiais e ativa a sincronização
+        # Atualiza as credenciais padrão sem desfazer a opção de desligar a nuvem.
         cur_url = self.data.get("supabase_url", "").strip()
         cur_key = self.data.get("supabase_key", "").strip()
         if not cur_url or not cur_key or cur_url == DEFAULT_SUPABASE_URL:
             self.data["supabase_url"] = DEFAULT_SUPABASE_URL
             self.data["supabase_key"] = DEFAULT_SUPABASE_KEY
-            self.data["cloud_sync_enabled"] = True
             self.save()
 
         # Valida token de sessão existente se houver
@@ -149,8 +147,6 @@ class ConfigManager:
         url = self.data.get("supabase_url", "").strip() or DEFAULT_SUPABASE_URL
         key = self.data.get("supabase_key", "").strip() or DEFAULT_SUPABASE_KEY
         enabled = self.data.get("cloud_sync_enabled", True)
-        if url == DEFAULT_SUPABASE_URL and key:
-            enabled = True
         return {
             "url": url,
             "key": key,

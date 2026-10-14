@@ -16,6 +16,7 @@ import urllib.parse
 import urllib.request
 
 from logger import log
+from runtime_paths import get_profile_dir
 
 DEFAULT_HUB_HOST = "192.168.12.10:3000"
 
@@ -54,8 +55,7 @@ class AjinManager:
         self._listeners: List[Callable[[], None]] = []
 
         # Diretório de cache local
-        appdata = os.environ.get("LOCALAPPDATA", str(Path.home()))
-        self._cache_dir = Path(appdata) / "RemoteXPTI" / "ajin_cache"
+        self._cache_dir = get_profile_dir() / "ajin_cache"
         self._cache_dir.mkdir(parents=True, exist_ok=True)
         self._cache_file = self._cache_dir / "telemetry_cache.json"
 

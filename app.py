@@ -172,21 +172,12 @@ def sync_windows_shortcuts_icon():
     usem o ícone oficial moderno (squircle escuro arredondado com o X estilizado),
     notificando o Windows Shell para atualizar a exibição imediatamente.
     """
-    if sys.platform != "win32":
+    if sys.platform != "win32" or not getattr(sys, "frozen", False):
         return
 
     try:
-        if getattr(sys, "frozen", False):
-            current_exe = Path(sys.executable).resolve()
-            app_dir = current_exe.parent
-        else:
-            # Em modo de desenvolvimento/testes, nunca aponte atalhos para python.exe
-            local_installed = Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "RemoteXPTI" / "RemoteXPTI.exe"
-            if local_installed.exists():
-                current_exe = local_installed
-                app_dir = local_installed.parent
-            else:
-                return  # Não altera atalhos em modo dev sem app instalado
+        current_exe = Path(sys.executable).resolve()
+        app_dir = current_exe.parent
 
         icon_file = app_dir / "imagens" / "app_icon.ico"
         if not icon_file.exists():
@@ -448,7 +439,8 @@ class RemoteXPTIApp(ctk.CTk):
         # e evitar qualquer flickering, renderização parcial ou botões se alinhando na tela
         self.withdraw()
 
-        self.title("RemoteXPTI - RDP Quick Launcher")
+        from runtime_paths import get_window_title
+        self.title(get_window_title())
         self.geometry("1100x720")
         self.minsize(860, 520)
 

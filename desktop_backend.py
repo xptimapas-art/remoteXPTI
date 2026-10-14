@@ -24,6 +24,7 @@ from ajin_manager import AjinManager
 from cloud_sync import CloudSyncManager
 from config_manager import ConfigManager
 from logger import log
+from runtime_paths import get_profile_dir, get_data_dir
 from rdp_manager import RDPManager
 from storage import StorageManager
 from tuya_access_manager import TuyaAccessManager
@@ -711,13 +712,13 @@ def apply_update_restart():
 
 @app.get("/api/logs/path")
 def get_logs_path():
-    log_dir = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))) / "RemoteXPTI" / "logs"
+    log_dir = get_profile_dir() / "logs"
     log_file = log_dir / "remotexpti.log"
     return {"dir": str(log_dir), "file": str(log_file), "exists": log_file.exists()}
 
 @app.post("/api/logs/open")
 def open_logs_folder():
-    log_dir = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))) / "RemoteXPTI" / "logs"
+    log_dir = get_profile_dir() / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     if hasattr(os, "startfile"):
         try:
@@ -728,7 +729,7 @@ def open_logs_folder():
 
 @app.get("/api/logs/tail")
 def get_logs_tail(lines: int = 50):
-    log_dir = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))) / "RemoteXPTI" / "logs"
+    log_dir = get_profile_dir() / "logs"
     log_file = log_dir / "remotexpti.log"
     if not log_file.exists():
         return {"lines": []}
@@ -940,9 +941,9 @@ async def websocket_ajin_endpoint(websocket: WebSocket):
         ws_manager.disconnect(websocket)
 
 # Monta diretório de miniaturas dos servidores
-thumbnails_path = Path(__file__).parent / "thumbnails"
-if thumbnails_path.exists():
-    app.mount("/thumbnails", StaticFiles(directory=str(thumbnails_path)), name="thumbnails")
+thumbnails_path = get_data_dir() / "thumbnails"
+thumbnails_path.mkdir(parents=True, exist_ok=True)
+app.mount("/thumbnails", StaticFiles(directory=str(thumbnails_path)), name="thumbnails")
 
 # Monta arquivos estáticos do frontend React compilado
 dist_path = Path(__file__).parent / "desktop_ui" / "dist"

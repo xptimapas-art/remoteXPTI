@@ -1,3 +1,3 @@
 @echo off
-cd /d "%~dp0"
-pythonw "%~dp0launch_modern_desktop.py"
+rem Compatibilidade: este launcher abre apenas o ambiente de desenvolvimento.
+call "%~dp0run_development.bat"

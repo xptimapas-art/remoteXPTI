@@ -14,6 +14,7 @@ from urllib.parse import quote
 from packaging.version import InvalidVersion, Version
 from version import APP_NAME, CURRENT_VERSION, GITHUB_REPO
 from logger import log
+from runtime_paths import get_profile_dir
 
 
 def release_version(value):
@@ -116,8 +117,7 @@ class SilentAutoUpdater:
         self.state = 'idle' if self.enabled else 'disabled'
         self.status_message = 'Pronto' if self.enabled else 'Atualização automática disponível no aplicativo instalado. Execução pelo Python não instala versões.'
         identity = hashlib.sha256(str(Path(sys.executable).resolve()).casefold().encode()).hexdigest()[:16]
-        local = Path(os.environ.get('LOCALAPPDATA', str(Path.home() / 'AppData' / 'Local')))
-        self.staging_dir = staging_dir or local / APP_NAME / 'updates' / identity
+        self.staging_dir = staging_dir or get_profile_dir() / 'updates' / identity
         self.pending_path = self.staging_dir / 'pending.json'
         if self.enabled:
             self._restore_pending()
