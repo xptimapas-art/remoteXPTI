@@ -1,10 +1,12 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Play, DoorClosed, DoorOpen } from 'lucide-react';
 import { TitleBar } from './components/TitleBar';
 import { UpdateBanner } from './components/UpdateBanner';
 import { ServersView } from './components/ServersView';
 import { MapView } from './components/MapView';
 import { AjinView } from './components/AjinView';
+import { ajinRows, canShowOnMap, readAjinResponse } from './components/ajin';
+import type { AjinScan, AjinTelemetry, ONUItem, Registration } from './components/ajin';
 import { DoorsView } from './components/DoorsView';
 import { DoorsSettingsModal } from './components/DoorsSettingsModal';
 import { AddServerModal } from './components/AddServerModal';
@@ -12,7 +14,7 @@ import { EditServerModal } from './components/EditServerModal';
 import { SettingsModal } from './components/SettingsModal';
 
 const API_BASE = '';
-const WS_URL = `ws://${window.location.host}/ws/ajin`;
+const WS_URL = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws/ajin`;
 
 export const App: React.FC = () => {
   const [currentTab, setCurrentTab] = useState<'servers' | 'map' | 'ajin' | 'doors'>('servers');
@@ -49,7 +51,7 @@ export const App: React.FC = () => {
     onu?: any;
   } | null>(null);
 
-  const [telemetry, setTelemetry] = useState<any>({
+  const [telemetry, setTelemetry] = useState<AjinTelemetry>({
     total: 0,
     online: 0,
     offline: 0,
@@ -64,6 +66,8 @@ export const App: React.FC = () => {
     rows: [],
   });
   const wsRef = useRef<WebSocket | null>(null);
+  const mapPoints = useMemo(() => ajinRows(telemetry), [telemetry]);
+  const [socketConnected, setSocketConnected] = useState(false);
 
   // Carrega status de desenvolvedor
   const checkDevStatus = async () => {
@@ -129,8 +133,10 @@ export const App: React.FC = () => {
     }
   };
 
-  // Conexão WebSocket em Tempo Real (Push contínuo a 60 FPS)
+  // One socket per mounted app, with a bounded reconnect timer.
   useEffect(() => {
+    let active = true;
+    let retry: ReturnType<typeof setTimeout> | undefined;
     checkDevStatus();
     loadServers();
     loadTelemetry();
@@ -138,10 +144,19 @@ export const App: React.FC = () => {
     fetch(`${API_BASE}/api/update/healthy`, { method: 'POST' }).catch(console.error);
 
     const connectWebSocket = () => {
+      if (!active) return;
       const ws = new WebSocket(WS_URL);
       wsRef.current = ws;
 
+      ws.onopen = () => {
+        if (!active) return;
+        setSocketConnected(true);
+        loadServers();
+        loadUpdateStatus();
+      };
+
       ws.onmessage = (event) => {
+        if (!active || event.data === 'pong') return;
         try {
           const msg = JSON.parse(event.data);
           if (msg.type === 'initial_state' || msg.type === 'telemetry_update') {
@@ -168,13 +183,18 @@ export const App: React.FC = () => {
       };
 
       ws.onclose = () => {
-        setTimeout(connectWebSocket, 2000);
+        if (!active) return;
+        setSocketConnected(false);
+        retry = setTimeout(connectWebSocket, 2000);
       };
     };
 
     connectWebSocket();
 
     return () => {
+      active = false;
+      clearTimeout(retry);
+      if (wsRef.current) wsRef.current.onclose = null;
       wsRef.current?.close();
     };
   }, []);
@@ -222,11 +242,34 @@ export const App: React.FC = () => {
   };
 
   const handleForceRefreshAjin = async () => {
-    try {
-      await fetch(`${API_BASE}/api/ajin/refresh`, { method: 'POST' });
-    } catch (e) {
-      console.error('Erro ao forçar refresh:', e);
-    }
+    const data = await fetch(`${API_BASE}/api/ajin/refresh`, { method: 'POST', signal: AbortSignal.timeout(15000) }).then(readAjinResponse);
+    setTelemetry(data);
+    return data;
+  };
+
+  const handleScanAjin = useCallback(async (): Promise<AjinScan> => {
+    const response = await fetch(`${API_BASE}/api/ajin/scan`, {signal:AbortSignal.timeout(15000)});
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || 'Não foi possível consultar o Scanner.');
+    if (!Array.isArray(data.devices)) throw new Error('Resposta inválida do Scanner.');
+    return data;
+  }, []);
+
+  const handleDeleteAjin = async (row: ONUItem) => {
+    const data = await fetch(`${API_BASE}/api/ajin/onu/delete`, {
+      method:'POST', signal:AbortSignal.timeout(15000), headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({port:row.port, onu_id:String(row.id)}),
+    }).then(readAjinResponse);
+    setTelemetry(data);
+    return data;
+  };
+
+  const handleRegisterAjin = async (devices: Registration[]) => {
+    const response = await fetch(`${API_BASE}/api/ajin/register`, {
+      method:'POST', signal:AbortSignal.timeout(25000), headers:{'Content-Type':'application/json'}, body:JSON.stringify({devices}),
+    });
+    const data = await response.json();
+    if (!response.ok || data.status !== 'registered') throw new Error(data.detail || 'O coletor não confirmou a homologação.');
   };
 
   const handleSaveLabel = async (
@@ -235,11 +278,13 @@ export const App: React.FC = () => {
     name: string,
     desc: string,
     lat?: number | null,
-    lon?: number | null
+    lon?: number | null,
+    notes?: string,
+    mapEnabled?: boolean
   ) => {
-    try {
-      await fetch(`${API_BASE}/api/ajin/label`, {
+    const data = await fetch(`${API_BASE}/api/ajin/label`, {
         method: 'POST',
+        signal: AbortSignal.timeout(15000),
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           port,
@@ -248,16 +293,16 @@ export const App: React.FC = () => {
           desc,
           latitude: lat,
           longitude: lon,
+          notes,
+          map_enabled: mapEnabled,
         }),
-      });
-      loadTelemetry();
-    } catch (e) {
-      console.error('Erro ao salvar label:', e);
-    }
+      }).then(readAjinResponse);
+    setTelemetry(data);
+    return data;
   };
 
   const handleLocateOnuOnMap = (onu: any) => {
-    if (onu.latitude && onu.longitude) {
+    if (canShowOnMap(onu)) {
       setMapTargetLocation({
         lat: Number(onu.latitude),
         lon: Number(onu.longitude),
@@ -359,7 +404,7 @@ export const App: React.FC = () => {
         {currentTab === 'map' && (
           <MapView
             servers={servers}
-            onus={telemetry.rows}
+            onus={mapPoints}
             onConnect={handleConnect}
             targetLocation={mapTargetLocation}
             onTargetLocationHandled={() => {
@@ -374,8 +419,12 @@ export const App: React.FC = () => {
         {currentTab === 'ajin' && (
           <AjinView
             telemetry={telemetry}
+            connected={socketConnected}
             onRefresh={handleForceRefreshAjin}
             onSaveLabel={handleSaveLabel}
+            onDelete={handleDeleteAjin}
+            onScan={handleScanAjin}
+            onRegister={handleRegisterAjin}
             onLocateOnMap={handleLocateOnuOnMap}
           />
         )}

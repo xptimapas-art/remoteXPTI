@@ -14,6 +14,7 @@ import urllib.request
 from pathlib import Path
 import webview
 from windows_single_instance import WindowsSingleInstance
+from desktop_lifecycle import stop_tray_icon
 from runtime_paths import (get_profile_dir, get_window_title, get_mutex_name,
                            get_app_user_model_id, is_development)
 
@@ -69,6 +70,7 @@ def main():
     # O backup de atualização é preservado para recuperação.
 
     instance = None
+    tray_icon = None
     try:
         instance = WindowsSingleInstance(get_mutex_name())
         if instance.already_running:
@@ -163,6 +165,7 @@ def main():
                                 subprocess.Popen([sys.executable] + sys.argv)
                     except:
                         pass
+                    stop_tray_icon(tray_icon)
                     os._exit(1)
             
             threading.Thread(target=_wait_and_load, daemon=True).start()
@@ -184,10 +187,10 @@ def main():
                 _dbg(f"show_window error: {e}")
 
         def _exit_app(icon=None, item=None):
-            _dbg("Encerrando via Ã­cone da bandeja...")
+            _dbg("Encerrando aplicativo e removendo ícone da bandeja...")
+            stop_tray_icon(tray_icon)
             try:
-                if tray_icon:
-                    tray_icon.stop()
+                desktop_hotkey_mgr.stop()
             except Exception:
                 pass
             os._exit(0)
@@ -310,6 +313,12 @@ def main():
         except Exception as e:
             _dbg(f"Erro ao inicializar pystray: {e}")
 
+        if is_development():
+            def _reload_dev():
+                _dbg('Recarregando interface DEV sem reiniciar processo ou bandeja.')
+                window.load_url(URL)
+            window_api._bind_dev_controls(reload=_reload_dev, stop=_exit_app)
+
         _dbg(f"Chamando webview.start(icon={icon_arg})...")
         webview.start(debug=False, icon=icon_arg)
         _dbg("webview.start() finalizado normalmente.")
@@ -320,11 +329,7 @@ def main():
                 desktop_hotkey_mgr.stop()
             except Exception:
                 pass
-        if tray_icon:
-            try:
-                tray_icon.stop()
-            except Exception:
-                pass
+        stop_tray_icon(tray_icon)
 
         os._exit(0)
 
@@ -341,6 +346,7 @@ def main():
             pass
         raise
     finally:
+        stop_tray_icon(tray_icon)
         if instance:
             instance.close()
 

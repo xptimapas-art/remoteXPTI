@@ -1,5 +1,6 @@
 """Private pywebview bridge for the shared client and DEV title bar."""
 import ctypes
+import threading
 from ctypes import wintypes as w
 
 
@@ -22,6 +23,19 @@ class DesktopWindow:
         self._procedure = None
         self._previous = None
         self._hwnd = None
+        self._dev_callbacks = {}
+        self._dev_messages = {}
+
+    def _bind_dev_controls(self, reload, stop):
+        if self._development:
+            self._dev_callbacks = {'reload':reload, 'stop':stop}
+
+    def _dispatch_dev_command(self, message):
+        callback = self._dev_messages.get(message) if self._development else None
+        if not callback:
+            return False
+        threading.Thread(target=callback, daemon=True).start()
+        return True
 
     def _bind(self, window):
         self._window = window
@@ -62,11 +76,22 @@ class DesktopWindow:
                 (self._user.IsZoomed, [w.HWND], w.BOOL),
                 (self._user.MonitorFromWindow, [w.HWND, w.DWORD], w.HANDLE),
                 (self._user.GetMonitorInfoW, [w.HANDLE, ctypes.POINTER(_MONITORINFO)], w.BOOL),
+                (self._user.RegisterWindowMessageW, [w.LPCWSTR], w.UINT),
             ):
                 function.argtypes, function.restype = arguments, returns
 
+            if self._development:
+                from desktop_dev_control import message_name
+                for action, handler in self._dev_callbacks.items():
+                    message = self._user.RegisterWindowMessageW(message_name(action))
+                    if not message:
+                        raise ctypes.WinError(ctypes.get_last_error())
+                    self._dev_messages[message] = handler
+
             @callback
             def procedure(hwnd, message, word, long):
+                if self._dispatch_dev_command(message):
+                    return 0
                 # Remove the non-client frame while retaining the Windows resize styles.
                 if message == 0x0083 and word:  # WM_NCCALCSIZE
                     return 0

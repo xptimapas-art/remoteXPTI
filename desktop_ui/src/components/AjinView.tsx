@@ -1,698 +1,117 @@
-import React, { useState, useMemo } from 'react';
-import {
-  Search,
-  RefreshCw,
-  Download,
-  AlertTriangle,
-  Radio,
-  CheckCircle2,
-  XCircle,
-  Clock,
-  Globe,
-  Database,
-  Pencil,
-  Trash2,
-  Activity,
-  MapPin,
-} from 'lucide-react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AlertTriangle, ArrowDown, ArrowUp, Check, Clock, MapPin, RadioTower, RefreshCw, ScanLine, Search, X } from 'lucide-react';
+import { ajinRows, canShowOnMap, filterRows, hasCoordinates, onuStatus, pointName } from './ajin';
+import type { AjinScan, AjinTelemetry, ONUItem, Registration, SortField, StatusFilter } from './ajin';
+import { CatalogPointDialog, EditOnuDialog, IncidentsDialog, onlineUptime, OnuStatus, ScannerDialog } from './AjinDialogs';
+import './Ajin.css';
+export type { ONUItem } from './ajin';
 
-export interface ONUItem {
-  id: string | number;
-  port: string;
-  name?: string;
-  desc?: string;
-  serial?: string;
-  status: 'Online' | 'Offline' | string;
-  uptime?: string;
-  vendor?: string;
-  rx_power?: string;
-  signal?: string;
-  latitude?: number | null;
-  longitude?: number | null;
-  cameras?: any[];
+interface Props {
+  telemetry: AjinTelemetry; connected: boolean;
+  onRefresh: () => Promise<AjinTelemetry>;
+  onSaveLabel: (port: string, id: string, name: string, desc: string, lat?: number | null, lon?: number | null, notes?: string, mapEnabled?: boolean) => Promise<AjinTelemetry>;
+  onDelete: (row: ONUItem) => Promise<AjinTelemetry>;
+  onScan: () => Promise<AjinScan>;
+  onRegister: (devices: Registration[]) => Promise<void>;
+  onLocateOnMap?: (row: ONUItem) => void;
 }
+const columns: { field: SortField; label: string }[] = [
+  {field:'name', label:'Ponto'}, {field:'status', label:'Status'}, {field:'desc', label:'Endereço'}, {field:'uptime', label:'UPTime'},
+  {field:'serial', label:'MAC / serial'}, {field:'vendor', label:'Fabricante'}, {field:'port', label:'Porta PON'},
+];
 
-interface TelemetryData {
-  total: number;
-  online: number;
-  offline: number;
-  total_cameras: number;
-  active_problems: number;
-  coleta_formatted: string;
-  server: { online: boolean; ip: string; checked_at: string };
-  olt: { modelo: string; ip: string };
-  ports: { port: string; online: number; total: number }[] | Record<string, { online: number; total: number; label?: string }>;
-  collector?: { status: 'connecting' | 'online' | 'unavailable'; endpoint: string; checked_at?: string };
-  stale?: boolean;
-  rows: ONUItem[];
-}
-
-interface AjinViewProps {
-  telemetry: TelemetryData;
-  onRefresh: () => void;
-  onSaveLabel: (port: string, onuId: string, name: string, desc: string, lat?: number | null, lon?: number | null) => void;
-  onLocateOnMap?: (onu: ONUItem) => void;
-}
-
-function parseColetaTimestamp(val?: string, defaultTime?: string): { time: string; date: string } {
-  if (!val) return { time: defaultTime || '--:--:--', date: 'Hoje' };
-  const cleaned = val.replace(/às/gi, ' ').trim();
-  const parts = cleaned.split(/\s+/);
-  if (parts.length >= 2) {
-    return { date: parts[0], time: parts[1] };
-  }
-  if (parts.length === 1) {
-    if (parts[0].includes(':')) return { date: '', time: parts[0] };
-    return { date: parts[0], time: defaultTime || '--:--:--' };
-  }
-  return { date: val, time: defaultTime || '--:--:--' };
-}
-
-const AjinClock = () => {
-  const [countdown, setCountdown] = useState(10);
-  const [currentTime, setCurrentTime] = useState('--:--:--');
-
-  React.useEffect(() => {
-    const handleTick = (e: any) => {
-      if (e.detail.time) setCurrentTime(e.detail.time);
-      if (typeof e.detail.countdown === 'number') setCountdown(e.detail.countdown);
-    };
-    window.addEventListener('ajinTick', handleTick);
-    return () => window.removeEventListener('ajinTick', handleTick);
+function ConsultationClock({ paused, connected }: { paused: boolean; connected: boolean }) {
+  const [countdown, setCountdown] = useState<number | null>(null);
+  useEffect(() => {
+    const tick = (event: Event) => { const detail = (event as CustomEvent<{countdown?: number}>).detail; if (Number.isFinite(detail.countdown)) setCountdown(detail.countdown!); };
+    window.addEventListener('ajinTick', tick); return () => window.removeEventListener('ajinTick', tick);
   }, []);
-
-  return (
-    <>
-      <span>Hora: {currentTime}</span>
-      <span>|</span>
-      <span className="text-blue-400">Próximo refresh: {countdown}s</span>
-    </>
-  );
-};
-
-const AutoRefreshCheckbox = ({ autoRefresh, setAutoRefresh }: { autoRefresh: boolean, setAutoRefresh: (val: boolean) => void }) => {
-  const [countdown, setCountdown] = useState(10);
-  const [currentTime, setCurrentTime] = useState('--:--:--');
-  React.useEffect(() => {
-    const handleTick = (e: any) => {
-      if (e.detail.time) setCurrentTime(e.detail.time);
-      if (typeof e.detail.countdown === 'number') setCountdown(e.detail.countdown);
-    };
-    window.addEventListener('ajinTick', handleTick);
-    return () => window.removeEventListener('ajinTick', handleTick);
-  }, []);
-
-  return (
-    <div className="p-3 bg-[#1d5b9f] border-t border-white/20 flex items-center justify-between">
-      <label className="flex items-center gap-2.5 cursor-pointer text-xs font-bold">
-        <input
-          type="checkbox"
-          checked={autoRefresh}
-          onChange={(e) => setAutoRefresh(e.target.checked)}
-          className="w-4 h-4 rounded text-blue-600 focus:ring-0 bg-white"
-        />
-        <span>Auto-refresh ({countdown}s)</span>
-      </label>
-      <span className="text-[10px] font-mono opacity-80">{currentTime}</span>
-    </div>
-  );
-};
-
-const ONURow = React.memo(({ row, onLocateOnMap, openEditModal }: { row: ONUItem, onLocateOnMap?: (onu: ONUItem) => void, openEditModal: (onu: ONUItem) => void }) => {
-  const isOnline = row.status === 'Online';
-  return (
-    <tr
-      className="hover:bg-[#1f242c] transition-colors group"
-    >
-      {/* Status Badge */}
-      <td className="py-2 px-3">
-        <span
-          className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold ${
-            isOnline
-              ? 'bg-emerald-950/70 text-emerald-400 border border-emerald-800/60 shadow-[0_0_8px_rgba(16,185,129,0.2)]'
-              : 'bg-rose-950/70 text-rose-400 border border-rose-800/60 shadow-[0_0_8px_rgba(244,63,94,0.2)]'
-          }`}
-        >
-          <span
-            className={`w-1.5 h-1.5 rounded-full ${
-              isOnline ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'
-            }`}
-          />
-          {isOnline ? 'Online' : 'Offline'}
-        </span>
-      </td>
-
-      {/* Nome do Ponto */}
-      <td className="py-2 px-3 font-semibold text-white">
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <span>{row.name || `Ponto ${row.id}`}</span>
-          {row.latitude && row.longitude ? (
-            <button
-              onClick={() => onLocateOnMap?.(row)}
-              title={`Localizado no Mapa (${Number(row.latitude).toFixed(4)}, ${Number(row.longitude).toFixed(4)})\nClique para visualizar no Mapa`}
-              className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-cyan-950/80 border border-cyan-500/40 text-cyan-300 text-[10px] font-mono hover:bg-cyan-900/90 transition-all cursor-pointer"
-            >
-              <MapPin className="w-2.5 h-2.5 text-cyan-400" />
-              <span>GPS</span>
-            </button>
-          ) : null}
-          <button
-            onClick={() => openEditModal(row)}
-            title="Editar identificação e coordenadas"
-            className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 text-slate-400 hover:text-blue-400 cursor-pointer"
-          >
-            <Pencil className="w-3 h-3" />
-          </button>
-        </div>
-      </td>
-
-      {/* Serial / MAC */}
-      <td className="py-2 px-3 font-mono text-[11px] text-slate-300">
-        {row.serial || '-'}
-      </td>
-
-      {/* Descrição */}
-      <td className="py-2 px-3 text-slate-200">
-        {row.desc || <span className="text-slate-500 italic">+ adicionar rua</span>}
-      </td>
-
-      {/* Fabricante */}
-      <td className="py-2 px-3 text-slate-400 text-[11px]">
-        {row.vendor || 'C-Data'}
-      </td>
-
-      {/* Sinal / Uptime */}
-      <td className="py-2 px-3 text-slate-300 font-mono text-[11px]">
-        {row.signal || row.uptime || '-21.4 dBm'}
-      </td>
-
-      {/* Porta PON */}
-      <td className="py-2 px-3 text-right font-mono text-[11px] text-slate-400">
-        {row.port}
-      </td>
-
-      {/* Ações */}
-      <td className="py-2 px-3 text-center">
-        <div className="flex items-center justify-center gap-1">
-          {row.latitude && row.longitude ? (
-            <button
-              onClick={() => onLocateOnMap?.(row)}
-              title="Visualizar ONU no Mapa Interativo"
-              className="p-1 rounded bg-cyan-950/70 hover:bg-cyan-900 border border-cyan-600/50 text-cyan-300 transition-colors cursor-pointer"
-            >
-              <MapPin className="w-3.5 h-3.5" />
-            </button>
-          ) : (
-            <button
-              onClick={() => openEditModal(row)}
-              title="Definir coordenadas no Mapa"
-              className="p-1 rounded bg-[#21262d] hover:bg-[#30363d] border border-[#30363d] text-slate-400 hover:text-cyan-300 transition-colors cursor-pointer"
-            >
-              <MapPin className="w-3.5 h-3.5" />
-            </button>
-          )}
-          <button
-            onClick={() => openEditModal(row)}
-            className="px-2 py-1 bg-[#21262d] hover:bg-[#30363d] text-slate-300 rounded text-[10px] font-bold border border-[#30363d] transition-colors cursor-pointer"
-          >
-            Menu
-          </button>
-          <button className="p-1 text-slate-500 hover:text-rose-400 transition-colors cursor-pointer">
-            <Trash2 className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      </td>
-    </tr>
-  );
+  return <span className="aj-next-query">{paused ? 'Exibição pausada' : !connected ? 'Reconectando ao aplicativo…' : countdown === null ? 'Aguardando próxima consulta' : `Próxima consulta: ${countdown}s`}</span>;
+}
+const ONURow = memo(function ONURow({ row, onEdit, onMap }: { row: ONUItem; onEdit: (row: ONUItem) => void; onMap?: (row: ONUItem) => void }) {
+  const located = canShowOnMap(row);
+  const locationAction = located ? 'Ver no mapa' : hasCoordinates(row) ? 'Ativar no mapa' : 'Definir localização';
+  return <tr><td className="aj-point"><strong>{pointName(row)}</strong></td><td><OnuStatus row={row} /></td>
+    <td className="aj-address" title={row.desc}>{row.desc || '—'}</td><td className="aj-mono" title={row.status_since ? `Desde ${row.status_since}` : undefined}>{onlineUptime(row)}</td>
+    <td className="aj-mono">{row.serial || '—'}</td><td>{row.vendor || '—'}</td><td className="aj-mono">{row.port || '—'}</td>
+    <td><div className="aj-row-actions"><button type="button" className={located ? 'aj-icon aj-located' : 'aj-icon'}
+      title={locationAction} aria-label={`${locationAction}: ${pointName(row)}`} onClick={() => located ? onMap?.(row) : onEdit(row)}><MapPin /></button>
+      <button type="button" aria-label={`${row.catalog_number !== undefined ? 'Detalhes' : 'Menu'}: ${pointName(row)}`} aria-haspopup="dialog" onClick={() => onEdit(row)}>{row.catalog_number !== undefined ? 'Detalhes' : 'Menu'}</button></div></td></tr>;
 });
 
-export const AjinView: React.FC<AjinViewProps> = React.memo(({
-  telemetry,
-  onRefresh,
-  onSaveLabel,
-  onLocateOnMap,
-}) => {
-  const [searchTerm, setSearchTerm] = useState('');
-  const [selectedPon, setSelectedPon] = useState('Todas as Portas PON');
-  const [selectedStatus, setSelectedStatus] = useState('Todos os Status');
-  const [autoRefresh, setAutoRefresh] = useState(true);
-  const [sortField, setSortField] = useState<string>('name');
-  const [sortAsc, setSortAsc] = useState<boolean>(true);
-
-  // Modal de Edição
-  const [editingItem, setEditingItem] = useState<ONUItem | null>(null);
-  const [editName, setEditName] = useState('');
-  const [editDesc, setEditDesc] = useState('');
-  const [editLat, setEditLat] = useState('');
-  const [editLon, setEditLon] = useState('');
-
-  const handleExportCSV = () => {
-    const headers = ['Status', 'ONU / Ponto', 'MAC / Serial', 'Descrição (Rua / Local)', 'Fabricante', 'Sinal / Uptime', 'Canal OLT'];
-    const rows = filteredRows.map((r) => [
-      r.status,
-      r.name || `Ponto ${r.id}`,
-      r.serial || '',
-      `"${(r.desc || '').replace(/"/g, '""')}"`,
-      r.vendor || '',
-      r.signal || r.uptime || '',
-      r.port || '',
-    ]);
-
-    const csvContent = 'data:text/csv;charset=utf-8,\uFEFF' + [headers.join(';'), ...rows.map((e) => e.join(';'))].join('\n');
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    const today = new Date().toISOString().slice(0, 10);
-    link.setAttribute('download', `ajin_telemetria_${today}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+export const AjinView = memo(function AjinView({ telemetry, connected, onRefresh, onSaveLabel, onDelete, onScan, onRegister, onLocateOnMap }: Props) {
+  const [search, setSearch] = useState(''), [status, setStatus] = useState<StatusFilter>('active');
+  const [sort, setSort] = useState<SortField>('name'), [ascending, setAscending] = useState(true);
+  const [paused, setPaused] = useState<AjinTelemetry | null>(null), [refreshing, setRefreshing] = useState(false);
+  const refreshingRef = useRef(false), mounted = useRef(true), scanRequest = useRef<Promise<void> | null>(null);
+  const [error, setError] = useState(''), [notice, setNotice] = useState(''), [editing, setEditing] = useState<ONUItem | null>(null);
+  const [modal, setModal] = useState<'incidents' | 'scanner' | null>(null);
+  const [scan, setScan] = useState<AjinScan | null>(null), [scanning, setScanning] = useState(false), [scanError, setScanError] = useState('');
+  const data = paused || telemetry;
+  const rows = useMemo(() => ajinRows(data), [data]);
+  const counts = useMemo(() => rows.reduce((acc, row) => { acc[onuStatus(row)]++; return acc; }, {online:0, offline:0, unknown:0, disabled:0}), [rows]);
+  const filtered = useMemo(() => filterRows(rows, search, '', status, sort, ascending), [rows, search, status, sort, ascending]);
+  const collected = (data.coleta_formatted || '—').replace(/\s+às\s+/, ' ').split(' ');
+  const connection = telemetry.collector?.status || 'connecting', outdated = Boolean(telemetry.stale) || connection !== 'online';
+  const activeFilters = Boolean(search || status !== 'active');
+  const fetchScan = useCallback((): Promise<void> => {
+    if (scanRequest.current) return scanRequest.current;
+    setScanning(true);
+    const task = (async () => {
+      try { const result = await onScan(); if (mounted.current) { setScan(result); setScanError(''); } }
+      catch (exception) { if (mounted.current) setScanError(exception instanceof Error ? exception.message : 'Scanner indisponível.'); }
+      finally { scanRequest.current = null; if (mounted.current) setScanning(false); }
+    })();
+    scanRequest.current = task; return task;
+  }, [onScan]);
+  useEffect(() => { mounted.current = true; void fetchScan(); const timer = window.setInterval(() => void fetchScan(), 30000); return () => { mounted.current = false; window.clearInterval(timer); }; }, [fetchScan]);
+  const refresh = async () => {
+    if (refreshingRef.current) return;
+    refreshingRef.current = true; setRefreshing(true); setError(''); setNotice('');
+    try { const snapshot = await onRefresh(); setPaused(current => current ? snapshot : null); setNotice('Últimos dados do coletor recebidos.'); }
+    catch (exception) { setError(exception instanceof Error ? exception.message : 'Não foi possível consultar o coletor.'); }
+    finally { refreshingRef.current = false; setRefreshing(false); }
   };
-
-  const handleToggleIncidents = () => {
-    if (selectedStatus === 'Fora de Funcionamento (Offline)') {
-      setSelectedStatus('Todos os Status');
-    } else {
-      setSelectedStatus('Fora de Funcionamento (Offline)');
-    }
+  const save = async (row: ONUItem, name: string, desc: string, lat: number | null, lon: number | null, notes: string, mapEnabled: boolean) => {
+    const snapshot = await onSaveLabel(row.port, String(row.id), name, desc, lat, lon, notes, mapEnabled);
+    setPaused(current => current ? snapshot : null); setNotice('Identificação salva.'); setError('');
   };
-
-  // Filtragem e Ordenação de Alta Performance
-  const filteredRows = useMemo(() => {
-    const term = searchTerm.toLowerCase().trim();
-    return (telemetry.rows || []).filter((r) => {
-      if (term) {
-        const pName = (r.name || `Ponto ${r.id}`).toLowerCase();
-        const pDesc = (r.desc || '').toLowerCase();
-        const pSer = (r.serial || '').toLowerCase();
-        const pPort = (r.port || '').toLowerCase();
-        if (!pName.includes(term) && !pDesc.includes(term) && !pSer.includes(term) && !pPort.includes(term)) {
-          return false;
-        }
-      }
-
-      if (selectedPon !== 'Todas as Portas PON' && r.port !== selectedPon) {
-        return false;
-      }
-
-      if (selectedStatus === 'Em Funcionamento (Online)' && r.status !== 'Online') {
-        return false;
-      }
-      if (selectedStatus === 'Fora de Funcionamento (Offline)' && r.status === 'Online') {
-        return false;
-      }
-
-      return true;
-    }).sort((a, b) => {
-      let va = (a as any)[sortField] || '';
-      let vb = (b as any)[sortField] || '';
-      if (typeof va === 'string') va = va.toLowerCase();
-      if (typeof vb === 'string') vb = vb.toLowerCase();
-      if (va < vb) return sortAsc ? -1 : 1;
-      if (va > vb) return sortAsc ? 1 : -1;
-      return 0;
-    });
-  }, [telemetry.rows, searchTerm, selectedPon, selectedStatus, sortField, sortAsc]);
-
-  const handleSort = (field: string) => {
-    if (sortField === field) {
-      setSortAsc(!sortAsc);
-    } else {
-      setSortField(field);
-      setSortAsc(true);
-    }
+  const remove = async (row: ONUItem) => {
+    const snapshot = await onDelete(row); setPaused(current => current ? snapshot : null); setNotice('Ponto excluído do monitoramento.'); setError(''); void fetchScan();
   };
-
-  const openEditModal = (item: ONUItem) => {
-    setEditingItem(item);
-    setEditName(item.name || `Ponto ${item.id}`);
-    setEditDesc(item.desc || '');
-    setEditLat(item.latitude != null ? String(item.latitude) : '');
-    setEditLon(item.longitude != null ? String(item.longitude) : '');
+  const register = async (devices: Registration[]) => {
+    await onRegister(devices); setNotice('Homologação confirmada pelo coletor.');
+    try { const snapshot = await onRefresh(); setPaused(current => current ? snapshot : null); }
+    catch { setNotice('Homologação confirmada. O inventário será atualizado na próxima consulta ao coletor.'); }
+    await fetchScan();
   };
-
-  const saveEdit = () => {
-    if (editingItem) {
-      const latVal = editLat.trim() ? parseFloat(editLat.trim().replace(',', '.')) : null;
-      const lonVal = editLon.trim() ? parseFloat(editLon.trim().replace(',', '.')) : null;
-      onSaveLabel(
-        editingItem.port,
-        String(editingItem.id),
-        editName,
-        editDesc,
-        latVal !== null && !isNaN(latVal) ? latVal : null,
-        lonVal !== null && !isNaN(lonVal) ? lonVal : null
-      );
-      setEditingItem(null);
-    }
-  };
-
-  return (
-    <div className="flex-1 flex overflow-hidden bg-[#0d1117] p-3 gap-3">
-      {/* PAINEL ESQUERDO: CONTROLES E TABELA DE ONUs */}
-      <div className="flex-1 flex flex-col min-w-0 bg-[#161b22] rounded-xl border border-[#30363d] overflow-hidden shadow-lg">
-        {telemetry.stale && (
-          <div role="status" className="px-3 py-2 border-b border-amber-800 bg-amber-950/40 text-xs text-amber-200 flex items-start gap-2">
-            <AlertTriangle className="w-4 h-4 shrink-0" />
-            <span>
-              {telemetry.collector?.status === 'connecting'
-                ? 'Conectando ao coletor AJIN.'
-                : telemetry.collector?.status === 'unavailable'
-                  ? 'Sem conexão com o coletor AJIN.'
-                  : 'O coletor está acessível, mas a coleta está atrasada.'}
-              {' '}{telemetry.rows?.length
-                ? `Exibindo a última coleta salva: ${telemetry.coleta_formatted}. Os status abaixo são dessa coleta.`
-                : 'Aguardando dados dos dispositivos.'}
-            </span>
-          </div>
-        )}
-        {/* Barra Superior de Filtros */}
-        <div className="p-3 border-b border-[#30363d] flex items-center justify-between gap-3 bg-[#11151c]">
-          <div className="flex items-center gap-2 flex-1 max-w-md">
-            <div className="relative w-full">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
-              <input
-                type="text"
-                placeholder="Buscar por ponto, rua, MAC ou porta..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full bg-[#0d1117] border border-[#30363d] rounded-lg pl-9 pr-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 transition-colors"
-              />
-            </div>
-
-            <select
-              value={selectedPon}
-              onChange={(e) => setSelectedPon(e.target.value)}
-              className="bg-[#0d1117] border border-[#30363d] rounded-lg px-2.5 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-blue-500"
-            >
-              <option>Todas as Portas PON</option>
-              <option>Slot1-PON1</option>
-              <option>Slot2-PON1</option>
-              <option>Slot2-PON2</option>
-            </select>
-
-            <select
-              value={selectedStatus}
-              onChange={(e) => setSelectedStatus(e.target.value)}
-              className="bg-[#0d1117] border border-[#30363d] rounded-lg px-2.5 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-blue-500"
-            >
-              <option>Todos os Status</option>
-              <option>Em Funcionamento (Online)</option>
-              <option>Fora de Funcionamento (Offline)</option>
-            </select>
-          </div>
-
-          {/* Botões de Ação */}
-          <div className="flex items-center gap-2">
-            <button
-              onClick={onRefresh}
-              title="Forçar nova coleta na OLT"
-              className="px-2.5 py-1.5 bg-[#21262d] hover:bg-[#30363d] border border-[#30363d] text-slate-200 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
-            >
-              <RefreshCw className="w-3.5 h-3.5 text-blue-400" />
-              <span>Atualizar</span>
-            </button>
-
-            <button
-              onClick={handleToggleIncidents}
-              title="Filtrar apenas ONUs offline em falha"
-              className={`px-2.5 py-1.5 border rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer ${
-                selectedStatus === 'Fora de Funcionamento (Offline)'
-                  ? 'bg-amber-950/70 border-amber-500/60 text-amber-300'
-                  : 'bg-[#21262d] hover:bg-[#30363d] border-[#30363d] text-slate-200'
-              }`}
-            >
-              <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
-              <span>Incidentes {telemetry.offline > 0 ? `(${telemetry.offline})` : ''}</span>
-            </button>
-
-            <button
-              onClick={handleExportCSV}
-              title="Baixar planilha CSV com as ONUs filtradas"
-              className="px-2.5 py-1.5 bg-[#21262d] hover:bg-[#30363d] border border-[#30363d] text-slate-200 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
-            >
-              <Download className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Exportar CSV</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Tabela de ONUs */}
-        <div className="flex-1 overflow-y-auto">
-          <table className="w-full text-left border-collapse">
-            <thead className="sticky top-0 bg-[#161b22] border-b border-[#30363d] text-[11px] font-bold text-slate-400 uppercase tracking-wider select-none z-10">
-              <tr>
-                <th onClick={() => handleSort('status')} className="py-2.5 px-3 cursor-pointer hover:text-white w-28">
-                  Status
-                </th>
-                <th onClick={() => handleSort('name')} className="py-2.5 px-3 cursor-pointer hover:text-white w-32">
-                  ONU / Ponto
-                </th>
-                <th onClick={() => handleSort('serial')} className="py-2.5 px-3 cursor-pointer hover:text-white w-36">
-                  MAC / Serial
-                </th>
-                <th onClick={() => handleSort('desc')} className="py-2.5 px-3 cursor-pointer hover:text-white">
-                  Descrição (Rua / Local)
-                </th>
-                <th onClick={() => handleSort('vendor')} className="py-2.5 px-3 cursor-pointer hover:text-white w-28">
-                  Fabricante
-                </th>
-                <th onClick={() => handleSort('uptime')} className="py-2.5 px-3 cursor-pointer hover:text-white w-28">
-                  Sinal / Uptime
-                </th>
-                <th onClick={() => handleSort('port')} className="py-2.5 px-3 cursor-pointer hover:text-white w-28 text-right">
-                  Canal OLT
-                </th>
-                <th className="py-2.5 px-3 w-20 text-center">Ações</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-[#21262d] text-xs">
-              {!filteredRows.length && (
-                <tr><td colSpan={8} className="px-3 py-10 text-center text-slate-400">
-                  {telemetry.rows?.length
-                    ? 'Nenhum dispositivo corresponde aos filtros.'
-                    : telemetry.collector?.status === 'unavailable'
-                      ? 'Coletor indisponível. O app tentará conectar novamente automaticamente.'
-                      : telemetry.collector?.status === 'connecting'
-                        ? 'Conectando ao coletor AJIN…'
-                        : 'Nenhum dispositivo recebido do coletor.'}
-                </td></tr>
-              )}
-              {filteredRows.map((row) => (
-                <ONURow 
-                  key={`${row.port}-${row.id}`} 
-                  row={row} 
-                  onLocateOnMap={onLocateOnMap} 
-                  openEditModal={openEditModal} 
-                />
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Rodapé da Tabela */}
-        <div className="p-2.5 bg-[#11151c] border-t border-[#30363d] flex items-center justify-between text-xs text-slate-400">
-          <div>
-            Exibindo <span className="font-bold text-white">{filteredRows.length}</span> de{' '}
-            <span className="font-bold text-white">{telemetry.rows?.length || 0}</span> ONUs cadastradas
-          </div>
-          <div className="flex items-center gap-3 font-mono">
-            <AjinClock />
-          </div>
-        </div>
+  const newOnus = scan?.devices.filter(row => !row.is_registered).length || 0;
+  return <section className="xpti-ajin" aria-label="Monitoramento AJIN">
+    <div className="aj-workspace"><section className="aj-main"><div className="aj-inventory"><div className="aj-toolbar">
+      <label className="aj-search"><Search /><input aria-label="Buscar ONU" placeholder="Buscar ponto, rua ou MAC…" value={search} onChange={event => setSearch(event.target.value)} /></label>
+      <select aria-label="Filtrar status das ONUs" value={status} onChange={event => setStatus(event.target.value as StatusFilter)}><option value="active">Ativados</option><option value="all">Todos</option><option value="online">Online</option><option value="offline">Offline</option><option value="disabled">Desativados</option></select>
+      <div className="aj-toolbar-actions"><button type="button" className="aj-primary" onClick={() => void refresh()} disabled={refreshing}><RefreshCw className={refreshing ? 'aj-spinning' : ''} />{refreshing ? 'Consultando…' : 'Atualizar'}</button>
+        <button type="button" className="aj-incidents" aria-haspopup="dialog" onClick={() => setModal('incidents')}><AlertTriangle />Incidentes <b>{counts.offline}</b></button>
+        <button type="button" className="aj-scanner" aria-haspopup="dialog" onClick={() => { setModal('scanner'); void fetchScan(); }} title={scanError || 'Descoberta de ONUs no coletor'}><ScanLine />Scanner{newOnus > 0 && <b>{newOnus}</b>}</button></div>
       </div>
-
-      {/* PAINEL LATERAL DIREITO: SIDEBAR NOC (LARGURA FIXA 304px DE REFERÊNCIA) */}
-      <aside className="w-[304px] flex-shrink-0 bg-[#2870c2] rounded-xl flex flex-col shadow-xl overflow-hidden text-white select-none">
-        {/* Métricas Roláveis */}
-        <div className="flex-1 overflow-y-auto divide-y divide-white/20">
-          {/* 1. Total */}
-          <div className="p-4 flex items-center justify-between hover:bg-[#307cd1] transition-colors">
-            <Radio className="w-8 h-8 opacity-90" />
-            <div className="text-right">
-              <div className="text-3xl font-extrabold tracking-tight">{telemetry.total ?? 0}</div>
-              <div className="text-xs font-bold uppercase tracking-wider opacity-90">Total</div>
-            </div>
-          </div>
-
-          {/* 2. Em Funcionamento */}
-          <div className="p-4 flex items-center justify-between hover:bg-[#307cd1] transition-colors">
-            <CheckCircle2 className="w-8 h-8 opacity-90" />
-            <div className="text-right">
-              <div className="text-3xl font-extrabold tracking-tight">{telemetry.online ?? 0}</div>
-              <div className="text-xs font-bold uppercase tracking-wider opacity-90">Em Funcionamento</div>
-            </div>
-          </div>
-
-          {/* 3. Fora de Funcionamento (Sem quebras de linha com 304px!) */}
-          <div className="p-4 flex items-center justify-between hover:bg-[#307cd1] transition-colors">
-            <XCircle className="w-8 h-8 opacity-90" />
-            <div className="text-right">
-              <div className="text-3xl font-extrabold tracking-tight">{telemetry.offline ?? 0}</div>
-              <div className="text-xs font-bold uppercase tracking-wider opacity-90 whitespace-nowrap">
-                Fora de Funcionamento
-              </div>
-            </div>
-          </div>
-
-
-          {/* 5. Portas PON */}
-          <div className="p-4 hover:bg-[#307cd1] transition-colors">
-            <div className="flex items-center justify-between mb-2">
-              <Activity className="w-6 h-6 opacity-90" />
-              <span className="text-xs font-bold uppercase tracking-wider opacity-90">Portas PON</span>
-            </div>
-            <div className="space-y-1.5 text-xs font-mono">
-              {(Array.isArray(telemetry.ports)
-                ? telemetry.ports
-                : Object.entries(telemetry.ports || {}).map(([port, counts]) => ({ port, ...counts }))
-              ).map((port) => (
-                <div key={port.port} className="flex justify-between">
-                  <span className="opacity-90">{port.port}</span>
-                  <span className="font-bold">{port.online} / {port.total}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* 5. Última Coleta */}
-          {(() => {
-            const coleta = parseColetaTimestamp(telemetry.coleta_formatted, "");
-            return (
-              <div className="p-4 flex items-center justify-between hover:bg-[#307cd1] transition-colors">
-                <Clock className="w-7 h-7 opacity-90" />
-                <div className="text-right">
-                  <div className="text-base font-bold font-mono tracking-tight">{coleta.time}</div>
-                  {coleta.date && <div className="text-[11px] opacity-80 mt-0.5">{coleta.date}</div>}
-                  <div className="text-[10px] font-bold uppercase tracking-wider opacity-90 mt-0.5">Última Coleta</div>
-                </div>
-              </div>
-            );
-          })()}
-
-          {/* 6. Servidor Coletor */}
-          <div className="p-4 flex items-center justify-between hover:bg-[#307cd1] transition-colors">
-            <Globe className={`w-7 h-7 ${telemetry.collector?.status === 'online' ? 'text-emerald-300' : 'text-rose-300'}`} />
-            <div className="text-right">
-              <div className={`text-xs font-bold ${telemetry.collector?.status === 'online' ? 'text-emerald-300' : 'text-rose-300'}`}>
-                {telemetry.collector?.status === 'online' ? 'API conectada' : telemetry.collector?.status === 'connecting' ? 'Conectando…' : 'API indisponível'}
-              </div>
-              <div className="text-[11px] font-mono opacity-90">{telemetry.collector?.endpoint || telemetry.server?.ip || '192.168.190.187'}</div>
-              <div className="text-[10px] font-bold uppercase tracking-wider opacity-90">Servidor Coletor</div>
-            </div>
-          </div>
-
-          {/* 8. OLT Principal */}
-          <div className="p-4 flex items-center justify-between hover:bg-[#307cd1] transition-colors">
-            <Database className="w-7 h-7 opacity-90" />
-            <div className="text-right">
-              <div className="text-xs font-bold">C-Data FD1108S</div>
-              <div className="text-[11px] font-mono opacity-90">192.168.1.100</div>
-              <div className="text-[10px] font-bold uppercase tracking-wider opacity-90">OLT Principal</div>
-            </div>
-          </div>
-        </div>
-
-        {/* Rodapé da Sidebar: Auto-refresh Toggle */}
-        <AutoRefreshCheckbox autoRefresh={autoRefresh} setAutoRefresh={setAutoRefresh} />
-      </aside>
-
-      {/* MODAL DE EDIÇÃO */}
-      {editingItem && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-[#161b22] border border-[#30363d] rounded-xl p-5 w-full max-w-md shadow-2xl space-y-4">
-            <h3 className="text-sm font-bold text-white flex items-center gap-2">
-              <Pencil className="w-4 h-4 text-blue-400" />
-              Editar Identificação da ONU ({editingItem.port})
-            </h3>
-
-            <div className="space-y-3">
-              <div>
-                <label className="text-[11px] text-slate-400 block mb-1">Nome do Ponto</label>
-                <input
-                  type="text"
-                  value={editName}
-                  onChange={(e) => setEditName(e.target.value)}
-                  placeholder="ex: Ponto 10"
-                  className="w-full bg-[#0d1117] border border-[#30363d] rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500"
-                />
-              </div>
-
-              <div>
-                <label className="text-[11px] text-slate-400 block mb-1">Descrição (Rua / Referência)</label>
-                <input
-                  type="text"
-                  value={editDesc}
-                  onChange={(e) => setEditDesc(e.target.value)}
-                  placeholder="ex: R. Tabaronas"
-                  className="w-full bg-[#0d1117] border border-[#30363d] rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500"
-                />
-              </div>
-
-              {/* Coordenadas Geográficas (Latitude e Longitude para o Mapa) */}
-              <div className="pt-2 border-t border-[#30363d]">
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-[11px] font-bold text-cyan-400 flex items-center gap-1.5">
-                    <MapPin className="w-3.5 h-3.5" />
-                    <span>Localização no Mapa (GPS)</span>
-                  </label>
-                  {editLat && editLon && (
-                    <button
-                      type="button"
-                      onClick={() => { setEditLat(''); setEditLon(''); }}
-                      className="text-[10px] text-rose-400 hover:text-rose-300 cursor-pointer"
-                    >
-                      Remover Coordenadas
-                    </button>
-                  )}
-                </div>
-
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="text-[10px] text-slate-400 block mb-0.5">Latitude</label>
-                    <input
-                      type="text"
-                      value={editLat}
-                      onChange={(e) => setEditLat(e.target.value)}
-                      placeholder="-27.4335"
-                      className="w-full bg-[#0d1117] border border-[#30363d] rounded-lg px-2.5 py-1.5 text-xs text-white font-mono placeholder:text-slate-600 focus:outline-none focus:border-cyan-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-slate-400 block mb-0.5">Longitude</label>
-                    <input
-                      type="text"
-                      value={editLon}
-                      onChange={(e) => setEditLon(e.target.value)}
-                      placeholder="-48.4025"
-                      className="w-full bg-[#0d1117] border border-[#30363d] rounded-lg px-2.5 py-1.5 text-xs text-white font-mono placeholder:text-slate-600 focus:outline-none focus:border-cyan-500"
-                    />
-                  </div>
-                </div>
-                <p className="text-[10px] text-slate-400 mt-1.5 leading-relaxed">
-                  💡 Preencha as coordenadas para plotar este ponto na aba <strong className="text-cyan-300">Mapa</strong> com telemetria e sinal em tempo real.
-                </p>
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-2 pt-2 border-t border-[#30363d]">
-              <button
-                onClick={() => setEditingItem(null)}
-                className="px-3 py-1.5 text-xs text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={saveEdit}
-                className="px-3.5 py-1.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 rounded-lg shadow transition-colors cursor-pointer flex items-center gap-1.5"
-              >
-                <CheckCircle2 className="w-3.5 h-3.5" />
-                <span>Salvar Alterações</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
+      {outdated && <div className="aj-banner" role="status"><AlertTriangle /><span>{connection === 'connecting' ? 'Conectando ao coletor AJIN.' : connection === 'unavailable' ? 'Sem conexão com o coletor AJIN.' : 'A coleta está atrasada ou sem data válida.'} {rows.length ? `Exibindo a última coleta salva: ${data.coleta_formatted}.` : 'Aguardando dados dos dispositivos.'}</span></div>}
+      {error && <div className="aj-banner aj-error" role="alert"><AlertTriangle /><span>{error}</span><button type="button" className="aj-icon" aria-label="Fechar erro" onClick={() => setError('')}><X /></button></div>}
+      <div className="aj-table-scroll" tabIndex={0} aria-label="Tabela de ONUs"><table><thead><tr>{columns.map(column => <th key={column.field} aria-sort={sort === column.field ? ascending ? 'ascending' : 'descending' : 'none'}><button type="button" onClick={() => { if (sort === column.field) setAscending(value => !value); else { setSort(column.field); setAscending(true); } }}>{column.label}{sort === column.field && (ascending ? <ArrowUp /> : <ArrowDown />)}</button></th>)}<th>Ações</th></tr></thead>
+        <tbody>{filtered.map(row => <ONURow key={JSON.stringify([row.port, row.id])} row={row} onEdit={setEditing} onMap={onLocateOnMap} />)}
+          {!filtered.length && <tr><td colSpan={8} className="aj-empty">{rows.length ? 'Nenhum dispositivo corresponde aos filtros.' : 'Nenhum dispositivo recebido do coletor.'}</td></tr>}</tbody></table></div>
+      <footer className="aj-table-footer"><span>Exibindo <b>{filtered.length}</b> de <b>{rows.length}</b> pontos{counts.unknown > 0 && ` · ${counts.unknown} com status desconhecido`}</span>
+        {activeFilters && <button type="button" className="aj-text-button" onClick={() => { setSearch(''); setStatus('active'); }}>Limpar filtros</button>}<ConsultationClock paused={Boolean(paused)} connected={connected} /></footer>
+      {notice && <div className="aj-notice" role="status" aria-live="polite"><Check /><span>{notice}</span></div>}
+    </div></section>
+    <aside className="aj-sidebar" aria-label="Painel lateral AJIN"><header><RadioTower /><h2>Visão da rede</h2></header>
+      <div className="aj-summary">{[['all','Total de pontos',rows.length],['active','Ativados',counts.online + counts.offline],['disabled','Desativado',counts.disabled],['online','Online',counts.online],['offline','Offline',counts.offline]].map(([value,label,count]) => <button type="button" key={value} aria-pressed={status === value} onClick={() => setStatus(value as StatusFilter)}><span>{label}</span><strong>{count}</strong></button>)}</div>
+      <section><h3><Clock />Última coleta</h3><strong className="aj-collection-time">{collected.find(part => /^\d{2}:\d{2}/.test(part)) || '—'}</strong><small>{collected.find(part => part.includes('/')) || 'Sem coleta'}</small></section>
+      <section><h3>Servidor coletor</h3><span className={`aj-connection ${outdated || !connected ? 'aj-warning' : ''}`}><i />{!connected ? 'Reconectando ao app' : connection === 'connecting' ? 'Conectando ao coletor' : connection === 'unavailable' ? 'API indisponível' : outdated ? 'Coleta atrasada' : 'Coleta em dia'}</span><code>{telemetry.collector?.endpoint || '—'}</code></section>
+      <section><h3>OLT principal</h3><p>{data.olt?.modelo || 'Não informada'}</p><code>{data.olt?.ip || '—'}</code></section>
+      <footer><label><input type="checkbox" role="switch" aria-label="Atualização automática da tela AJIN" checked={!paused} onChange={event => setPaused(event.target.checked ? null : telemetry)} />Atualização automática</label><small>Consulta a cada 10 segundos</small></footer>
+    </aside></div>
+    {editing && (editing.catalog_number !== undefined ? <CatalogPointDialog row={editing} onClose={() => setEditing(null)} /> : <EditOnuDialog row={editing} onSave={save} onDelete={remove} onClose={() => setEditing(null)} />)}
+    {modal === 'incidents' && <IncidentsDialog data={data} onClose={() => setModal(null)} />}
+    {modal === 'scanner' && <ScannerDialog scan={scan} loading={scanning} error={scanError} onScan={fetchScan} onRegister={register} onClose={() => setModal(null)} />}
+  </section>;
 });

@@ -10,6 +10,18 @@ import {
   X,
 } from 'lucide-react';
 import type { ONUItem } from './AjinView';
+import { canShowOnMap, onuKey, onuStatus, pointName, signalValue } from './ajin';
+
+function mapTooltip(title: string, detail: string) {
+  const content = document.createElement('div');
+  const heading = document.createElement('strong');
+  heading.textContent = title;
+  const description = document.createElement('span');
+  description.style.color = '#94a3b8';
+  description.textContent = detail;
+  content.append(heading, document.createElement('br'), description);
+  return content;
+}
 
 interface Server {
   id: string;
@@ -45,6 +57,13 @@ interface MapViewProps {
   onTargetLocationHandled?: () => void;
 }
 
+interface AjinMarkerEntry {
+  marker: L.Marker & { ajinStatus?: string };
+  row: ONUItem;
+  iconKey: string;
+  tooltipKey: string;
+}
+
 export const MapView: React.FC<MapViewProps> = React.memo(({
   servers,
   onus = [],
@@ -57,8 +76,9 @@ export const MapView: React.FC<MapViewProps> = React.memo(({
   const mapInstanceRef = useRef<L.Map | null>(null);
   const currentTileLayerRef = useRef<L.TileLayer | null>(null);
   const serverClusterGroupRef = useRef<L.MarkerClusterGroup | null>(null);
-  const onuLayerRef = useRef<L.LayerGroup | null>(null);
+  const onuLayerRef = useRef<L.MarkerClusterGroup | null>(null);
   const serverMarkersMapRef = useRef<Map<string, L.Marker>>(new Map());
+  const onuMarkersRef = useRef(new Map<string, AjinMarkerEntry>());
 
   const [activeLayer, setActiveLayer] = useState<'satellite' | 'roads' | 'osm'>('satellite');
   const [incidents, setIncidents] = useState<Incident[]>([]);
@@ -67,6 +87,14 @@ export const MapView: React.FC<MapViewProps> = React.memo(({
   const [showOnus, setShowOnus] = useState(true);
   const [selectedServer, setSelectedServer] = useState<Server | null>(null);
   const [selectedOnu, setSelectedOnu] = useState<ONUItem | null>(null);
+
+  useEffect(() => {
+    setSelectedOnu(previous => {
+      if (!previous) return null;
+      const current = onus.find(row => onuKey(row) === onuKey(previous));
+      return showOnus && current && canShowOnMap(current) ? current : null;
+    });
+  }, [onus, showOnus]);
 
   const lastTargetKeyRef = useRef<string | null>(
     targetLocation ? `${targetLocation.lat}_${targetLocation.lon}_${targetLocation.itemType || ''}_${targetLocation.id || ''}` : null
@@ -137,6 +165,7 @@ export const MapView: React.FC<MapViewProps> = React.memo(({
           subdomains: ['0', '1', '2', '3'],
           maxZoom: 20,
           attribution: 'Google Satélite Híbrido',
+          updateWhenZooming: false,
         }
       ).addTo(map);
 
@@ -214,7 +243,42 @@ export const MapView: React.FC<MapViewProps> = React.memo(({
       serverClusterGroup.addTo(map);
       serverClusterGroupRef.current = serverClusterGroup;
 
-      const onuLayer = L.layerGroup().addTo(map);
+      // Keep the group selectable when a server pin shares its location.
+      map.createPane('ajin-cluster-pane').style.zIndex = '610';
+      const onuLayer = L.markerClusterGroup({
+        animate: false,
+        clusterPane: 'ajin-cluster-pane',
+        maxClusterRadius: 35,
+        // Neighborhood view must show each numbered point, even when nearby.
+        disableClusteringAtZoom: 14,
+        spiderfyOnMaxZoom: true,
+        showCoverageOnHover: false,
+        zoomToBoundsOnClick: true,
+        iconCreateFunction: cluster => {
+          const markers = cluster.getAllChildMarkers() as (L.Marker & { ajinStatus?: string })[];
+          const total = cluster.getChildCount();
+          const counts = { online:0, offline:0, disabled:0, unknown:0 };
+          for (const marker of markers) {
+            const status = marker.ajinStatus as keyof typeof counts | undefined;
+            counts[status && status in counts ? status : 'unknown']++;
+          }
+          const status = counts.offline === total ? 'critical' : counts.offline > 0 ? 'warning'
+            : counts.disabled === total ? 'disabled' : counts.unknown === total ? 'unknown' : 'online';
+          const content = document.createElement('div');
+          const count = document.createElement('span');
+          count.textContent = String(total);
+          content.append(count);
+          const detail = `${counts.online} online · ${counts.offline} offline · ${counts.disabled} desativados${counts.unknown ? ` · ${counts.unknown} desconhecidos` : ''}`;
+          const tooltip = mapTooltip(`${total} pontos AJIN`, detail);
+          if (cluster.getTooltip()) cluster.setTooltipContent(tooltip);
+          else cluster.bindTooltip(tooltip, {
+            direction:'top', className:'leaflet-tooltip-dark', offset:[0, -15],
+          });
+          const size = total >= 100 ? 50 : total >= 10 ? 44 : 38;
+          const sizeClass = total >= 100 ? 'cluster-lg' : total >= 10 ? 'cluster-md' : 'cluster-sm';
+          return L.divIcon({ html:content, className:`marker-cluster marker-cluster-${status} ${sizeClass} ajin-cluster`, iconSize:[size, size] });
+        },
+      }).addTo(map);
       onuLayerRef.current = onuLayer;
 
       mapInstanceRef.current = map;
@@ -239,6 +303,7 @@ export const MapView: React.FC<MapViewProps> = React.memo(({
         currentTileLayerRef.current = null;
         serverClusterGroupRef.current = null;
         onuLayerRef.current = null;
+        onuMarkersRef.current.clear();
         serverMarkersMapRef.current.clear();
       }
     };
@@ -261,6 +326,7 @@ export const MapView: React.FC<MapViewProps> = React.memo(({
           subdomains: ['0', '1', '2', '3'],
           maxZoom: 20,
           attribution: 'Google Satélite Híbrido',
+          updateWhenZooming: false,
         }
       );
     } else if (activeLayer === 'roads') {
@@ -270,12 +336,14 @@ export const MapView: React.FC<MapViewProps> = React.memo(({
           subdomains: ['0', '1', '2', '3'],
           maxZoom: 20,
           attribution: 'Google Maps',
+          updateWhenZooming: false,
         }
       );
     } else {
       newLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         maxZoom: 19,
         attribution: 'OpenStreetMap',
+        updateWhenZooming: false,
       });
     }
 
@@ -327,15 +395,13 @@ export const MapView: React.FC<MapViewProps> = React.memo(({
     onTargetLocationHandled?.();
   }, [targetLocation]);
 
-  // Marcadores em Alfinete de Alta Definição com Halo Pulsante (Servidores e ONUs)
+  // Server markers do not depend on AJIN telemetry.
   useEffect(() => {
     const map = mapInstanceRef.current;
     const clusterGroup = serverClusterGroupRef.current;
-    const onuGroup = onuLayerRef.current;
-    if (!map || !clusterGroup || !onuGroup) return;
+    if (!map || !clusterGroup) return;
 
     clusterGroup.clearLayers();
-    onuGroup.clearLayers();
     serverMarkersMapRef.current.clear();
 
     // 1. Plotar Servidores com Agrupamento (MarkerCluster)
@@ -370,7 +436,7 @@ export const MapView: React.FC<MapViewProps> = React.memo(({
         (marker as any).serverData = s;
         (marker as any).isOffline = isIncident;
 
-        marker.bindTooltip(`🖥️ <strong>${s.name}</strong><br/><span style="color:#94a3b8">${s.host}:${s.port || 3389}</span>`, {
+        marker.bindTooltip(mapTooltip(s.name, `${s.host}:${s.port || 3389}`), {
           permanent: false,
           direction: 'top',
           className: 'leaflet-tooltip-dark',
@@ -389,50 +455,107 @@ export const MapView: React.FC<MapViewProps> = React.memo(({
       clusterGroup.addLayers(markersToAdd);
     }
 
-    // 2. Plotar ONUs da Ajin
+  }, [servers, incidents, showServers]);
+
+  // Preserve marker objects/DOM across snapshots; uptime changes need no redraw.
+  useEffect(() => {
+    const map = mapInstanceRef.current, onuGroup = onuLayerRef.current;
+    if (!map || !onuGroup) return;
+    const cache = onuMarkersRef.current;
+    if (!showOnus) {
+      onuGroup.clearLayers(); cache.clear(); return;
+    }
     if (showOnus && onus) {
-      const validOnus = onus.filter((o) => o.latitude && o.longitude);
+      const validOnus = onus.filter(canShowOnMap);
+      const keys = new Set(validOnus.map(onuKey));
+      for (const [key, entry] of cache) {
+        if (!keys.has(key)) { onuGroup.removeLayer(entry.marker); cache.delete(key); }
+      }
+      const markers: L.Marker[] = [];
+      const statusChanges: L.Marker[] = [];
+      let requestedMarker: L.Marker | undefined;
 
       validOnus.forEach((o) => {
-        const isOnline = o.status === 'Online';
-        const dotColor = isOnline ? '#22d3ee' : '#f43f5e';
-        const haloColor = isOnline ? 'rgba(34, 211, 238, 0.45)' : 'rgba(244, 63, 94, 0.5)';
-        const pinBg = isOnline ? '#09252c' : '#330e16';
-        const borderColor = isOnline ? '#06b6d4' : '#f43f5e';
+        const key = onuKey(o), status = onuStatus(o);
+        let entry = cache.get(key);
+        const iconKey = JSON.stringify([pointName(o), status]);
+        const tooltipKey = JSON.stringify([pointName(o), status, o.desc, o.port]);
+        let customIcon: L.DivIcon | undefined;
+        if (!entry || entry.iconKey !== iconKey) {
+          const disabled = onuStatus(o) === 'disabled', isOnline = onuStatus(o) === 'online';
+          const haloColor = disabled ? '#ffd54a' : isOnline ? 'rgba(34, 211, 238, 0.45)' : 'rgba(244, 63, 94, 0.5)';
+          const pinBg = disabled ? '#ffd54a' : isOnline ? '#09252c' : '#330e16';
+          const borderColor = disabled ? '#8a6510' : isOnline ? '#06b6d4' : '#f43f5e';
 
-        const customIcon = L.divIcon({
-          className: 'leaflet-pin-container',
-          html: `
-            <div class="pin-marker ${isOnline ? 'pin-onu-online' : 'pin-offline'}">
-              <svg width="28" height="36" viewBox="0 0 30 38" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path class="pin-base" d="M15 1.5C7.544 1.5 1.5 7.544 1.5 15C1.5 24.8 13.9 36.6 14.5 37.1C14.8 37.4 15.2 37.4 15.5 37.1C16.1 36.6 28.5 24.8 28.5 15C28.5 7.544 22.456 1.5 15 1.5Z" fill="${pinBg}" stroke="${borderColor}" stroke-width="2.2"/>
-                <circle class="pin-halo" cx="15" cy="15" r="7.5" fill="${haloColor}"/>
-                <path d="M15 7L11 15H15L14 22L20 13H15L15 7Z" fill="${dotColor}"/>
+          // Point numbering is independent from the physical ONU ID (e.g. point 01 / ONU 91).
+          const number = String(o.name || '').trim().match(/^(?:ponto\s+)?(\d+)$/i)?.[1] || '?';
+          const pin = document.createElement('div');
+          pin.className = `pin-marker pin-onu-numbered ${disabled ? 'pin-disabled' : isOnline ? 'pin-onu-online' : 'pin-offline'}`;
+          pin.innerHTML = `
+              <svg width="32" height="${disabled ? 32 : 42}" viewBox="0 0 30 ${disabled ? 30 : 38}" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                ${disabled ? `<circle class="pin-base" cx="15" cy="15" r="13.5" fill="${pinBg}" stroke="${borderColor}" stroke-width="2.2"/>` : `<path class="pin-base" d="M15 1.5C7.544 1.5 1.5 7.544 1.5 15C1.5 24.8 13.9 36.6 14.5 37.1C14.8 37.4 15.2 37.4 15.5 37.1C16.1 36.6 28.5 24.8 28.5 15C28.5 7.544 22.456 1.5 15 1.5Z" fill="${pinBg}" stroke="${borderColor}" stroke-width="2.2"/>`}
+                <circle cx="15" cy="15" r="10" fill="${haloColor}"/>
+                <text class="pin-point-number" x="15" y="15" dy=".35em" text-anchor="middle" fill="${disabled ? '#263d50' : '#ffffff'}"></text>
               </svg>
-            </div>
-          `,
-          iconSize: [28, 36],
-          iconAnchor: [14, 35],
-          tooltipAnchor: [0, -36],
-        });
-
-        const marker = L.marker([Number(o.latitude), Number(o.longitude)], { icon: customIcon }).addTo(onuGroup);
-
-        const tooltipHtml = `⚡ <strong>${o.name || `Ponto ${o.id}`}</strong> (${o.status})<br/><span style="color:#94a3b8">${o.desc || o.port}</span>`;
-        marker.bindTooltip(tooltipHtml, {
-          permanent: false,
-          direction: 'top',
-          className: 'leaflet-tooltip-dark',
-          offset: [0, -36],
-        });
-
-        marker.on('click', () => {
-          setSelectedOnu(o);
-          setSelectedServer(null);
-        });
+          `;
+          const numberText = pin.querySelector('text')!;
+          numberText.textContent = number;
+          numberText.setAttribute('font-size', number.length > 2 ? '9' : '12');
+          customIcon = L.divIcon({
+            className: 'leaflet-pin-container', html: pin,
+            iconSize: [32, disabled ? 32 : 42],
+            iconAnchor: [16, disabled ? 16 : 41],
+            tooltipAnchor: [0, disabled ? -16 : -42],
+          });
+        }
+        if (!entry) {
+          const marker = L.marker([Number(o.latitude), Number(o.longitude)], {icon:customIcon, title:pointName(o)});
+          entry = {marker, row:o, iconKey, tooltipKey:''};
+          const currentEntry = entry;
+          marker.on('click', () => { setSelectedOnu(currentEntry.row); setSelectedServer(null); });
+          cache.set(key, entry); markers.push(marker);
+        } else {
+          entry.row = o;
+          if (customIcon) {
+            entry.marker.setIcon(customIcon);
+            entry.marker.options.title = pointName(o);
+            entry.marker.getElement()?.setAttribute('title', pointName(o));
+          }
+          const location = entry.marker.getLatLng();
+          if (location.lat !== Number(o.latitude) || location.lng !== Number(o.longitude)) {
+            onuGroup.removeLayer(entry.marker);
+            entry.marker.setLatLng([Number(o.latitude), Number(o.longitude)]);
+            markers.push(entry.marker);
+          }
+          if (entry.marker.ajinStatus !== status) statusChanges.push(entry.marker);
+        }
+        entry.marker.ajinStatus = status;
+        entry.iconKey = iconKey;
+        if (entry.tooltipKey !== tooltipKey) {
+          const text = status === 'disabled' ? 'Desativado' : o.status || 'Desconhecido';
+          const content = mapTooltip(`${pointName(o)} (${text})`, o.desc || o.port);
+          if (entry.marker.getTooltip()) entry.marker.setTooltipContent(content);
+          else entry.marker.bindTooltip(content, {direction:'top', className:'leaflet-tooltip-dark', offset:[0, -36]});
+          entry.tooltipKey = tooltipKey;
+        }
+        if (targetLocation?.onu && key === onuKey(targetLocation.onu)) requestedMarker = entry.marker;
       });
+      if (markers.length) onuGroup.addLayers(markers);
+      if (statusChanges.length) onuGroup.refreshClusters(statusChanges);
+      if (requestedMarker) {
+        // Resolve synchronously: zoomToShowLayer leaves moveend callbacks referring
+        // to removed markers if a telemetry refresh rebuilds this group mid-zoom.
+        let zoom = map.getZoom();
+        map.setView(requestedMarker.getLatLng(), zoom, {animate:false});
+        while (onuGroup.getVisibleParent(requestedMarker) !== requestedMarker && zoom < map.getMaxZoom()) {
+          map.setZoom(++zoom, {animate:false});
+        }
+        const parent = onuGroup.getVisibleParent(requestedMarker);
+        if (parent instanceof L.MarkerCluster) parent.spiderfy();
+        onTargetLocationHandled?.();
+      }
     }
-  }, [servers, incidents, onus, showServers, showOnus]);
+  }, [onus, showOnus, targetLocation, onTargetLocationHandled]);
 
   const handleCenterSC = () => {
     if (mapInstanceRef.current) {
@@ -534,7 +657,7 @@ export const MapView: React.FC<MapViewProps> = React.memo(({
             </button>
             <button
               onClick={() => setShowOnus(!showOnus)}
-              title="Exibir ou ocultar ONUs da Ajin no mapa"
+              title="Exibir ou ocultar pontos da Ajin no mapa"
               className={`px-2 py-1 rounded text-[11px] font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
                 showOnus
                   ? 'bg-cyan-600 text-white shadow-md'
@@ -542,7 +665,7 @@ export const MapView: React.FC<MapViewProps> = React.memo(({
               }`}
             >
               <span>⚡</span>
-              <span>ONUs AJIN ({onus ? onus.filter((o) => o.latitude && o.longitude).length : 0})</span>
+              <span>Pontos AJIN ({onus ? onus.filter(canShowOnMap).length : 0})</span>
             </button>
           </div>
 
@@ -701,17 +824,17 @@ export const MapView: React.FC<MapViewProps> = React.memo(({
               </h3>
               <span
                 className={`text-xs px-2.5 py-0.5 rounded-full border font-bold flex items-center gap-1.5 ${
-                  selectedOnu.status === 'Online'
+                  onuStatus(selectedOnu) === 'disabled' ? 'bg-yellow-950/80 text-yellow-300 border-yellow-700/60' : selectedOnu.status === 'Online'
                     ? 'bg-cyan-950/80 text-cyan-300 border-cyan-700/60'
                     : 'bg-rose-950/80 text-rose-300 border-rose-700/60'
                 }`}
               >
-                <span className={`w-1.5 h-1.5 rounded-full ${selectedOnu.status === 'Online' ? 'bg-cyan-400 animate-pulse' : 'bg-rose-400'}`} />
-                {selectedOnu.status === 'Online' ? 'Online' : 'Fora de Funcionamento'}
+                <span className={`w-1.5 h-1.5 rounded-full ${onuStatus(selectedOnu) === 'disabled' ? 'bg-yellow-400' : selectedOnu.status === 'Online' ? 'bg-cyan-400 animate-pulse' : 'bg-rose-400'}`} />
+                {onuStatus(selectedOnu) === 'disabled' ? 'Desativado' : selectedOnu.status === 'Online' ? 'Online' : 'Fora de Funcionamento'}
               </span>
-              <span className="text-xs px-2 py-0.5 rounded bg-[#1f2430] border border-white/10 text-slate-300 font-mono">
+              {selectedOnu.catalog_number === undefined && <span className="text-xs px-2 py-0.5 rounded bg-[#1f2430] border border-white/10 text-slate-300 font-mono">
                 {selectedOnu.port} • ID #{selectedOnu.id}
-              </span>
+              </span>}
             </div>
             <button
               onClick={() => setSelectedOnu(null)}
@@ -724,11 +847,12 @@ export const MapView: React.FC<MapViewProps> = React.memo(({
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-slate-300 pt-2 border-t border-white/10">
             <div className="space-y-1">
               <div>📍 <span className="text-slate-400">Localização / Rua:</span> <strong className="text-white">{selectedOnu.desc || 'Não especificada'}</strong></div>
-              <div>📟 <span className="text-slate-400">MAC / Serial:</span> <span className="font-mono text-cyan-300">{selectedOnu.serial || '-'}</span></div>
-              <div>🏭 <span className="text-slate-400">Fabricante:</span> <span className="text-white">{selectedOnu.vendor || 'C-Data'}</span></div>
+              {selectedOnu.catalog_number === undefined ? <><div>📟 <span className="text-slate-400">MAC / Serial:</span> <span className="font-mono text-cyan-300">{selectedOnu.serial || '-'}</span></div>
+              <div>🏭 <span className="text-slate-400">Fabricante:</span> <span className="text-white">{selectedOnu.vendor || '—'}</span></div></> : <div className="text-yellow-300">Ponto desativado · sem ONU vinculada</div>}
             </div>
             <div className="space-y-1">
-              <div>📶 <span className="text-slate-400">Sinal / Uptime:</span> <span className="font-mono text-emerald-400">{selectedOnu.signal || selectedOnu.uptime || '-21.4 dBm'}</span></div>
+              {selectedOnu.catalog_number === undefined && <><div>📶 <span className="text-slate-400">Sinal:</span> <span className="font-mono text-emerald-400">{signalValue(selectedOnu)}</span></div>
+              <div><span className="text-slate-400">UPTime:</span> <span className="font-mono">{onuStatus(selectedOnu) === 'disabled' ? '—' : selectedOnu.uptime || '—'}</span></div></>}
               <div>🌐 <span className="text-slate-400">Coordenadas:</span> <span className="font-mono text-cyan-400">{Number(selectedOnu.latitude).toFixed(5)}, {Number(selectedOnu.longitude).toFixed(5)}</span></div>
               {selectedOnu.cameras && selectedOnu.cameras.length > 0 && (
                 <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
@@ -746,7 +870,7 @@ export const MapView: React.FC<MapViewProps> = React.memo(({
             </div>
           </div>
 
-          {onEditOnu && (
+          {onEditOnu && selectedOnu.catalog_number === undefined && (
             <div className="flex justify-end pt-2.5 mt-2 border-t border-white/10">
               <button
                 onClick={() => onEditOnu(selectedOnu)}
@@ -779,6 +903,16 @@ export const MapView: React.FC<MapViewProps> = React.memo(({
           filter: drop-shadow(0 6px 14px rgba(0, 0, 0, 0.9));
           z-index: 9999 !important;
         }
+        .pin-onu-numbered { width: 32px; height: 42px; filter: none; }
+        .pin-onu-numbered:hover { filter: none; }
+        .pin-onu-numbered.pin-disabled { height: 32px; transform-origin: center; }
+        .pin-point-number { font-family: 'Segoe UI', Arial, sans-serif; font-weight: 700; font-variant-numeric: tabular-nums; }
+        .marker-cluster.ajin-cluster { animation: none !important; filter: none; transition: none; }
+        .marker-cluster.ajin-cluster div { box-shadow: none !important; }
+        .marker-cluster-disabled { background: #ffd54a60; }
+        .marker-cluster-disabled div { background: #ffd54a; color: #263d50; border: 2px solid white; text-align: center; font-weight: 800; }
+        .marker-cluster-unknown { background: #8796a460; }
+        .marker-cluster-unknown div { background: #657485; color: white; border: 2px solid white; text-align: center; font-weight: 800; }
         .pin-online .pin-halo {
           animation: pulse-halo-green 2.2s infinite ease-in-out;
         }

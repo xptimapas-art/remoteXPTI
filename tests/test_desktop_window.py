@@ -1,11 +1,31 @@
 import ctypes
 from ctypes import wintypes as w
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 from desktop_window import DesktopWindow, _MINMAXINFO, _MONITORINFO
 
 
 class DesktopDragTests(unittest.TestCase):
+    def test_installed_client_never_accepts_dev_commands(self):
+        bridge = DesktopWindow(development=False)
+        bridge._bind_dev_controls(reload=MagicMock(), stop=MagicMock())
+        self.assertEqual(bridge._dev_callbacks, {})
+        bridge._dev_messages[123] = MagicMock()
+        with patch('desktop_window.threading.Thread') as thread:
+            self.assertFalse(bridge._dispatch_dev_command(123))
+        thread.assert_not_called()
+
+    def test_dev_command_runs_off_window_message_thread_and_unknown_is_ignored(self):
+        bridge = DesktopWindow(development=True)
+        callback = MagicMock()
+        bridge._dev_messages[123] = callback
+        with patch('desktop_window.threading.Thread') as thread:
+            self.assertTrue(bridge._dispatch_dev_command(123))
+            thread.assert_called_once_with(target=callback, daemon=True)
+            thread.return_value.start.assert_called_once()
+            self.assertFalse(bridge._dispatch_dev_command(999))
+        callback.assert_not_called()
+
     def test_integrated_frame_does_not_label_installed_clients_as_development(self):
         for development in (False, True):
             state = DesktopWindow(development=development).window_state()

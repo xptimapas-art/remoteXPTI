@@ -7,6 +7,7 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 import json
+import math
 import os
 import sys
 from pathlib import Path
@@ -17,7 +18,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import uvicorn
 
 from ajin_manager import AjinManager
@@ -138,6 +139,7 @@ async def on_startup():
 
 # Cache de coordenadas de ONUs da Ajin
 onu_coordinates: Dict[str, Dict[str, Any]] = {}
+onu_coordinates_lock = threading.RLock()
 
 def _load_onu_coordinates():
     global onu_coordinates
@@ -162,31 +164,56 @@ def _load_onu_coordinates():
     except Exception as e:
         log.warning(f"[DesktopBackend] Falha ao carregar onu_coordinates.json: {e}")
 
-def _save_onu_coordinates():
+def _save_onu_coordinates(data=None):
     try:
         from config_manager import get_config_dir
         coords_file = get_config_dir() / "onu_coordinates.json"
-        with open(coords_file, "w", encoding="utf-8") as f:
-            json.dump(onu_coordinates, f, indent=2, ensure_ascii=False)
+        temporary = coords_file.with_suffix('.json.tmp')
+        with temporary.open("w", encoding="utf-8") as f:
+            json.dump(onu_coordinates if data is None else data, f, indent=2, ensure_ascii=False)
+        temporary.replace(coords_file)
     except Exception as e:
         log.warning(f"[DesktopBackend] Falha ao salvar onu_coordinates.json: {e}")
+        raise HTTPException(status_code=500, detail='Não foi possível salvar as coordenadas neste PC.') from e
+
+
+def _validate_onu_coordinates(latitude, longitude):
+    if (latitude is None) != (longitude is None):
+        raise HTTPException(status_code=422, detail='Informe latitude e longitude juntas, ou deixe ambas vazias.')
+    if latitude is not None and (not math.isfinite(latitude) or not math.isfinite(longitude)
+                                or not -90 <= latitude <= 90 or not -180 <= longitude <= 180):
+        raise HTTPException(status_code=422, detail='Latitude ou longitude fora do intervalo válido.')
+
+
+def _store_onu_location(req):
+    global onu_coordinates
+    key = f'{req.port}_{req.onu_id}'
+    with onu_coordinates_lock:
+        updated = dict(onu_coordinates)
+        if req.latitude is None:
+            updated.pop(key, None)
+        else:
+            updated[key] = {'latitude':req.latitude, 'longitude':req.longitude,
+                            'name':req.name or '', 'desc':req.desc or '',
+                            'port':req.port, 'onu_id':req.onu_id}
+        _save_onu_coordinates(updated)
+        onu_coordinates = updated
+    return key
 
 def _enrich_ajin_telemetry(data: Dict[str, Any]) -> Dict[str, Any]:
     if not data or not isinstance(data, dict):
         return data
     res = dict(data)
+    coordinates = onu_coordinates
     rows = res.get("rows", [])
     enriched_rows = []
     for r in rows:
         rc = dict(r)
         k = f"{rc.get('port')}_{rc.get('id')}"
-        if k in onu_coordinates:
-            c = onu_coordinates[k]
+        if k in coordinates and not rc.get('coordinates_shared'):
+            c = coordinates[k]
             rc["latitude"] = c.get("latitude")
             rc["longitude"] = c.get("longitude")
-        else:
-            rc["latitude"] = None
-            rc["longitude"] = None
         enriched_rows.append(rc)
     res["rows"] = enriched_rows
     return res
@@ -304,6 +331,22 @@ class EditLabelRequest(BaseModel):
     desc: str = ""
     latitude: Optional[float] = None
     longitude: Optional[float] = None
+    notes: Optional[str] = Field(default=None, max_length=4000)
+    map_enabled: Optional[bool] = None
+
+class AjinOnuRequest(BaseModel):
+    port: str = Field(min_length=1, max_length=80)
+    onu_id: str = Field(min_length=1, max_length=32)
+
+class AjinDeviceRequest(BaseModel):
+    port: str = Field(min_length=1, max_length=80)
+    id: str = Field(min_length=1, max_length=32)
+    serial: str = Field(min_length=1, max_length=100)
+    name: str = Field(default='', max_length=120)
+    desc: str = Field(default='', max_length=300)
+
+class AjinRegisterRequest(BaseModel):
+    devices: List[AjinDeviceRequest] = Field(min_length=1, max_length=200)
 
 class SetOnuLocationRequest(BaseModel):
     port: str
@@ -949,45 +992,61 @@ def get_ajin_telemetry():
 
 @app.post("/api/ajin/refresh")
 def force_refresh_ajin():
-    ajin_mgr.fetch_telemetry_async(force=True)
-    return {"status": "refreshing"}
+    completed, outcome = threading.Event(), []
+    ajin_mgr.fetch_telemetry_async(force=True, callback=lambda ok: (outcome.append(ok), completed.set()))
+    if not completed.wait(10):
+        raise HTTPException(status_code=504, detail='O coletor demorou para responder. Tente novamente.')
+    if not outcome[0]:
+        raise HTTPException(status_code=502, detail='Não foi possível consultar o coletor AJIN. A última coleta foi preservada.')
+    return {'status':'updated', 'telemetry':_enrich_ajin_telemetry(ajin_mgr.get_data())}
 
 @app.post("/api/ajin/label")
 def save_ajin_label(req: EditLabelRequest):
-    ajin_mgr.update_label(req.port, req.onu_id, req.name, req.desc)
-    k = f"{req.port}_{req.onu_id}"
-    if req.latitude is not None and req.longitude is not None:
-        onu_coordinates[k] = {
-            "latitude": req.latitude,
-            "longitude": req.longitude,
-            "name": req.name or "",
-            "desc": req.desc or "",
-            "port": req.port,
-            "onu_id": req.onu_id,
-        }
-        _save_onu_coordinates()
-    elif k in onu_coordinates:
-        onu_coordinates[k]["name"] = req.name or ""
-        onu_coordinates[k]["desc"] = req.desc or ""
-        _save_onu_coordinates()
+    _validate_onu_coordinates(req.latitude, req.longitude)
+    changes = {} if req.notes is None else {'notes':req.notes}
+    if req.map_enabled is not None:
+        changes['map_enabled'] = req.map_enabled
+    if {'latitude', 'longitude'} & req.model_fields_set:
+        changes.update(latitude=req.latitude, longitude=req.longitude)
+    if not ajin_mgr.update_label(req.port, req.onu_id, req.name, req.desc, **changes):
+        raise HTTPException(status_code=502, detail='O coletor não confirmou a alteração da identificação. Tente novamente.')
+    if {'latitude', 'longitude'} & req.model_fields_set:
+        _store_onu_location(req)
     broadcast_ws({"type": "telemetry_update", "data": _enrich_ajin_telemetry(ajin_mgr.get_data())})
-    return {"status": "saved"}
+    return {"status": "saved", 'telemetry':_enrich_ajin_telemetry(ajin_mgr.get_data())}
+
+@app.get('/api/ajin/scan')
+def scan_ajin_onus():
+    try:
+        return ajin_mgr.scan_onus()
+    except Exception:
+        raise HTTPException(status_code=502, detail='Não foi possível consultar o Scanner no coletor AJIN. Tente novamente.')
+
+@app.post('/api/ajin/onu/delete')
+def delete_ajin_onu(req: AjinOnuRequest):
+    if not ajin_mgr.delete_onu(req.port, req.onu_id):
+        raise HTTPException(status_code=502, detail='O coletor não confirmou a exclusão. O ponto foi preservado no aplicativo.')
+    return {'status':'deleted', 'telemetry':_enrich_ajin_telemetry(ajin_mgr.get_data())}
+
+@app.post('/api/ajin/register')
+def register_ajin_onus(req: AjinRegisterRequest):
+    devices = [device.model_dump() for device in req.devices]
+    if len({(device['port'], device['id']) for device in devices}) != len(devices):
+        raise HTTPException(status_code=422, detail='A seleção contém ONUs repetidas.')
+    try:
+        confirmed = ajin_mgr.register_onus(devices)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except Exception:
+        raise HTTPException(status_code=502, detail='Não foi possível conferir a descoberta no coletor AJIN.')
+    if not confirmed:
+        raise HTTPException(status_code=502, detail='O coletor não confirmou a homologação. Re-escaneie antes de tentar novamente.')
+    return {'status':'registered', 'count':len(devices)}
 
 @app.post("/api/ajin/onu/location")
 def set_onu_location(req: SetOnuLocationRequest):
-    k = f"{req.port}_{req.onu_id}"
-    if req.latitude is None and req.longitude is None:
-        onu_coordinates.pop(k, None)
-    else:
-        onu_coordinates[k] = {
-            "latitude": req.latitude,
-            "longitude": req.longitude,
-            "name": req.name or "",
-            "desc": req.desc or "",
-            "port": req.port,
-            "onu_id": req.onu_id,
-        }
-    _save_onu_coordinates()
+    _validate_onu_coordinates(req.latitude, req.longitude)
+    k = _store_onu_location(req)
     broadcast_ws({"type": "telemetry_update", "data": _enrich_ajin_telemetry(ajin_mgr.get_data())})
     return {"status": "ok", "saved": k}
 

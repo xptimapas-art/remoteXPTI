@@ -47,7 +47,7 @@ export function TitleBar({ currentTab, setCurrentTab, searchTerm, setSearchTerm,
         <button type="button" className="xpti-window-close" aria-label="Fechar janela" title="Fechar" onClick={() => void api?.close().catch(console.error)}><span className="xpti-system-icon" aria-hidden="true">{'\uE8BB'}</span></button>
       </div>}
     </header>
-    {currentTab !== 'doors' && <div className="xpti-server-tools" aria-label="Ferramentas de servidores">
+    {(currentTab === 'servers' || currentTab === 'map') && <div className="xpti-server-tools" aria-label="Ferramentas de servidores">
       <label className="xpti-search"><Search aria-hidden="true" /><input aria-label="Buscar servidor" placeholder="Buscar servidor, IP ou grupo…" value={searchTerm} onChange={event => setSearchTerm(event.target.value)} /></label>
       <select aria-label="Filtrar grupo" value={selectedGroup} onChange={event => setSelectedGroup(event.target.value)}>
         <option value="Todos os Grupos">Todos os Grupos</option>{groups.map(group => <option key={group} value={group}>{group}</option>)}</select>
