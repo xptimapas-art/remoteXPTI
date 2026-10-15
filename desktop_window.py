@@ -3,6 +3,17 @@ import ctypes
 from ctypes import wintypes as w
 
 
+class _MINMAXINFO(ctypes.Structure):
+    _fields_ = [('ptReserved', w.POINT), ('ptMaxSize', w.POINT),
+                ('ptMaxPosition', w.POINT), ('ptMinTrackSize', w.POINT),
+                ('ptMaxTrackSize', w.POINT)]
+
+
+class _MONITORINFO(ctypes.Structure):
+    _fields_ = [('cbSize', w.DWORD), ('rcMonitor', w.RECT),
+                ('rcWork', w.RECT), ('dwFlags', w.DWORD)]
+
+
 class DesktopWindow:
     def __init__(self, development=False):
         self._development = bool(development)
@@ -29,10 +40,14 @@ class DesktopWindow:
 
     def _install_frame(self):
         def install():
-            from System.Windows.Forms import Screen
+            from System.Drawing import Rectangle
             native = self._window.native
+            if self._procedure and self._hwnd == native.Handle.ToInt64():
+                return
             self._hwnd = native.Handle.ToInt64()
-            native.MaximizedBounds = Screen.FromHandle(native.Handle).WorkingArea
+            # Absolute screen coordinates in MaximizedBounds displace secondary
+            # monitor windows. WM_GETMINMAXINFO below supplies monitor offsets.
+            native.MaximizedBounds = Rectangle.Empty
             self._user = ctypes.WinDLL('user32', use_last_error=True)
             result = ctypes.c_ssize_t
             callback = ctypes.WINFUNCTYPE(result, w.HWND, w.UINT, w.WPARAM, w.LPARAM)
@@ -45,6 +60,8 @@ class DesktopWindow:
                 (self._user.ReleaseCapture, [], w.BOOL),
                 (self._user.GetCursorPos, [ctypes.POINTER(w.POINT)], w.BOOL),
                 (self._user.IsZoomed, [w.HWND], w.BOOL),
+                (self._user.MonitorFromWindow, [w.HWND, w.DWORD], w.HANDLE),
+                (self._user.GetMonitorInfoW, [w.HANDLE, ctypes.POINTER(_MONITORINFO)], w.BOOL),
             ):
                 function.argtypes, function.restype = arguments, returns
 
@@ -53,7 +70,10 @@ class DesktopWindow:
                 # Remove the non-client frame while retaining the Windows resize styles.
                 if message == 0x0083 and word:  # WM_NCCALCSIZE
                     return 0
-                return self._user.CallWindowProcW(self._previous, hwnd, message, word, long)
+                value = self._user.CallWindowProcW(self._previous, hwnd, message, word, long)
+                if message == 0x0024 and long:  # WM_GETMINMAXINFO
+                    self._constrain_maximize(hwnd, long)
+                return value
 
             self._procedure = procedure  # Keep the callback alive for the HWND's lifetime.
             ctypes.set_last_error(0)
@@ -65,6 +85,26 @@ class DesktopWindow:
             self._user.SetWindowLongPtrW(self._hwnd, -16, style)
             self._user.SetWindowPos(self._hwnd, None, 0, 0, 0, 0, 0x27)  # FRAMECHANGED, NOMOVE, NOSIZE, NOZORDER
         self._on_ui(install)
+
+    def _constrain_maximize(self, hwnd, address):
+        # Use physical coordinates from one API for both rectangles, including
+        # negative monitor origins and taskbars on any edge. Requery each time
+        # Windows maximizes (button, double click, keyboard or drag to screen top).
+        monitor = self._user.MonitorFromWindow(hwnd, 2)  # MONITOR_DEFAULTTONEAREST
+        if not monitor:
+            return
+        info = _MONITORINFO()
+        info.cbSize = ctypes.sizeof(info)
+        if not self._user.GetMonitorInfoW(monitor, ctypes.byref(info)):
+            return
+        width = info.rcWork.right - info.rcWork.left
+        height = info.rcWork.bottom - info.rcWork.top
+        if width <= 0 or height <= 0:
+            return
+        limits = ctypes.cast(address, ctypes.POINTER(_MINMAXINFO)).contents
+        limits.ptMaxPosition.x = info.rcWork.left - info.rcMonitor.left
+        limits.ptMaxPosition.y = info.rcWork.top - info.rcMonitor.top
+        limits.ptMaxSize.x, limits.ptMaxSize.y = width, height
 
     def window_state(self):
         return {'integrated': True, 'development': self._development,
@@ -79,15 +119,12 @@ class DesktopWindow:
         self._window.minimize()
 
     def toggle_maximize(self):
-        if self.window_state()['maximized']:
-            self._window.restore()
-        else:
-            def maximize():
-                from System.Windows.Forms import Screen
-                native = self._window.native
-                native.MaximizedBounds = Screen.FromHandle(native.Handle).WorkingArea
+        def toggle():
+            if self.window_state()['maximized']:
+                self._window.restore()
+            else:
                 self._window.maximize()
-            self._on_ui(maximize)
+        self._on_ui(toggle)
 
     def close(self):
         # Preserve the app's existing closing event and tray behavior.
