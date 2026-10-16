@@ -25,6 +25,7 @@ from web_map_manager import WebMapManager
 from logger import log
 from config_manager import ConfigManager
 from cloud_sync import CloudSyncManager
+from connection_health import ConnectionHealthMonitor, PROBE_TIMEOUT_SECONDS
 from splash_screen import SplashScreen, SplashProcessManager
 from ajin_view import AjinView
 
@@ -172,21 +173,12 @@ def sync_windows_shortcuts_icon():
     usem o ícone oficial moderno (squircle escuro arredondado com o X estilizado),
     notificando o Windows Shell para atualizar a exibição imediatamente.
     """
-    if sys.platform != "win32":
+    if sys.platform != "win32" or not getattr(sys, "frozen", False):
         return
 
     try:
-        if getattr(sys, "frozen", False):
-            current_exe = Path(sys.executable).resolve()
-            app_dir = current_exe.parent
-        else:
-            # Em modo de desenvolvimento/testes, nunca aponte atalhos para python.exe
-            local_installed = Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "RemoteXPTI" / "RemoteXPTI.exe"
-            if local_installed.exists():
-                current_exe = local_installed
-                app_dir = local_installed.parent
-            else:
-                return  # Não altera atalhos em modo dev sem app instalado
+        current_exe = Path(sys.executable).resolve()
+        app_dir = current_exe.parent
 
         icon_file = app_dir / "imagens" / "app_icon.ico"
         if not icon_file.exists():
@@ -448,7 +440,8 @@ class RemoteXPTIApp(ctk.CTk):
         # e evitar qualquer flickering, renderização parcial ou botões se alinhando na tela
         self.withdraw()
 
-        self.title("RemoteXPTI - RDP Quick Launcher")
+        from runtime_paths import get_window_title
+        self.title(get_window_title())
         self.geometry("1100x720")
         self.minsize(860, 520)
 
@@ -498,6 +491,8 @@ class RemoteXPTIApp(ctk.CTk):
         self.server_status: Dict[str, Tuple[bool, str]] = {}
         # Rastreamento de tempo de inatividade (loss/offline) por servidor: server_id -> timestamp float
         self.server_downtime: Dict[str, float] = {}
+        self.health_monitor = ConnectionHealthMonitor()
+        self._status_lock = threading.RLock()
         self._load_downtime_history()
         self.view_mode = "grade"
         self.filtered_servers: List[Dict[str, Any]] = list(self.storage.servers)
@@ -861,9 +856,10 @@ class RemoteXPTIApp(ctk.CTk):
 
     def _sync_servers_from_cloud(self):
         try:
+            revision = self.storage.revision
             remote = CloudSyncManager.fetch_servers()
             if remote is not None:
-                changed, added, updated = self.storage.merge_cloud_servers(remote)
+                changed, added, updated = self.storage.merge_cloud_servers(remote, expected_revision=revision)
                 if changed:
                     PreviewManager.invalidate_cache()
                     self._action_queue.put(self._on_cloud_sync_applied)
@@ -1450,22 +1446,15 @@ class RemoteXPTIApp(ctk.CTk):
 
         def check_worker(server_id: str, host: str, port: int):
             try:
-                is_online, msg = RDPManager.check_connection(host, port, timeout=1.5)
-                # Salva no cache de status
-                self.server_status[server_id] = (is_online, msg)
-                
-                # Gerencia o rastreador de tempo de loss / downtime com persistência em disco
-                changed = False
-                if not is_online:
-                    if server_id not in self.server_downtime:
-                        self.server_downtime[server_id] = time.time()
-                        changed = True
-                else:
-                    if server_id in self.server_downtime:
-                        self.server_downtime.pop(server_id, None)
-                        changed = True
-                if changed:
-                    self._save_downtime_history()
+                reachable, probe_msg = RDPManager.check_connection(host, port, timeout=PROBE_TIMEOUT_SECONDS)
+                with self._status_lock:
+                    status, changed = self.health_monitor.observe(
+                        server_id, reachable, probe_msg, target=(host, port))
+                    is_online, msg = status['is_online'], status['msg']
+                    self.server_status[server_id] = (is_online, msg)
+                    self.server_downtime = self.health_monitor.downtime()
+                    if changed:
+                        self._save_downtime_history()
                 
                 # Atualiza o card da grade suavemente apenas quando o resultado chegar
                 def update_ui():
@@ -1536,7 +1525,8 @@ class RemoteXPTIApp(ctk.CTk):
                 with open(hist_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
                     if isinstance(data, dict):
-                        self.server_downtime = {str(k): float(v) for k, v in data.items()}
+                        self.health_monitor.restore(data)
+                        self.server_downtime = self.health_monitor.downtime()
                         log.info(f"[RemoteXPTI] Histórico de downtime carregado do disco: {len(self.server_downtime)} servidores em falha.")
         except Exception as e:
             log.warning(f"[RemoteXPTI] Falha ao carregar downtime_history.json: {e}")
@@ -1546,8 +1536,9 @@ class RemoteXPTIApp(ctk.CTk):
         try:
             from config_manager import get_config_dir
             hist_file = get_config_dir() / "downtime_history.json"
-            with open(hist_file, "w", encoding="utf-8") as f:
-                json.dump(self.server_downtime, f, indent=2)
+            with self._status_lock:
+                from update_engine import write_json_atomic
+                write_json_atomic(hist_file, self.server_downtime)
         except Exception as e:
             log.warning(f"[RemoteXPTI] Falha ao salvar downtime_history.json: {e}")
 
@@ -1720,10 +1711,13 @@ class RemoteXPTIApp(ctk.CTk):
                 except Exception:
                     pass
             # Remove do cache de status e histórico de downtime
-            self.server_status.pop(server_id, None)
-            if server_id in self.server_downtime:
-                self.server_downtime.pop(server_id, None)
-                self._save_downtime_history()
+            with self._status_lock:
+                was_offline = server_id in self.server_downtime
+                self.health_monitor.forget(server_id)
+                self.server_status.pop(server_id, None)
+                self.server_downtime = self.health_monitor.downtime()
+                if was_offline:
+                    self._save_downtime_history()
             
             # Destrói o card da interface
             if server_id in self.card_widgets:

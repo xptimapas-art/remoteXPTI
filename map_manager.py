@@ -7,12 +7,11 @@ import re
 import sys
 from pathlib import Path
 from typing import Dict, Tuple, Optional, Any
+from runtime_paths import get_data_dir
 
 
 def get_app_dir() -> Path:
-    if getattr(sys, "frozen", False):
-        return Path(sys.executable).parent
-    return Path(__file__).parent.resolve()
+    return get_data_dir()
 
 
 def get_map_cache_path() -> Path:
@@ -157,7 +156,7 @@ def resolve_server_coordinates(server: Dict[str, Any]) -> Optional[Tuple[float, 
 
     # Correspondência parcial no nome
     for city, coords in SC_COORDINATES.items():
-        if city in name_norm or name_norm in city:
+        if name_norm and (city in name_norm or name_norm in city):
             return coords
 
     # Correspondência no grupo

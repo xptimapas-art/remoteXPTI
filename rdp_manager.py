@@ -1,10 +1,11 @@
+import os
 import subprocess
-import socket
 import sys
 import tempfile
 from pathlib import Path
 from typing import Tuple, Optional
 from logger import log
+from connection_probe import probe_connection
 
 class RDPManager:
     """Gerencia conexões RDP, injeção de credenciais via cmdkey e testes de conectividade."""
@@ -14,41 +15,12 @@ class RDPManager:
         return sys.platform == "win32"
 
     @staticmethod
-    def check_connection(host: str, port: int = 3389, timeout: float = 1.2) -> Tuple[bool, str]:
+    def check_connection(host: str, port: int = 3389, timeout: float = 1.2) -> Tuple[Optional[bool], str]:
         """
         Testa rapidamente se a porta RDP do servidor está respondendo.
-        Retorna (is_online, mensagem).
+        Retorna (respondeu, mensagem); None indica erro local/inconclusivo.
         """
-        if not host:
-            return False, "Host vazio"
-
-        # Se o host vier no formato host:porta, separar
-        clean_host = host
-        target_port = port
-        if ":" in host:
-            parts = host.split(":", 1)
-            clean_host = parts[0]
-            try:
-                target_port = int(parts[1])
-            except ValueError:
-                target_port = port
-
-        try:
-            # Resolve DNS ou conecta direto via IPv4/IPv6
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(timeout)
-            result = sock.connect_ex((clean_host, target_port))
-            sock.close()
-            if result == 0:
-                return True, f"Online ({clean_host}:{target_port})"
-            else:
-                return False, f"Porta {target_port} fechada ou filtrada"
-        except socket.gaierror:
-            return False, "Falha ao resolver DNS"
-        except socket.timeout:
-            return False, "Tempo de resposta esgotado (Timeout)"
-        except Exception as e:
-            return False, f"Erro de rede: {str(e)}"
+        return probe_connection(host, port, timeout)
 
     @staticmethod
     def set_windows_credential(host: str, port: int, username: str, password: str) -> Tuple[bool, str]:
@@ -199,23 +171,50 @@ class RDPManager:
         temp_dir = Path(tempfile.gettempdir())
         clean_name = clean_host.replace(".", "_").replace(":", "_")
         rdp_file = temp_dir / f"remotexpti_{clean_name}.rdp"
+        has_rdp_file = False
         try:
-            rdp_file.write_text("\r\n".join(rdp_lines) + "\r\n", encoding="utf-16")
-            cmd = ["mstsc", str(rdp_file)]
-        except Exception:
-            cmd = ["mstsc", f"/v:{target_v}"]
+            # Escreve arquivo .rdp com formato padrão oficial do Windows (UTF-16LE com BOM b"\xff\xfe")
+            # usando write_bytes com \r\n explícito para evitar duplicação \r\r\n
+            content_str = "\r\n".join(rdp_lines) + "\r\n"
+            rdp_file.write_bytes(b"\xff\xfe" + content_str.encode("utf-16le"))
+            has_rdp_file = True
+        except Exception as e:
+            log.warning(f"[RDPManager] Falha ao criar arquivo temporário .rdp: {e}")
 
-        if fullscreen:
-            cmd.append("/f")
-        if admin_mode:
-            cmd.append("/admin")
-        if multimon:
-            cmd.append("/multimon")
+        # 1. Se o arquivo .rdp foi gerado com sucesso, tenta abrir via os.startfile (ShellExecute)
+        # Isso garante integração nativa com o Windows Shell e foco automático na tela do usuário
+        if has_rdp_file and hasattr(os, "startfile"):
+            try:
+                os.startfile(str(rdp_file))
+                log.info(f"[RDPManager] Cliente mstsc iniciado com sucesso via ShellExecute para {target_v}")
+                return True, f"Conexão iniciada com {target_v}"
+            except Exception as e:
+                log.warning(f"[RDPManager] os.startfile falhou ({e}), tentando via subprocess.Popen...")
+
+        # 2. Fallback via subprocess.Popen com STARTUPINFO visível (SW_SHOWNORMAL) e sem CREATE_NO_WINDOW
+        cmd = ["mstsc.exe"]
+        if has_rdp_file:
+            cmd.append(str(rdp_file))
+        else:
+            cmd.append(f"/v:{target_v}")
+            if fullscreen:
+                cmd.append("/f")
+            if admin_mode:
+                cmd.append("/admin")
+            if multimon:
+                cmd.append("/multimon")
 
         try:
-            creation_flags = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
-            subprocess.Popen(cmd, creationflags=creation_flags)
-            log.info(f"[RDPManager] Cliente mstsc iniciado com sucesso para {target_v}")
+            si = subprocess.STARTUPINFO()
+            si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            si.wShowWindow = 1  # SW_SHOWNORMAL (Garante que a janela RDP seja aberta visível e não oculta)
+
+            flags = 0
+            if sys.platform == "win32":
+                flags = 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+
+            subprocess.Popen(cmd, startupinfo=si, creationflags=flags)
+            log.info(f"[RDPManager] Cliente mstsc iniciado com sucesso via Popen para {target_v}")
             return True, f"Conexão iniciada com {target_v}"
         except Exception as e:
             log.error(f"[RDPManager] Erro ao iniciar mstsc para {target_v}: {e}", exc_info=True)

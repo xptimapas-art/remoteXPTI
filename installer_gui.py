@@ -9,6 +9,7 @@ from PIL import Image
 import customtkinter as ctk
 from typing import Optional
 from version import CURRENT_VERSION
+from install_safety import validate_install_dir, close_installed_app
 
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
@@ -29,13 +30,14 @@ def create_windows_shortcut(target: Path, shortcut_dest: Path, description: str 
     """Cria atalho .lnk no Windows com o ícone oficial estilizado (squircle escuro + X)."""
     if not icon_path or not icon_path.exists():
         icon_path = target
+    ps_literal = lambda value: str(value).replace("'", "''")
     script = f"""
     $WshShell = New-Object -ComObject WScript.Shell
-    $Shortcut = $WshShell.CreateShortcut('{str(shortcut_dest)}')
-    $Shortcut.TargetPath = '{str(target)}'
-    $Shortcut.WorkingDirectory = '{str(target.parent)}'
-    $Shortcut.Description = '{description}'
-    $Shortcut.IconLocation = '{str(icon_path)},0'
+    $Shortcut = $WshShell.CreateShortcut('{ps_literal(shortcut_dest)}')
+    $Shortcut.TargetPath = '{ps_literal(target)}'
+    $Shortcut.WorkingDirectory = '{ps_literal(target.parent)}'
+    $Shortcut.Description = '{ps_literal(description)}'
+    $Shortcut.IconLocation = '{ps_literal(icon_path)},0'
     $Shortcut.Save()
     """
     creation_flags = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
@@ -150,7 +152,7 @@ class SetupApp(ctk.CTk):
         self.chk_startmenu.select()
         self.chk_startmenu.pack(anchor="w", padx=16, pady=6)
 
-        self.chk_servers = ctk.CTkCheckBox(opts_box, text="Importar lista de servidores pré-configurados", font=ctk.CTkFont(size=12))
+        self.chk_servers = ctk.CTkCheckBox(opts_box, text="Criar configuração inicial de servidores", font=ctk.CTkFont(size=12))
         self.chk_servers.select()
         self.chk_servers.pack(anchor="w", padx=16, pady=6)
 
@@ -205,22 +207,14 @@ class SetupApp(ctk.CTk):
         threading.Thread(target=self._run_install_steps, daemon=True).start()
 
     def _run_install_steps(self):
-        target_dir = Path(self.entry_dir.get())
-        
         try:
-            # 0. Encerra qualquer instância aberta do RemoteXPTI para liberar o arquivo executável
-            self.lbl_progress.configure(text="Fechando instâncias abertas do RemoteXPTI...")
-            creation_flags = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
-            subprocess.run(["taskkill", "/F", "/IM", "RemoteXPTI.exe"], capture_output=True, creationflags=creation_flags)
-            time.sleep(0.5)
-
-            # 1. Cria diretório de instalação se não existir
-            self.lbl_progress.configure(text="Preparando diretório de instalação...")
+            target_dir = validate_install_dir(self.entry_dir.get())
+            self.lbl_progress.configure(text="Passo 1: Fechando esta instalação do RemoteXPTI...")
+            close_installed_app(target_dir)
             target_dir.mkdir(parents=True, exist_ok=True)
-            time.sleep(0.2)
 
             # 2. Copia RemoteXPTI.exe embutido (com retry caso o Windows demore a liberar o processo)
-            self.lbl_progress.configure(text="Atualizando RemoteXPTI.exe...")
+            self.lbl_progress.configure(text="Passo 3: Copiando arquivos atualizados...")
             source_exe = get_bundle_resource("app_payload.bin")
             if not source_exe.exists():
                 source_exe = get_bundle_resource("RemoteXPTI.exe")
@@ -229,76 +223,29 @@ class SetupApp(ctk.CTk):
             if not source_exe.exists():
                 raise FileNotFoundError(f"Arquivo executável não encontrado: {source_exe}")
 
-            copied = False
+            staged_exe = target_dir / "RemoteXPTI.installing.exe"
+            shutil.copy2(source_exe, staged_exe)
+            with staged_exe.open("rb") as stream:
+                if stream.read(2) != b"MZ":
+                    raise ValueError("O pacote não contém um executável Windows válido.")
+            if dest_exe.exists():
+                shutil.copy2(dest_exe, target_dir / "RemoteXPTI.previous.exe")
             for attempt in range(4):
                 try:
-                    shutil.copy2(source_exe, dest_exe)
-                    copied = True
+                    staged_exe.replace(dest_exe)
                     break
                 except PermissionError:
+                    if attempt == 3:
+                        raise PermissionError("Feche esta instalação do RemoteXPTI e tente novamente.")
+                    close_installed_app(target_dir)
                     time.sleep(0.8)
-                    subprocess.run(["taskkill", "/F", "/IM", "RemoteXPTI.exe"], capture_output=True, creationflags=creation_flags)
 
-            if not copied:
-                raise PermissionError("Não foi possível sobrescrever o RemoteXPTI.exe. Verifique se o aplicativo está fechado.")
-
-            time.sleep(0.3)
-
-            # 3. Copia lista de servidores e chave de segurança (se solicitado)
+            # Pacotes novos contêm somente um template vazio, nunca credenciais.
             if self.chk_servers.get():
                 source_json = get_bundle_resource("servers.json")
                 dest_json = target_dir / "servers.json"
-                source_key = get_bundle_resource(".secret.key")
-                dest_key = target_dir / ".secret.key"
-
-                if source_json.exists():
-                    self.lbl_progress.configure(text="Atualizando lista de servidores...")
-                    # Se não existir, copia direto
-                    if not dest_json.exists():
-                        shutil.copy2(source_json, dest_json)
-                    else:
-                        # Se já existir, mescla novos servidores que não estavam cadastrados
-                        try:
-                            import json
-                            with open(source_json, "r", encoding="utf-8") as f_src:
-                                src_data = json.load(f_src)
-                            with open(dest_json, "r", encoding="utf-8") as f_dst:
-                                dst_data = json.load(f_dst)
-
-                            src_servers = src_data.get("servers", [])
-                            src_by_host = {s.get("host"): s for s in src_servers if s.get("host")}
-                            src_by_name = {s.get("name"): s for s in src_servers if s.get("name")}
-
-                            # Atualiza servidores já existentes com as novas tags oficiais e usuários
-                            existing_hosts = set()
-                            existing_names = set()
-                            for dst_s in dst_data.get("servers", []):
-                                h = dst_s.get("host")
-                                n = dst_s.get("name")
-                                if h:
-                                    existing_hosts.add(h)
-                                if n:
-                                    existing_names.add(n)
-                                ref = src_by_host.get(h) or src_by_name.get(n)
-                                if ref:
-                                    dst_s["group"] = ref.get("group", dst_s.get("group"))
-                                    if ref.get("group") == "BEMTEVI":
-                                        dst_s["username"] = ref.get("username", dst_s.get("username"))
-
-                            # Adiciona novos servidores do pacote que não existiam no cliente
-                            for s in src_servers:
-                                s_host = s.get("host")
-                                s_name = s.get("name")
-                                if (s_host and s_host not in existing_hosts) or (not s_host and s_name not in existing_names):
-                                    dst_data.setdefault("servers", []).append(s)
-
-                            with open(dest_json, "w", encoding="utf-8") as f_dst:
-                                json.dump(dst_data, f_dst, indent=4, ensure_ascii=False)
-                        except Exception:
-                            pass
-
-                if source_key.exists():
-                    shutil.copy2(source_key, dest_key)
+                if source_json.exists() and not dest_json.exists():
+                    shutil.copy2(source_json, dest_json)
 
             # Copia pasta de imagens oficiais
             source_imagens = get_bundle_resource("imagens")
@@ -313,7 +260,7 @@ class SetupApp(ctk.CTk):
                             pass
 
             # 4. Cria atalhos
-            self.lbl_progress.configure(text="Criando atalhos no Windows...")
+            self.lbl_progress.configure(text="Passo 5: Criando atalhos no Windows...")
             
             dest_ico = dest_imagens / "app_icon.ico"
             if not dest_ico.exists():
@@ -321,18 +268,41 @@ class SetupApp(ctk.CTk):
             shortcut_icon = dest_ico if dest_ico.exists() else dest_exe
 
             # Atalho Desktop
+            userprofile = Path(os.environ.get("USERPROFILE", str(Path.home())))
+            desktop_candidates = [
+                userprofile / "Desktop",
+                userprofile / "OneDrive" / "Desktop",
+                userprofile / "OneDrive" / "Área de Trabalho",
+                userprofile / "Área de Trabalho",
+                Path(os.environ.get("PUBLIC", r"C:\Users\Public")) / "Desktop",
+            ]
+            real_desktop = None
+            try:
+                out = subprocess.run(
+                    ["powershell", "-NoProfile", "-Command", "[Environment]::GetFolderPath('Desktop')"],
+                    capture_output=True, text=True, timeout=10, creationflags=creation_flags
+                ).stdout.strip()
+                if out and Path(out).is_dir():
+                    real_desktop = Path(out)
+            except Exception:
+                pass
+
+            # Remove atalhos antigos/duplicados (ex.: V1 apontando para pythonw.exe)
+            for d in ([real_desktop] if real_desktop else []) + desktop_candidates:
+                try:
+                    if d and d.is_dir():
+                        for lnk in d.glob("RemoteXPTI*.lnk"):
+                            try:
+                                lnk.unlink()
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+
             if self.chk_desktop.get():
-                userprofile = Path(os.environ.get("USERPROFILE", str(Path.home())))
-                desktop_candidates = [
-                    userprofile / "Desktop",
-                    userprofile / "OneDrive" / "Desktop",
-                    userprofile / "OneDrive" / "Área de Trabalho",
-                    userprofile / "Área de Trabalho"
-                ]
-                for d in desktop_candidates:
-                    if d.exists() and d.is_dir():
-                        create_windows_shortcut(dest_exe, d / "RemoteXPTI.lnk", "RemoteXPTI - RDP Quick Launcher", shortcut_icon)
-                        break
+                targets = [real_desktop] if real_desktop else [d for d in desktop_candidates[:4] if d.is_dir()][:1]
+                for d in targets:
+                    create_windows_shortcut(dest_exe, d / "RemoteXPTI.lnk", "RemoteXPTI - RDP Quick Launcher", shortcut_icon)
 
             # Atalho Menu Iniciar
             if self.chk_startmenu.get():
@@ -367,9 +337,10 @@ class SetupApp(ctk.CTk):
             self.after(0, on_finished)
 
         except Exception as e:
+            error_message = str(e)
             def on_error():
                 self.progress_bar.stop()
-                self.lbl_progress.configure(text=f"Erro: {str(e)}", text_color="#ff5555")
+                self.lbl_progress.configure(text=f"Erro: {error_message}", text_color="#ff5555")
                 self.btn_install.configure(state="normal", text="Tentar Novamente")
                 self.btn_cancel.configure(state="normal")
 

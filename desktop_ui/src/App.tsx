@@ -1,0 +1,575 @@
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { Play, DoorClosed, DoorOpen } from 'lucide-react';
+import { TitleBar } from './components/TitleBar';
+import { UpdateBanner } from './components/UpdateBanner';
+import { ServersView } from './components/ServersView';
+import { MapView } from './components/MapView';
+import { AjinView } from './components/AjinView';
+import { ajinRows, canShowOnMap, readAjinResponse } from './components/ajin';
+import type { AjinScan, AjinTelemetry, ONUItem, Registration } from './components/ajin';
+import { DoorsView } from './components/DoorsView';
+import { DoorsSettingsModal } from './components/DoorsSettingsModal';
+import { AddServerModal } from './components/AddServerModal';
+import { EditServerModal } from './components/EditServerModal';
+import { SettingsModal } from './components/SettingsModal';
+import { toggleServerFavorite } from './components/serverRequests';
+
+const API_BASE = '';
+const WS_URL = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws/ajin`;
+
+export const App: React.FC = () => {
+  const [currentTab, setCurrentTab] = useState<'servers' | 'map' | 'ajin' | 'doors'>('servers');
+  const [servers, setServers] = useState<any[]>([]);
+  const [serverError, setServerError] = useState('');
+  const pendingFavorites = useRef(new Set<string>());
+  const [groups, setGroups] = useState<string[]>([]);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedGroup, setSelectedGroup] = useState('Todos os Grupos');
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [editingServerId, setEditingServerId] = useState<string | null>(null);
+  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [isDoorsSettingsOpen, setIsDoorsSettingsOpen] = useState(false);
+  const [doorSettingsTarget, setDoorSettingsTarget] = useState<string | null>(null);
+  const [isDev, setIsDev] = useState(false);
+  const [serverReadOnly, setServerReadOnly] = useState(false);
+  const [rdpToast, setRdpToast] = useState<{ visible: boolean; name: string; host: string } | null>(null);
+  const [doorToast, setDoorToast] = useState<{ visible: boolean; name: string; success: boolean; message: string } | null>(null);
+  const [updateInfo, setUpdateInfo] = useState({
+    currentVersion: '—',
+    enabled: false,
+    isApplying: false,
+    newVersion: '',
+    updateReady: false,
+    isChecking: false,
+    isDownloading: false,
+    channel: 'public',
+    statusMessage: 'Pronto',
+  });
+  const [isBannerDismissed, setIsBannerDismissed] = useState(false);
+  const [mapTargetLocation, setMapTargetLocation] = useState<{
+    lat: number;
+    lon: number;
+    zoom?: number;
+    id?: string;
+    itemType?: 'server' | 'onu';
+    onu?: any;
+  } | null>(null);
+
+  const [telemetry, setTelemetry] = useState<AjinTelemetry>({
+    total: 0,
+    online: 0,
+    offline: 0,
+    total_cameras: 0,
+    active_problems: 0,
+    coleta_formatted: '-',
+    collector: { status: 'connecting', endpoint: '192.168.190.187:3000' },
+    stale: true,
+    server: { online: false, ip: '192.168.190.187', checked_at: '-' },
+    olt: { modelo: 'C-Data FD1108S', ip: '192.168.1.100' },
+    ports: {},
+    rows: [],
+  });
+  const wsRef = useRef<WebSocket | null>(null);
+  const mapPoints = useMemo(() => ajinRows(telemetry), [telemetry]);
+  const [socketConnected, setSocketConnected] = useState(false);
+
+  // Carrega status de desenvolvedor
+  const checkDevStatus = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/dev/status`);
+      if (res.ok) {
+        const data = await res.json();
+        setIsDev(Boolean(data.is_dev));
+        setServerReadOnly(Boolean(data.server_read_only));
+      }
+    } catch (e) {
+      console.warn('Erro ao verificar status DEV:', e);
+    }
+  };
+
+  // Carrega lista de servidores da API local
+  const loadServers = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/servers`);
+      if (res.ok) {
+        const data = await res.json();
+        setServers(data.servers || []);
+        setGroups(data.groups || []);
+        setSelectedGroup(current => current === 'Todos os Grupos' || (data.groups || []).includes(current)
+          ? current : 'Todos os Grupos');
+      }
+    } catch (e) {
+      console.warn('Erro ao carregar servidores locais:', e);
+    }
+  };
+
+  // Carrega telemetria inicial da AJIN
+  const loadTelemetry = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/ajin/telemetry`);
+      if (res.ok) {
+        const data = await res.json();
+        setTelemetry(data);
+      }
+    } catch (e) {
+      console.warn('Erro ao carregar telemetria:', e);
+    }
+  };
+
+  // Carrega status do Auto-Updater
+  const loadUpdateStatus = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/update/status`);
+      if (res.ok) {
+        const data = await res.json();
+        setUpdateInfo((prev) => ({
+          ...prev,
+          currentVersion: data.current_version || prev.currentVersion,
+          newVersion: data.new_version || '',
+          updateReady: Boolean(data.update_ready),
+          enabled: Boolean(data.enabled),
+          isApplying: Boolean(data.is_applying),
+          isChecking: Boolean(data.is_checking),
+          isDownloading: Boolean(data.is_downloading),
+          channel: data.channel || 'public',
+          statusMessage: data.status_message || '',
+        }));
+      }
+    } catch (e) {
+      console.warn('Erro ao carregar status do updater:', e);
+    }
+  };
+
+  // One socket per mounted app, with a bounded reconnect timer.
+  useEffect(() => {
+    let active = true;
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    checkDevStatus();
+    loadServers();
+    loadTelemetry();
+    loadUpdateStatus();
+    fetch(`${API_BASE}/api/update/healthy`, { method: 'POST' }).catch(console.error);
+
+    const connectWebSocket = () => {
+      if (!active) return;
+      const ws = new WebSocket(WS_URL);
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        if (!active) return;
+        setSocketConnected(true);
+        loadServers();
+        loadUpdateStatus();
+      };
+
+      ws.onmessage = (event) => {
+        if (!active || event.data === 'pong') return;
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type === 'initial_state' || msg.type === 'telemetry_update') {
+            if (msg.data) setTelemetry(msg.data);
+            if (msg.time) window.dispatchEvent(new CustomEvent('ajinTick', { detail: { time: msg.time } }));
+          } else if (msg.type === 'tick') {
+            window.dispatchEvent(new CustomEvent('ajinTick', { detail: { time: msg.time, countdown: msg.countdown } }));
+          } else if (msg.type === 'servers_status_updated' || msg.type === 'thumbnail_updated') {
+            loadServers();
+          } else if (
+            msg.type === 'update_status' ||
+            msg.type === 'update_ready' ||
+            msg.type === 'update_channel_changed'
+          ) {
+            loadUpdateStatus();
+          } else if (msg.type === 'doors_updated') {
+            window.dispatchEvent(new Event('doorsUpdated'));
+          } else if (msg.type === 'incidents_updated') {
+            window.dispatchEvent(new Event('incidentsUpdated'));
+          }
+        } catch (e) {
+          console.error('Falha ao processar mensagem do WebSocket:', e);
+        }
+      };
+
+      ws.onclose = () => {
+        if (!active) return;
+        setSocketConnected(false);
+        retry = setTimeout(connectWebSocket, 2000);
+      };
+    };
+
+    connectWebSocket();
+
+    return () => {
+      active = false;
+      clearTimeout(retry);
+      if (wsRef.current) wsRef.current.onclose = null;
+      wsRef.current?.close();
+    };
+  }, []);
+
+  const handleConnect = async (serverId: string) => {
+    const target = servers.find((s) => s.id === serverId);
+    const name = target?.name || 'Servidor';
+    const host = target?.host || '';
+
+    setRdpToast({ visible: true, name, host });
+    setTimeout(() => {
+      setRdpToast(null);
+    }, 4500);
+
+    try {
+      await fetch(`${API_BASE}/api/servers/connect`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ server_id: serverId }),
+      });
+    } catch (e) {
+      console.error('Erro ao conectar ao servidor:', e);
+    }
+  };
+
+  const handleToggleFavorite = async (serverId: string) => {
+    if (pendingFavorites.current.has(serverId)) return;
+    pendingFavorites.current.add(serverId);
+    setServerError('');
+    try {
+      const favorite = await toggleServerFavorite(serverId);
+      setServers(prev => prev.map(server => server.id === serverId ? { ...server, favorite } : server));
+    } catch (e) {
+      setServerError(e instanceof Error ? e.message : 'Não foi possível salvar o favorito.');
+    } finally {
+      pendingFavorites.current.delete(serverId);
+    }
+  };
+
+  const handleGlobalRefresh = async () => {
+    try {
+      await fetch(`${API_BASE}/api/refresh_all`, { method: 'POST' });
+      await loadServers();
+      await loadTelemetry();
+    } catch (e) {
+      console.error('Erro ao atualizar geral:', e);
+    }
+  };
+
+  const handleForceRefreshAjin = async () => {
+    const data = await fetch(`${API_BASE}/api/ajin/refresh`, { method: 'POST', signal: AbortSignal.timeout(15000) }).then(readAjinResponse);
+    setTelemetry(data);
+    return data;
+  };
+
+  const handleScanAjin = useCallback(async (): Promise<AjinScan> => {
+    const response = await fetch(`${API_BASE}/api/ajin/scan`, {signal:AbortSignal.timeout(15000)});
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || 'Não foi possível consultar o Scanner.');
+    if (!Array.isArray(data.devices)) throw new Error('Resposta inválida do Scanner.');
+    return data;
+  }, []);
+
+  const handleDeleteAjin = async (row: ONUItem) => {
+    const data = await fetch(`${API_BASE}/api/ajin/onu/delete`, {
+      method:'POST', signal:AbortSignal.timeout(15000), headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({port:row.port, onu_id:String(row.id)}),
+    }).then(readAjinResponse);
+    setTelemetry(data);
+    return data;
+  };
+
+  const handleRegisterAjin = async (devices: Registration[]) => {
+    const response = await fetch(`${API_BASE}/api/ajin/register`, {
+      method:'POST', signal:AbortSignal.timeout(25000), headers:{'Content-Type':'application/json'}, body:JSON.stringify({devices}),
+    });
+    const data = await response.json();
+    if (!response.ok || data.status !== 'registered') throw new Error(data.detail || 'O coletor não confirmou a homologação.');
+  };
+
+  const handleSaveLabel = async (
+    port: string,
+    onuId: string,
+    name: string,
+    desc: string,
+    lat?: number | null,
+    lon?: number | null,
+    notes?: string,
+    mapEnabled?: boolean
+  ) => {
+    const data = await fetch(`${API_BASE}/api/ajin/label`, {
+        method: 'POST',
+        signal: AbortSignal.timeout(15000),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          port,
+          onu_id: onuId,
+          name,
+          desc,
+          latitude: lat,
+          longitude: lon,
+          notes,
+          map_enabled: mapEnabled,
+        }),
+      }).then(readAjinResponse);
+    setTelemetry(data);
+    return data;
+  };
+
+  const handleLocateOnuOnMap = (onu: any) => {
+    if (canShowOnMap(onu)) {
+      setMapTargetLocation({
+        lat: Number(onu.latitude),
+        lon: Number(onu.longitude),
+        zoom: 16,
+        itemType: 'onu',
+        onu,
+      });
+      setCurrentTab('map');
+    }
+  };
+
+  const updateRequest = async (path: string, body?: object) => {
+    const res = await fetch(`${API_BASE}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || data.message || 'Falha ao atualizar.');
+    return data;
+  };
+
+  const showUpdateError = (error: unknown) => {
+    const message = error instanceof Error ? error.message : 'Falha de comunicação com o aplicativo.';
+    setUpdateInfo((prev) => ({ ...prev, isChecking: false, isApplying: false, statusMessage: message }));
+    setIsSettingsModalOpen(true);
+  };
+
+  const handleCheckUpdates = async () => {
+    try {
+      await updateRequest('/api/update/check');
+      await loadUpdateStatus();
+    } catch (error) { showUpdateError(error); }
+  };
+
+  const handleRestartUpdate = async () => {
+    if (updateInfo.isApplying) return;
+    try {
+      const data = await updateRequest('/api/update/restart');
+      setUpdateInfo((prev) => ({ ...prev, isApplying: true, statusMessage: data.message }));
+    } catch (error) { showUpdateError(error); }
+  };
+
+  const handleChannelChange = async (channel: string) => {
+    try {
+      await updateRequest('/api/update/channel', { channel });
+      await loadUpdateStatus();
+    } catch (e) {
+      showUpdateError(e);
+    }
+  };
+
+  return (
+    <div className="flex flex-col h-screen w-screen bg-[#0d1117] overflow-hidden select-none font-sans">
+      {/* Top Header Barra idêntica à referência original */}
+      <TitleBar
+        currentTab={currentTab}
+        setCurrentTab={(tab) => {
+          if (tab === 'map') {
+            setMapTargetLocation(null);
+          }
+          setCurrentTab(tab);
+        }}
+        searchTerm={searchTerm}
+        setSearchTerm={setSearchTerm}
+        selectedGroup={selectedGroup}
+        setSelectedGroup={setSelectedGroup}
+        groups={groups}
+        isDev={isDev}
+        onRefresh={handleGlobalRefresh}
+        onAddServer={() => setIsAddModalOpen(true)}
+        onOpenSettings={() => setIsSettingsModalOpen(true)}
+        updateInfo={updateInfo}
+        onRestartUpdate={handleRestartUpdate}
+      />
+
+      {/* Banner Superior de Atualização Pronta */}
+      {updateInfo.updateReady && !isBannerDismissed && (
+        <UpdateBanner
+          onDismiss={() => setIsBannerDismissed(true)}
+          onRestart={handleRestartUpdate}
+          isApplying={updateInfo.isApplying}
+        />
+      )}
+
+      {/* Main View Area com transição instantânea e sem sobreposição */}
+      <main className="flex-1 flex overflow-hidden relative">
+        {currentTab === 'servers' && (
+          <ServersView
+            servers={servers}
+            searchTerm={searchTerm}
+            selectedGroup={selectedGroup}
+            onConnect={handleConnect}
+            onEdit={(id) => setEditingServerId(id)}
+            onToggleFavorite={handleToggleFavorite}
+          />
+        )}
+
+        {currentTab === 'map' && (
+          <MapView
+            servers={servers}
+            onus={mapPoints}
+            onConnect={handleConnect}
+            targetLocation={mapTargetLocation}
+            onTargetLocationHandled={() => {
+              setMapTargetLocation(null);
+            }}
+            onEditOnu={() => {
+              setCurrentTab('ajin');
+            }}
+          />
+        )}
+
+        {currentTab === 'ajin' && (
+          <AjinView
+            telemetry={telemetry}
+            connected={socketConnected}
+            onRefresh={handleForceRefreshAjin}
+            onSaveLabel={handleSaveLabel}
+            onDelete={handleDeleteAjin}
+            onScan={handleScanAjin}
+            onRegister={handleRegisterAjin}
+            onLocateOnMap={handleLocateOnuOnMap}
+          />
+        )}
+
+        {currentTab === 'doors' && (
+          <DoorsView
+            isDev={isDev}
+            onOpenDevLogin={() => setIsSettingsModalOpen(true)}
+            onOpenDoorsSettings={(doorId) => { setDoorSettingsTarget(doorId || null); setIsDoorsSettingsOpen(true); }}
+            onDoorTriggered={(name, success, msg) => {
+              setDoorToast({
+                visible: true,
+                name,
+                success,
+                message: msg,
+              });
+              setTimeout(() => {
+                setDoorToast(null);
+              }, 4500);
+            }}
+          />
+        )}
+      </main>
+
+      {serverError && <div role="alert" className="fixed bottom-6 right-6 z-[200] max-w-md rounded-xl border border-rose-500/50 bg-[#16171d] p-4 text-sm text-rose-200 shadow-2xl">
+        <p>{serverError}</p><button type="button" className="mt-2 text-xs underline" onClick={() => setServerError('')}>Fechar</button>
+      </div>}
+
+      {/* Modais de Ação */}
+      <AddServerModal
+        isOpen={isAddModalOpen}
+        onClose={() => setIsAddModalOpen(false)}
+        groups={groups}
+        onServerAdded={() => {
+          loadServers();
+        }}
+      />
+
+      <EditServerModal
+        serverId={editingServerId}
+        isOpen={Boolean(editingServerId)}
+        onClose={() => setEditingServerId(null)}
+        groups={groups}
+        onServerUpdated={() => {
+          loadServers();
+        }}
+        onConnect={handleConnect}
+      />
+
+      <SettingsModal
+        isOpen={isSettingsModalOpen}
+        onClose={() => setIsSettingsModalOpen(false)}
+        serverCount={servers.length}
+        isDev={isDev}
+        serverReadOnly={serverReadOnly}
+        onDevStatusChanged={(val) => setIsDev(val)}
+        onServersReload={() => {
+          loadServers();
+        }}
+        updateInfo={updateInfo}
+        onCheckUpdates={handleCheckUpdates}
+        onRestartUpdate={handleRestartUpdate}
+        onChannelChange={handleChannelChange}
+        onOpenDoorsSettings={() => { setIsSettingsModalOpen(false); setDoorSettingsTarget(null); setIsDoorsSettingsOpen(true); }}
+      />
+
+      <DoorsSettingsModal
+        isOpen={isDoorsSettingsOpen}
+        doorId={doorSettingsTarget}
+        onClose={() => setIsDoorsSettingsOpen(false)}
+      />
+
+      {/* Toast Flutuante de Disparo de RDP */}
+      {rdpToast && (
+        <div className="fixed bottom-6 right-6 z-[200] bg-[#16171d] border border-blue-500/50 shadow-2xl rounded-xl p-4 flex items-center space-x-3.5 animate-in slide-in-from-bottom-5 duration-200">
+          <div className="w-10 h-10 rounded-lg bg-blue-600/20 border border-blue-500/40 flex items-center justify-center text-blue-400 shrink-0">
+            <Play className="w-5 h-5 fill-current" />
+          </div>
+          <div className="flex flex-col">
+            <div className="flex items-center space-x-2">
+              <span className="text-xs font-bold text-white leading-tight">{rdpToast.name}</span>
+              <span className="text-[10px] font-mono text-blue-400 bg-blue-950/80 px-1.5 py-0.5 rounded border border-blue-800/40">
+                {rdpToast.host}
+              </span>
+            </div>
+            <span className="text-[11px] text-[#8e92a0] mt-1">
+              Injetando credenciais via cmdkey e abrindo MSTSC nativo...
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Toast Flutuante de Disparo de Portão Tuya */}
+      {doorToast && (
+        <div
+          className={`fixed bottom-6 right-6 z-[200] bg-[#16171d] border shadow-2xl rounded-xl p-4 flex items-center space-x-3.5 animate-in slide-in-from-bottom-5 duration-200 ${
+            doorToast.success ? 'border-emerald-500/50' : 'border-rose-500/50'
+          }`}
+        >
+          <div
+            className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${
+              doorToast.success
+                ? 'bg-emerald-600/20 border border-emerald-500/40 text-emerald-400'
+                : 'bg-rose-600/20 border border-rose-500/40 text-rose-400'
+            }`}
+          >
+            {doorToast.success ? (
+              <DoorOpen className="w-5 h-5" />
+            ) : (
+              <DoorClosed className="w-5 h-5" />
+            )}
+          </div>
+          <div className="flex flex-col">
+            <div className="flex items-center space-x-2">
+              <span className="text-xs font-bold text-white leading-tight">
+                {doorToast.name}
+              </span>
+              <span
+                className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${
+                  doorToast.success
+                    ? 'text-emerald-400 bg-emerald-950/80 border-emerald-800/40'
+                    : 'text-rose-400 bg-rose-950/80 border-rose-800/40'
+                }`}
+              >
+                {doorToast.success ? 'ABERTO' : 'FALHA'}
+              </span>
+            </div>
+            <span className="text-[11px] text-[#8e92a0] mt-1">
+              {doorToast.message}
+            </span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default App;

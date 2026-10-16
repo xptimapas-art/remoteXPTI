@@ -1,3 +1,7 @@
+> Desktop moderno (2.1.12-beta.1): use `run_development.bat` para desenvolver e `run_client.bat` para abrir a instalação cliente. Consulte [os ambientes separados](AMBIENTES_CLIENTE_E_DESENVOLVIMENTO.md) e [a nova tela de portas e portões](INTERFACE_PORTAS_E_PORTOES.md). Para distribuir, use `python build_all.py` com `requirements-build.txt`. Consulte [o guia atualizado](COMO_DISTRIBUIR_E_ATUALIZAR.md) e [as correções do updater](CORRECOES_AUTO_UPDATE.md). O auto update funciona no EXE instalado; o modo Python não instala versões.
+>
+> As seções abaixo descrevem também a interface legada. A entrada de build foi consolidada no desktop moderno.
+
 # ⚡ RemoteXPTI - Gerenciador RDP Ágil (Estilo AnyDesk)
 
 O **RemoteXPTI** é um gerenciador de conexões de Área de Trabalho Remota (RDP) moderno, inspirado na interface intuitiva do AnyDesk (cartões de servidores, status de rede online/offline em tempo real, busca rápida e grupos). 
@@ -50,7 +54,7 @@ python main.py
 
 Para usar o programa em computadores que não possuem o Python instalado:
 
-1. Dê um duplo clique no arquivo **`build_exe.bat`** (ou execute via terminal).
+1. Instale `requirements-build.txt` e execute **`python build_all.py`** no terminal.
 2. Ao finalizar, o executável independente estará na pasta **`dist\RemoteXPTI.exe`**.
 
 ---
@@ -68,3 +72,22 @@ O **RemoteXPTI** resolve isso de forma nativa e limpa:
    mstsc /v:<IP_DO_SERVIDOR>
    ```
 3. O cliente RDP detecta a chave `TERMSRV/` e realiza o login automático sem abrir caixas de diálogo solicitando senha.
+
+---
+
+## 🛠️ Diagnóstico Remoto de Servidores via CLI
+
+O RemoteXPTI inclui uma ferramenta CLI para auditar a integridade, memória RAM, processos e discos de qualquer servidor cadastrado remotamente:
+
+```bash
+# Diagnóstico básico (RAM, CPU, discos e top processos)
+python diagnostico_servidor.py --server "Lages"
+
+# Diagnóstico aprofundado (VSS Writers e histórico de OutOfMemory)
+python diagnostico_servidor.py --server "Lages" --deep
+
+# Listar todos os 56 servidores disponíveis
+python diagnostico_servidor.py --list
+```
+Consulte o arquivo [`DIAGNOSTICO_SERVIDORES.md`](file:///c:/Users/XPTI/Documents/vscode/remoteXPTI/DIAGNOSTICO_SERVIDORES.md) para detalhes técnicos.
+

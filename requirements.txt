@@ -1,4 +1,15 @@
-customtkinter>=5.2.0
-cryptography>=42.0.0
-pillow>=10.0.0
-pyinstaller>=6.4.0
+customtkinter==6.0.0
+cryptography==50.0.0
+pillow==12.3.0
+psutil==7.2.2
+packaging==26.3
+pywebview==6.2.1
+fastapi==0.141.1
+uvicorn==0.54.0
+pystray==0.19.5
+requests==2.34.2
+pywinrm==0.5.0
+av==19.0.1
+qrcode==8.2
+tuya-device-sharing-sdk==0.2.15
+pywin32==312; sys_platform == "win32"

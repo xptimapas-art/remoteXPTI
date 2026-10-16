@@ -21,6 +21,7 @@ import win32con
 import win32process
 
 from logger import log
+from runtime_paths import get_profile_dir
 from map_manager import resolve_server_coordinates, DEFAULT_MAP_CENTER, DEFAULT_MAP_ZOOM
 
 
@@ -1396,7 +1397,7 @@ class WebMapManager:
     def start(self):
         """Inicia o servidor HTTP embutido e limpa processos orfãos (Edge é carregado sob demanda)."""
         log.info("[WebMapManager] Inicializando servidor HTTP do mapa Leaflet...")
-        cache_dir = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "RemoteXPTI" / "map_cache"
+        cache_dir = get_profile_dir() / "map_cache"
         cleanup_orphaned_edge_processes(cache_dir)
         self.server.start()
         log.info(f"[WebMapServer] Servidor Leaflet pronto em http://127.0.0.1:{self.server.port} (Edge em standby)")
@@ -1462,7 +1463,7 @@ class WebMapManager:
             log.error("[WebMapManager] Microsoft Edge não encontrado no sistema!")
             return
 
-        cache_dir = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "RemoteXPTI" / "map_cache"
+        cache_dir = get_profile_dir() / "map_cache"
         cache_dir.mkdir(parents=True, exist_ok=True)
 
         try:
@@ -1612,7 +1613,7 @@ class WebMapManager:
                 except Exception:
                     pass
             self.edge_proc = None
-        cache_dir = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "RemoteXPTI" / "map_cache"
+        cache_dir = get_profile_dir() / "map_cache"
         cleanup_orphaned_edge_processes(cache_dir)
         self.server.stop()
         log.info("[WebMapManager] Subsistema do mapa finalizado com sucesso.")
