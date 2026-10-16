@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "test:ajin": "node --test tests/ajin.test.cjs",
+    "test": "node --test tests/*.test.cjs",
     "preview": "vite preview"
   },
   "dependencies": {

@@ -16,6 +16,7 @@ interface ServerItem {
   status_msg?: string;
   offline_since?: number | null;
   duration_seconds?: number;
+  thumbnail_url?: string | null;
 }
 
 interface ServersViewProps {
@@ -96,6 +97,12 @@ export const ServersView: React.FC<ServersViewProps> = React.memo(({
         if (!nameMatch && !hostMatch && !groupMatch) return false;
       }
       return true;
+    }).sort((a, b) => {
+      const favoriteOrder = Number(Boolean(b.favorite)) - Number(Boolean(a.favorite));
+      if (favoriteOrder) return favoriteOrder;
+      return a.favorite && b.favorite
+        ? a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base', numeric: true })
+        : 0;
     });
   }, [servers, searchTerm, selectedGroup]);
 
@@ -157,8 +164,9 @@ export const ServersView: React.FC<ServersViewProps> = React.memo(({
               className={`${isOffline ? 'hover:border-[#ef4444]' : 'hover:border-[#0082f0]'} hover:scale-[1.02] hover:shadow-2xl group select-none`}
             >
               {/* Foto Cheia (100% da área do Card) */}
-              <img
-                src={`/thumbnails/${s.id}.png`}
+              {s.thumbnail_url !== null && <img
+                key={s.thumbnail_url ?? s.id}
+                src={s.thumbnail_url ?? `/thumbnails/${s.id}.png`}
                 alt=""
                 style={{
                   position: 'absolute',
@@ -173,7 +181,7 @@ export const ServersView: React.FC<ServersViewProps> = React.memo(({
                 onError={(e) => {
                   (e.target as HTMLElement).style.display = 'none';
                 }}
-              />
+              />}
 
               {/* Ondas AnyDesk em SVG caso não haja print capturado */}
               <svg
@@ -229,7 +237,7 @@ export const ServersView: React.FC<ServersViewProps> = React.memo(({
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
                   {/* Status LED Redondo com Glow AnyDesk (Verde Online / Vermelho Pulsante Offline) */}
                   <span
-                    title={isOffline ? `Offline: ${s.status_msg || 'Porta fechada/filtrada'}` : 'Online'}
+                    title={isOffline ? `Offline: ${s.status_msg || 'Porta fechada/filtrada'}` : s.status_msg || 'Online'}
                     style={{
                       width: '10px',
                       height: '10px',

@@ -12,6 +12,7 @@ import { DoorsSettingsModal } from './components/DoorsSettingsModal';
 import { AddServerModal } from './components/AddServerModal';
 import { EditServerModal } from './components/EditServerModal';
 import { SettingsModal } from './components/SettingsModal';
+import { toggleServerFavorite } from './components/serverRequests';
 
 const API_BASE = '';
 const WS_URL = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws/ajin`;
@@ -19,6 +20,8 @@ const WS_URL = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${win
 export const App: React.FC = () => {
   const [currentTab, setCurrentTab] = useState<'servers' | 'map' | 'ajin' | 'doors'>('servers');
   const [servers, setServers] = useState<any[]>([]);
+  const [serverError, setServerError] = useState('');
+  const pendingFavorites = useRef(new Set<string>());
   const [groups, setGroups] = useState<string[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedGroup, setSelectedGroup] = useState('Todos os Grupos');
@@ -28,6 +31,7 @@ export const App: React.FC = () => {
   const [isDoorsSettingsOpen, setIsDoorsSettingsOpen] = useState(false);
   const [doorSettingsTarget, setDoorSettingsTarget] = useState<string | null>(null);
   const [isDev, setIsDev] = useState(false);
+  const [serverReadOnly, setServerReadOnly] = useState(false);
   const [rdpToast, setRdpToast] = useState<{ visible: boolean; name: string; host: string } | null>(null);
   const [doorToast, setDoorToast] = useState<{ visible: boolean; name: string; success: boolean; message: string } | null>(null);
   const [updateInfo, setUpdateInfo] = useState({
@@ -76,6 +80,7 @@ export const App: React.FC = () => {
       if (res.ok) {
         const data = await res.json();
         setIsDev(Boolean(data.is_dev));
+        setServerReadOnly(Boolean(data.server_read_only));
       }
     } catch (e) {
       console.warn('Erro ao verificar status DEV:', e);
@@ -90,6 +95,8 @@ export const App: React.FC = () => {
         const data = await res.json();
         setServers(data.servers || []);
         setGroups(data.groups || []);
+        setSelectedGroup(current => current === 'Todos os Grupos' || (data.groups || []).includes(current)
+          ? current : 'Todos os Grupos');
       }
     } catch (e) {
       console.warn('Erro ao carregar servidores locais:', e);
@@ -164,7 +171,7 @@ export const App: React.FC = () => {
             if (msg.time) window.dispatchEvent(new CustomEvent('ajinTick', { detail: { time: msg.time } }));
           } else if (msg.type === 'tick') {
             window.dispatchEvent(new CustomEvent('ajinTick', { detail: { time: msg.time, countdown: msg.countdown } }));
-          } else if (msg.type === 'servers_status_updated') {
+          } else if (msg.type === 'servers_status_updated' || msg.type === 'thumbnail_updated') {
             loadServers();
           } else if (
             msg.type === 'update_status' ||
@@ -221,13 +228,16 @@ export const App: React.FC = () => {
   };
 
   const handleToggleFavorite = async (serverId: string) => {
+    if (pendingFavorites.current.has(serverId)) return;
+    pendingFavorites.current.add(serverId);
+    setServerError('');
     try {
-      setServers((prev) =>
-        prev.map((s) => (s.id === serverId ? { ...s, favorite: !s.favorite } : s))
-      );
-      await fetch(`${API_BASE}/api/servers/${serverId}/favorite`, { method: 'POST' });
+      const favorite = await toggleServerFavorite(serverId);
+      setServers(prev => prev.map(server => server.id === serverId ? { ...server, favorite } : server));
     } catch (e) {
-      console.error('Erro ao alternar favorito:', e);
+      setServerError(e instanceof Error ? e.message : 'Não foi possível salvar o favorito.');
+    } finally {
+      pendingFavorites.current.delete(serverId);
     }
   };
 
@@ -449,6 +459,10 @@ export const App: React.FC = () => {
         )}
       </main>
 
+      {serverError && <div role="alert" className="fixed bottom-6 right-6 z-[200] max-w-md rounded-xl border border-rose-500/50 bg-[#16171d] p-4 text-sm text-rose-200 shadow-2xl">
+        <p>{serverError}</p><button type="button" className="mt-2 text-xs underline" onClick={() => setServerError('')}>Fechar</button>
+      </div>}
+
       {/* Modais de Ação */}
       <AddServerModal
         isOpen={isAddModalOpen}
@@ -475,6 +489,7 @@ export const App: React.FC = () => {
         onClose={() => setIsSettingsModalOpen(false)}
         serverCount={servers.length}
         isDev={isDev}
+        serverReadOnly={serverReadOnly}
         onDevStatusChanged={(val) => setIsDev(val)}
         onServersReload={() => {
           loadServers();

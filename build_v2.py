@@ -138,6 +138,8 @@ def main():
         "--version-file", str(v_app), 
         *image_args,
         "--add-data", "desktop_ui/dist:desktop_ui/dist",
+        "--add-data", "resources/br_municipalities.json:resources",
+        "--add-data", "resources/municipalities-LICENSE.txt:resources",
         "--add-data", "update_helper.ps1:.",
         "--hidden-import", "tuya_devices",
         "--hidden-import", "desktop_backend",

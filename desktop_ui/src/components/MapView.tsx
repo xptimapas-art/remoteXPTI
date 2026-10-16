@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import type { ONUItem } from './AjinView';
 import { canShowOnMap, onuKey, onuStatus, pointName, signalValue } from './ajin';
+import { hasServerLocation } from './serverMap';
 
 function mapTooltip(title: string, detail: string) {
   const content = document.createElement('div');
@@ -32,6 +33,9 @@ interface Server {
   longitude?: number;
   group?: string;
   username?: string;
+  city?: string;
+  state?: string;
+  location_approximate?: boolean;
 }
 
 interface Incident {
@@ -407,7 +411,7 @@ export const MapView: React.FC<MapViewProps> = React.memo(({
     // 1. Plotar Servidores com Agrupamento (MarkerCluster)
     if (showServers) {
       const incidentIds = new Set(incidents.map((inc) => inc.id));
-      const validServers = servers.filter((s) => s.latitude && s.longitude);
+      const validServers = servers.filter(hasServerLocation);
       const markersToAdd: L.Marker[] = [];
 
       validServers.forEach((s) => {
@@ -436,7 +440,7 @@ export const MapView: React.FC<MapViewProps> = React.memo(({
         (marker as any).serverData = s;
         (marker as any).isOffline = isIncident;
 
-        marker.bindTooltip(mapTooltip(s.name, `${s.host}:${s.port || 3389}`), {
+        marker.bindTooltip(mapTooltip(s.name, `${s.host}:${s.port || 3389}${s.location_approximate ? ' · Localização aproximada: ' + s.city + '/' + s.state : ''}`), {
           permanent: false,
           direction: 'top',
           className: 'leaflet-tooltip-dark',
@@ -586,7 +590,7 @@ export const MapView: React.FC<MapViewProps> = React.memo(({
         setSelectedServer(srv);
         setSelectedOnu(null);
       });
-    } else if (inc.latitude && inc.longitude && mapInstanceRef.current) {
+    } else if (hasServerLocation(inc) && mapInstanceRef.current) {
       mapInstanceRef.current.stop();
       mapInstanceRef.current.flyTo([Number(inc.latitude), Number(inc.longitude)], 14, { duration: 1.0 });
       setSelectedServer(srv);
@@ -653,7 +657,7 @@ export const MapView: React.FC<MapViewProps> = React.memo(({
               }`}
             >
               <span>🖥️</span>
-              <span>Servidores ({servers.filter((s) => s.latitude && s.longitude).length})</span>
+              <span>Servidores ({servers.filter(hasServerLocation).length})</span>
             </button>
             <button
               onClick={() => setShowOnus(!showOnus)}
@@ -795,6 +799,7 @@ export const MapView: React.FC<MapViewProps> = React.memo(({
             </button>
           </div>
 
+          {selectedServer.location_approximate && <p className="text-xs text-slate-400">Localização aproximada · {selectedServer.city}/{selectedServer.state}</p>}
           <div className="flex items-center justify-between text-xs text-slate-300 pt-2 border-t border-white/10">
             <div className="flex items-center gap-4">
               <span>🌐 Host: <span className="font-mono text-white">{selectedServer.host}:{selectedServer.port || 3389}</span></span>

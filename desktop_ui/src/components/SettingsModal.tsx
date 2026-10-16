@@ -44,6 +44,7 @@ interface SettingsModalProps {
   onClose: () => void;
   serverCount: number;
   isDev: boolean;
+  serverReadOnly?: boolean;
   onDevStatusChanged: (isDev: boolean) => void;
   onServersReload: () => void;
   updateInfo?: UpdateInfo;
@@ -58,6 +59,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onClose,
   serverCount,
   isDev,
+  serverReadOnly = false,
   onDevStatusChanged,
   onServersReload,
   updateInfo,
@@ -109,6 +111,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         body: JSON.stringify({ password: devPassword }),
       });
       const data = await res.json();
+      if (!res.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Não foi possível salvar a sessão DEV.');
       if (data.success) {
         onDevStatusChanged(true);
         setDevPassword('');
@@ -116,8 +119,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       } else {
         setDevError('Senha de desenvolvedor incorreta.');
       }
-    } catch (err: any) {
-      setDevError('Erro de comunicação com o servidor.');
+    } catch (err: unknown) {
+      setDevError(err instanceof Error ? err.message : 'Erro de comunicação com o servidor.');
     } finally {
       setDevLoading(false);
     }
@@ -126,10 +129,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const handleDevLogout = async () => {
     setDevLoading(true);
     try {
-      await fetch('/api/dev/logout', { method: 'POST' });
+      const response = await fetch('/api/dev/logout', { method: 'POST' });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(typeof data.detail === 'string' ? data.detail : 'Não foi possível salvar a saída do modo DEV.');
+      }
       onDevStatusChanged(false);
     } catch (err) {
-      console.error('Erro ao sair do modo DEV:', err);
+      setSyncMessage(`❌ ${err instanceof Error ? err.message : 'Falha ao sair do modo DEV.'}`);
     } finally {
       setDevLoading(false);
     }
@@ -382,7 +389,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             {isDev ? (
               <div className="space-y-3.5">
                 <p className="text-[11px] text-slate-300 leading-relaxed">
-                  Você está autenticado como <strong>Desenvolvedor / Administrador</strong>. Servidores corporativos criados ou editados são publicados automaticamente para todos os nós da empresa no Supabase.
+                  {serverReadOnly
+                    ? 'Ambiente DEV: os cadastros da empresa são recebidos em modo somente leitura. Novos servidores de teste ficam apenas neste computador.'
+                    : <>Você está autenticado como <strong>Desenvolvedor / Administrador</strong>. Servidores corporativos criados ou editados são publicados automaticamente para todos os nós da empresa no Supabase.</>}
                 </p>
 
                 {/* 1. Seletor de Canal de Atualização */}

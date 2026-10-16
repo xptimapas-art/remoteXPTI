@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, Server, Trash2, Play, Eye, EyeOff, Check, AlertCircle } from 'lucide-react';
+import { BRAZIL_STATES, parseCoordinate } from './serverForm';
 
 interface EditServerModalProps {
   serverId: string | null;
@@ -31,6 +32,8 @@ export const EditServerModal: React.FC<EditServerModalProps> = ({
   const [multimon, setMultimon] = useState(false);
   const [latitude, setLatitude] = useState<string>('');
   const [longitude, setLongitude] = useState<string>('');
+  const [city, setCity] = useState('');
+  const [state, setState] = useState('');
 
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -63,6 +66,8 @@ export const EditServerModal: React.FC<EditServerModalProps> = ({
         setMultimon(Boolean(data.multimon));
         setLatitude(data.latitude !== undefined && data.latitude !== null ? String(data.latitude) : '');
         setLongitude(data.longitude !== undefined && data.longitude !== null ? String(data.longitude) : '');
+        setCity(data.city || '');
+        setState(data.state || '');
       })
       .catch((err) => {
         setError(err.message || 'Erro ao carregar dados');
@@ -78,6 +83,10 @@ export const EditServerModal: React.FC<EditServerModalProps> = ({
     e.preventDefault();
     if (!name.trim() || !host.trim()) {
       setError('Nome e IP/Host são obrigatórios.');
+      return;
+    }
+    if ((latitude.trim() || longitude.trim()) && (parseCoordinate(latitude, 90) === null || parseCoordinate(longitude, 180) === null)) {
+      setError('Informe latitude e longitude válidas, ou deixe ambas vazias.');
       return;
     }
 
@@ -99,13 +108,16 @@ export const EditServerModal: React.FC<EditServerModalProps> = ({
           fullscreen,
           admin_mode: adminMode,
           multimon,
-          latitude: latitude.trim() ? parseFloat(latitude) : null,
-          longitude: longitude.trim() ? parseFloat(longitude) : null,
+          latitude: latitude.trim() ? parseCoordinate(latitude, 90) : null,
+          longitude: longitude.trim() ? parseCoordinate(longitude, 180) : null,
+          city: city.trim(),
+          state,
         }),
       });
 
       if (!res.ok) {
-        throw new Error('Falha ao salvar alterações');
+        const data = await res.json().catch(() => ({}));
+        throw new Error(typeof data.detail === 'string' ? data.detail : 'Falha ao salvar alterações');
       }
 
       onServerUpdated();
@@ -128,7 +140,10 @@ export const EditServerModal: React.FC<EditServerModalProps> = ({
       const res = await fetch(`/api/servers/${serverId}`, {
         method: 'DELETE',
       });
-      if (!res.ok) throw new Error('Falha ao excluir servidor');
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(typeof data.detail === 'string' ? data.detail : 'Falha ao excluir servidor');
+      }
       onServerUpdated();
       onClose();
     } catch (err: any) {
@@ -254,7 +269,7 @@ export const EditServerModal: React.FC<EditServerModalProps> = ({
                   list="edit-groups-list"
                   value={group}
                   onChange={(e) => setGroup(e.target.value)}
-                  placeholder="Ex: BEMTEVI, ALT, UNETVALE..."
+                  placeholder="Ex: BEMTEVI, SEJURI, XPTI..."
                   className="w-full bg-[#1f2129] border border-[#2e323e] focus:border-[#0066cc] rounded-lg px-3 py-2 text-white outline-none"
                 />
                 <datalist id="edit-groups-list">
@@ -275,6 +290,14 @@ export const EditServerModal: React.FC<EditServerModalProps> = ({
                 />
               </div>
 
+              <label className="space-y-1">
+                <span className="text-slate-300 font-semibold">Cidade</span>
+                <input value={city} onChange={event => setCity(event.target.value)} placeholder="Cidade" maxLength={100} className="w-full bg-[#1f2129] border border-[#2e323e] rounded-lg px-3 py-2 text-white" />
+              </label>
+              <label className="space-y-1">
+                <span className="text-slate-300 font-semibold">Estado (UF)</span>
+                <select value={state} onChange={event => setState(event.target.value)} className="w-full bg-[#1f2129] border border-[#2e323e] rounded-lg px-3 py-2 text-white"><option value="">UF</option>{BRAZIL_STATES.map(uf => <option key={uf}>{uf}</option>)}</select>
+              </label>
               <div className="space-y-1">
                 <label className="text-slate-300 font-semibold flex items-center justify-between">
                   <span>Latitude</span>

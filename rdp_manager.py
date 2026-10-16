@@ -1,11 +1,11 @@
 import os
 import subprocess
-import socket
 import sys
 import tempfile
 from pathlib import Path
 from typing import Tuple, Optional
 from logger import log
+from connection_probe import probe_connection
 
 class RDPManager:
     """Gerencia conexões RDP, injeção de credenciais via cmdkey e testes de conectividade."""
@@ -15,41 +15,12 @@ class RDPManager:
         return sys.platform == "win32"
 
     @staticmethod
-    def check_connection(host: str, port: int = 3389, timeout: float = 1.2) -> Tuple[bool, str]:
+    def check_connection(host: str, port: int = 3389, timeout: float = 1.2) -> Tuple[Optional[bool], str]:
         """
         Testa rapidamente se a porta RDP do servidor está respondendo.
-        Retorna (is_online, mensagem).
+        Retorna (respondeu, mensagem); None indica erro local/inconclusivo.
         """
-        if not host:
-            return False, "Host vazio"
-
-        # Se o host vier no formato host:porta, separar
-        clean_host = host
-        target_port = port
-        if ":" in host:
-            parts = host.split(":", 1)
-            clean_host = parts[0]
-            try:
-                target_port = int(parts[1])
-            except ValueError:
-                target_port = port
-
-        try:
-            # Resolve DNS ou conecta direto via IPv4/IPv6
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(timeout)
-            result = sock.connect_ex((clean_host, target_port))
-            sock.close()
-            if result == 0:
-                return True, f"Online ({clean_host}:{target_port})"
-            else:
-                return False, f"Porta {target_port} fechada ou filtrada"
-        except socket.gaierror:
-            return False, "Falha ao resolver DNS"
-        except socket.timeout:
-            return False, "Tempo de resposta esgotado (Timeout)"
-        except Exception as e:
-            return False, f"Erro de rede: {str(e)}"
+        return probe_connection(host, port, timeout)
 
     @staticmethod
     def set_windows_credential(host: str, port: int, username: str, password: str) -> Tuple[bool, str]:

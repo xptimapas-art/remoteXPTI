@@ -19,7 +19,8 @@ from typing import Dict, Any, List, Optional, Tuple
 
 from logger import log
 from config_manager import ConfigManager, get_config_dir
-from runtime_paths import is_development
+from runtime_paths import is_development, get_device_file
+from atomic_storage import PersistenceError, write_json_atomic
 from native_hotkeys import NativeHotkeyManager
 
 # Arquivo de configuração de portas e sessão
@@ -103,32 +104,10 @@ class TuyaAccessManager:
             self.reload_hotkeys()
 
     def _resolve_config_path(self) -> Path:
-        """Localiza o arquivo doors_config.json em %LOCALAPPDATA% ou na pasta do app."""
-        appdata_path = get_config_dir() / CONFIG_FILENAME
-        if is_development():
-            return appdata_path
-        local_path = Path(__file__).parent / CONFIG_FILENAME
-        if appdata_path.exists():
-            return appdata_path
-        if local_path.exists():
-            return local_path
-        return local_path
+        return get_device_file(CONFIG_FILENAME)
 
     def _resolve_session_path(self) -> Path:
-        """Localiza session.json com credenciais da Tuya."""
-        appdata_path = get_config_dir() / SESSION_FILENAME
-        if is_development():
-            return appdata_path
-        local_path = Path(__file__).parent / SESSION_FILENAME
-        vscode_test_path = Path("c:/Users/XPTI/Documents/vscode/abrir porta tuya/session.json")
-
-        if appdata_path.exists():
-            return appdata_path
-        if local_path.exists():
-            return local_path
-        if vscode_test_path.exists():
-            return vscode_test_path
-        return local_path
+        return get_device_file(SESSION_FILENAME)
 
     def load_config(self) -> Dict[str, Any]:
         """Carrega configurações de portas."""
@@ -159,12 +138,10 @@ class TuyaAccessManager:
                                 "last_triggered": None
                             })
                         cfg["facial_initialized"] = True
-                        try:
-                            with open(self.config_path, "w", encoding="utf-8") as fw:
-                                json.dump(cfg, fw, indent=2, ensure_ascii=False)
-                        except Exception:
-                            pass
+                        write_json_atomic(self.config_path, cfg)
                     return cfg
+            except PersistenceError:
+                raise
             except Exception as e:
                 log.error(f"[TuyaAccess] Erro ao carregar {self.config_path}: {e}")
 

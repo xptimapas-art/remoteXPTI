@@ -25,7 +25,10 @@ def verify_release(directory):
         pyz = archive.open_embedded_archive('PYZ.pyz')
         if binary == app:
             required = {'desktop_backend', 'update_engine', 'update_bootstrap', 'local_api_security',
-                        'tuya_devices', 'runtime_paths', 'windows_single_instance', 'connection_health', 'camera_snapshots', 'camera_streams', 'av', 'hotkey_capture', 'video_runtime_check', 'shared_doors', 'desktop_window', 'desktop_lifecycle'}
+                        'tuya_devices', 'runtime_paths', 'atomic_storage', 'server_snapshot', 'wallpaper_previews', 'wallpaper_transport', 'winrm', 'windows_single_instance', 'connection_health', 'camera_snapshots', 'camera_streams', 'av', 'hotkey_capture', 'video_runtime_check', 'shared_doors', 'desktop_window', 'desktop_lifecycle'}
+            required.update({'connection_probe', 'connection_diagnostics', 'server_location', 'server_groups'})
+            if not {'resources/br_municipalities.json', 'resources/municipalities-LICENSE.txt'}.issubset(names):
+                raise RuntimeError('Base de municípios ou sua licença ausente no pacote.')
             if not required.issubset(pyz.toc) or 'update_helper.ps1' not in names or 'desktop_ui/dist/index.html' not in names:
                 raise RuntimeError('Recursos do app/updater ausentes no pacote.')
             functions = {c.co_name for c in pyz.extract('update_engine').co_consts if isinstance(c, types.CodeType)}
@@ -80,9 +83,10 @@ def verify_release(directory):
         completed = subprocess.run([str(app), '--verify-video-runtime', str(result_path)], timeout=40)
         result = json.loads(result_path.read_text('utf-8')) if result_path.exists() else {}
         if completed.returncode != 0 or not result.get('success') or result.get('version') != manifest['version'] \
-                or result.get('h264_decoder') != 'h264' or not result.get('rtsp_input') or not result.get('mp4_output'):
-            raise RuntimeError('O EXE final não carregou o decoder H.264 e os formatos RTSP/MP4 empacotados.')
-        print('Vídeo no EXE: bibliotecas nativas, H.264, RTSP e MP4 carregados sem acessar dispositivos.')
+                or result.get('h264_decoder') != 'h264' or not result.get('rtsp_input') or not result.get('mp4_output') \
+                or not result.get('winrm_ntlm'):
+            raise RuntimeError('O EXE final não carregou as dependências de vídeo ou WinRM/NTLM empacotadas.')
+        print('EXE: H.264, RTSP, MP4 e WinRM/NTLM carregados sem acessar dispositivos.')
     print(f'Release {manifest["version"]}: manifesto, EXEs, Tcl/Tk e pacote portátil verificados.')
 
 

@@ -156,7 +156,7 @@ def resolve_server_coordinates(server: Dict[str, Any]) -> Optional[Tuple[float, 
 
     # Correspondência parcial no nome
     for city, coords in SC_COORDINATES.items():
-        if city in name_norm or name_norm in city:
+        if name_norm and (city in name_norm or name_norm in city):
             return coords
 
     # Correspondência no grupo

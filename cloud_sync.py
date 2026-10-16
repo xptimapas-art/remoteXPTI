@@ -8,9 +8,12 @@ import json
 import urllib.request
 import urllib.error
 import urllib.parse
+import re
 from typing import List, Dict, Any, Optional, Tuple
 from config_manager import ConfigManager
 from logger import log
+from server_snapshot import CompleteServerSnapshot
+from runtime_paths import is_development
 
 
 class CloudSyncManager:
@@ -18,6 +21,13 @@ class CloudSyncManager:
 
     @staticmethod
     def is_configured() -> bool:
+        cfg = ConfigManager().get_supabase_config()
+        return bool(cfg.get("server_pull_enabled", cfg.get("enabled")) and cfg.get("url") and cfg.get("key"))
+
+    @staticmethod
+    def can_write_servers() -> bool:
+        if is_development():
+            return False
         cfg = ConfigManager().get_supabase_config()
         return bool(cfg.get("enabled") and cfg.get("url") and cfg.get("key"))
 
@@ -121,34 +131,59 @@ class CloudSyncManager:
             return False, f"Falha ao conectar: {str(ex)}"
 
     @classmethod
-    def fetch_servers(cls) -> Optional[List[Dict[str, Any]]]:
-        """Busca a lista de servidores atualizada no Supabase."""
+    def fetch_servers(cls) -> Optional[CompleteServerSnapshot]:
+        """Return only a fully counted snapshot, never the successful prefix."""
         cfg = ConfigManager().get_supabase_config()
-        if not cfg.get("enabled") or not cfg.get("url") or not cfg.get("key"):
+        if not cfg.get("server_pull_enabled", cfg.get("enabled")) or not cfg.get("url") or not cfg.get("key"):
             return None
 
         clean_url = cls._clean_base_url(cfg["url"])
-        url = f"{clean_url}/rest/v1/servers?select=*"
         headers = cls._get_headers(cfg["key"])
+        headers["Prefer"] = "count=exact"
 
         try:
-            log.info(f"[CloudSync] Consultando servidores remotos no Supabase: {url}")
-            req = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(req, timeout=8.0) as resp:
-                if resp.status == 200:
-                    data = json.loads(resp.read().decode("utf-8"))
-                    # Filtra o servidor fake usado para armazenar a config do Tuya e doors_config
-                    data = [s for s in data if s.get("id") not in ("ffffffff-ffff-ffff-ffff-ffffffffffff", "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee")]
-                    log.info(f"[CloudSync] {len(data)} servidores obtidos com sucesso do Supabase.")
-                    return data
-        except Exception as e:
-            log.warning(f"[CloudSync] Falha ao sincronizar servidores com Supabase: {e}")
+            rows, seen, total = [], set(), None
+            while total is None or len(rows) < total:
+                offset = len(rows)
+                query = urllib.parse.urlencode({"select":"*", "order":"id.asc", "limit":200, "offset":offset})
+                req = urllib.request.Request(f"{clean_url}/rest/v1/servers?{query}", headers=headers)
+                with urllib.request.urlopen(req, timeout=8.0) as resp:
+                    if resp.status not in (200, 206):
+                        raise ValueError("Resposta inesperada ao consultar servidores.")
+                    page = json.loads(resp.read().decode("utf-8"))
+                    content_range = resp.headers.get("Content-Range", "")
+                match = re.fullmatch(r"(?:(\d+)-(\d+)|\*)/(\d+)", content_range.strip())
+                if not isinstance(page, list) or not match:
+                    raise ValueError("Resposta sem contagem exata de servidores.")
+                count = int(match[3])
+                if count > 100000 or (total is not None and total != count):
+                    raise ValueError("A lista mudou durante a consulta ou excedeu o limite.")
+                total = count
+                if not page:
+                    if offset != total:
+                        raise ValueError("Página de servidores incompleta.")
+                    break
+                if (match[1] is None or int(match[1]) != offset or
+                        int(match[2]) != offset + len(page) - 1 or offset + len(page) > total):
+                    raise ValueError("Intervalo de servidores incompleto.")
+                for row in page:
+                    if not isinstance(row, dict) or not isinstance(row.get("id"), str) or not row["id"].strip() or row["id"] in seen:
+                        raise ValueError("Servidor inválido ou duplicado na resposta.")
+                    seen.add(row["id"])
+                    rows.append(row)
+            reserved = {"ffffffff-ffff-ffff-ffff-ffffffffffff", "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"}
+            servers = tuple(row for row in rows if row["id"] not in reserved)
+            log.info(f"[CloudSync] Snapshot completo: {len(servers)} servidores.")
+            return CompleteServerSnapshot(servers)
+        except Exception as error:
+            log.warning(f"[CloudSync] Consulta incompleta; dados locais preservados ({type(error).__name__}).")
             return None
-        return None
 
     @classmethod
     def push_servers(cls, servers: List[Dict[str, Any]]) -> Tuple[bool, str]:
         """Envia / atualiza a lista de servidores corporativos para o Supabase (Upsert)."""
+        if is_development():
+            return False, "O DEV recebe servidores da empresa, mas não publica alterações."
         cfg = ConfigManager().get_supabase_config()
         if not cfg.get("enabled") or not cfg.get("url") or not cfg.get("key"):
             log.info("[CloudSync] Supabase não configurado ou desabilitado. Operação mantida apenas localmente.")
@@ -175,7 +210,6 @@ class CloudSyncManager:
                 "scope": "corporate",
                 "latitude": s.get("latitude"),
                 "longitude": s.get("longitude"),
-                "favorite": bool(s.get("favorite", False)),
                 "admin_mode": bool(s.get("admin_mode", False)),
                 "multimon": bool(s.get("multimon", False)),
                 "fullscreen": bool(s.get("fullscreen", True)),
@@ -401,6 +435,8 @@ class CloudSyncManager:
     @classmethod
     def delete_remote_server(cls, server_id: str) -> Tuple[bool, str]:
         """Remove um servidor corporativo do banco Supabase ao ser excluído pelo admin."""
+        if is_development():
+            return False, "O DEV não pode excluir servidores da empresa."
         cfg = ConfigManager().get_supabase_config()
         if not cfg.get("enabled") or not cfg.get("url") or not cfg.get("key"):
             return False, "Supabase não configurado."

@@ -25,8 +25,9 @@ from ajin_manager import AjinManager
 from cloud_sync import CloudSyncManager
 from config_manager import ConfigManager
 from logger import log
-from runtime_paths import get_profile_dir, get_data_dir
+from runtime_paths import get_profile_dir, get_data_dir, is_development
 from connection_health import ConnectionHealthMonitor, PROBE_TIMEOUT_SECONDS
+from connection_diagnostics import ConnectionScanHistory, summarize_scan
 from rdp_manager import RDPManager
 from storage import StorageManager
 from tuya_access_manager import TuyaAccessManager
@@ -35,6 +36,8 @@ from camera_streams import CameraStream
 from hotkey_capture import HotkeyCapture
 from update_engine import SilentAutoUpdater
 from version import CURRENT_VERSION, APP_NAME, GITHUB_REPO
+from atomic_storage import PersistenceError
+from wallpaper_previews import WallpaperPreviews
 
 config_mgr = ConfigManager()
 tuya_mgr = TuyaAccessManager()
@@ -43,6 +46,12 @@ hotkey_capture = HotkeyCapture()
 
 # Inicialização FastAPI
 app = FastAPI(title="RemoteXPTI Modern Backend", version=CURRENT_VERSION)
+
+
+@app.exception_handler(PersistenceError)
+async def persistence_error_handler(request: Request, error: PersistenceError):
+    log.error(f"[DesktopBackend] Falha de persistência: {type(error).__name__}")
+    return JSONResponse(status_code=507, content={"detail": str(error)})
 
 @app.middleware("http")
 async def protect_local_api(request, call_next):
@@ -86,6 +95,20 @@ def broadcast_ws(message: dict):
         except Exception:
             pass
 
+
+wallpaper_previews = WallpaperPreviews(
+    get_data_dir() / "thumbnails",
+    get_profile_dir() / "wallpaper_cache.json",
+    enabled=lambda: is_development() or config_mgr.get_update_channel() == "beta_tester",
+    current_server=lambda key: next((s for s in storage_mgr.servers if s["id"] == key), None),
+    on_ready=lambda key: broadcast_ws({"type": "thumbnail_updated", "server_id": key}),
+)
+
+
+@app.on_event("shutdown")
+async def stop_wallpaper_previews():
+    wallpaper_previews.stop()
+
 # Instância Global do Auto-Updater Silencioso
 updater_instance: Optional[SilentAutoUpdater] = None
 
@@ -115,6 +138,7 @@ def _on_updater_status(msg: str):
 
 def _cleanup_before_restart():
     log.info("[DesktopBackend] Executando rotina de limpeza para reinício de update...")
+    wallpaper_previews.stop()
     try:
         ajin_mgr.stop()
     except Exception:
@@ -231,6 +255,7 @@ health_monitor = ConnectionHealthMonitor()
 status_lock = threading.RLock()
 status_scan_lock = threading.Lock()
 server_probe_locks: Dict[str, Any] = {}
+status_scan_history = ConnectionScanHistory(get_profile_dir() / "logs" / "rdp_status_scans.json")
 
 def _load_downtime_history():
     global server_downtime
@@ -265,15 +290,21 @@ def _check_server_status(srv):
         probe_lock = server_probe_locks.setdefault(server_id, threading.Lock())
     # Manual checks and scheduled scans use the same per-server lock and filter.
     with probe_lock:
-        target = (srv.get('host', ''), int(srv.get('port', 3389)))
-        reachable, message = RDPManager.check_connection(*target, timeout=PROBE_TIMEOUT_SECONDS)
+        target = (srv.get('host', ''), srv.get('port', 3389))
+        try:
+            reachable, message = RDPManager.check_connection(*target, timeout=PROBE_TIMEOUT_SECONDS)
+        except Exception as error:
+            log.warning(f"[RDPHealth] Teste inconclusivo: {server_id} ({type(error).__name__}).")
+            reachable, message = None, "Falha ao executar o teste neste computador."
         with status_lock:
             current = storage_mgr.get_server(server_id)
-            if not current or (current.get('host', ''), int(current.get('port', 3389))) != target:
-                return server_status_cache.get(server_id, {}), False
+            if not current or (current.get('host', ''), current.get('port', 3389)) != target:
+                return {}, False
             status, changed = health_monitor.observe(server_id, reachable, message, target=target)
             server_status_cache[server_id] = status
             server_downtime = health_monitor.downtime()
+            if changed:
+                log.info(f"[RDPHealth] {server_id}: {status['health_state']}; motivo={message}")
             return status, changed
 
 
@@ -282,9 +313,27 @@ def check_all_servers_status():
     if not status_scan_lock.acquire(blocking=False):
         return
     try:
+        started_at, started = time.time(), time.monotonic()
+        with status_lock:
+            previous = {key: value.copy() for key, value in server_status_cache.items()}
         servers = list(storage_mgr.servers)
         with ThreadPoolExecutor(max_workers=20) as executor:
             results = list(executor.map(_check_server_status, servers))
+        summary = summarize_scan(servers, results, previous, started_at=started_at,
+                                 elapsed=time.monotonic() - started)
+        last_summary = status_scan_history.latest()
+        try:
+            status_scan_history.append(summary)
+        except OSError:
+            log.warning("[RDPHealth] Não foi possível gravar o diagnóstico deste ciclo.")
+        if summary["mass_failure"] or summary["inconclusive"]:
+            log.warning(f"[RDPHealth] Ciclo: {summary['total']} testes, "
+                        f"{summary['responded']} respostas, {summary['failed']} falhas RDP, "
+                        f"{summary['inconclusive']} inconclusivos; "
+                        f"falha coletiva={summary['mass_failure']}; redes={summary['affected_networks']}")
+        elif last_summary and (last_summary.get("mass_failure") or last_summary.get("inconclusive")):
+            log.info(f"[RDPHealth] Fim da falha coletiva/inconclusiva: {summary['responded']} respostas, "
+                     f"{summary['failed']} falhas RDP.")
         if any(changed for _, changed in results):
             _save_downtime_history()
             broadcast_ws({"type": "incidents_updated"})
@@ -309,6 +358,8 @@ class AddServerRequest(BaseModel):
     multimon: bool = False
     latitude: Optional[float] = None
     longitude: Optional[float] = None
+    city: str = Field(default="", max_length=100)
+    state: str = Field(default="", max_length=2)
 
 class UpdateServerRequest(BaseModel):
     name: str
@@ -323,6 +374,16 @@ class UpdateServerRequest(BaseModel):
     multimon: bool = False
     latitude: Optional[float] = None
     longitude: Optional[float] = None
+    city: str = Field(default="", max_length=100)
+    state: str = Field(default="", max_length=2)
+
+
+class GroupRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
+
+
+class RenameGroupRequest(GroupRequest):
+    new_name: str = Field(min_length=1, max_length=60)
 
 class EditLabelRequest(BaseModel):
     port: str
@@ -408,17 +469,18 @@ def sync_supabase_servers() -> tuple[bool, int, str]:
     if not CloudSyncManager.is_configured():
         return doors_synced, 0, "Portas sincronizadas" if doors_synced else "Sincronização de servidores desabilitada"
     try:
+        revision = storage_mgr.revision
         remote = CloudSyncManager.fetch_servers()
         if remote is not None:
-            changed, added, updated = storage_mgr.merge_cloud_servers(remote)
+            changed, added, updated = storage_mgr.merge_cloud_servers(remote, expected_revision=revision)
             if changed:
-                storage_mgr.save()
                 log.info(f"[DesktopBackend] Nuvem sincronizada: {added} novos, {updated} atualizados.")
+                broadcast_ws({"type": "servers_status_updated"})
             return True, len(remote), f"{len(remote)} servidores na nuvem"
     except Exception as e:
         log.warning(f"[DesktopBackend] Erro ao sincronizar com Supabase: {e}")
         return False, 0, str(e)
-    return False, 0, "Nenhum dado retornado do Supabase"
+    return False, 0, "Não foi possível confirmar a consulta completa ao Supabase. Os dados locais foram preservados."
 
 # Endpoints REST
 @app.get("/api/status")
@@ -440,6 +502,7 @@ def get_servers():
         sc = s.copy()
         sc.pop("password", None)
         sc.pop("password_plain", None)
+        sc["thumbnail_url"] = wallpaper_previews.image_url(s)
 
         s_id = sc.get("id", "")
         cached = server_status_cache.get(s_id)
@@ -448,6 +511,9 @@ def get_servers():
             sc["status_msg"] = cached.get("msg", "Online")
             sc["offline_since"] = cached.get("offline_since")
             sc["duration_seconds"] = int(now - cached["offline_since"]) if cached.get("offline_since") else 0
+            sc["health_state"] = cached.get("health_state")
+            sc["last_probe_online"] = cached.get("last_probe_online")
+            sc["last_valid_probe_at"] = cached.get("last_valid_probe_at")
         else:
             off_since = server_downtime.get(s_id)
             if off_since:
@@ -493,6 +559,7 @@ def connect_server(req: ConnectRequest):
             multimon=multi
         )
         if ok:
+            wallpaper_previews.request(server)
             storage_mgr.record_connection(req.server_id)
             log.info(f"[DesktopBackend] Conexão RDP disparada com sucesso para {server.get('name')}: {msg}")
         else:
@@ -504,11 +571,18 @@ def connect_server(req: ConnectRequest):
 @app.post("/api/servers/add")
 def add_server(req: AddServerRequest):
     data = req.dict()
-    new_s = storage_mgr.add_server(data)
-    storage_mgr.save()
+    if is_development():
+        data["scope"] = "local"
+    if not data["name"].strip() or not data["host"].strip() or not 1 <= data["port"] <= 65535:
+        raise HTTPException(status_code=422, detail="Informe nome, endereço e porta válida (1 a 65535).")
+    try:
+        new_s = storage_mgr.add_server(data)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from None
+    broadcast_ws({"type": "servers_status_updated"})
 
     # Se dev autenticado ou escopo corporativo, publica automaticamente no Supabase
-    if config_mgr.is_dev_authenticated() or new_s.get("scope") == "corporate":
+    if CloudSyncManager.can_write_servers() and (config_mgr.is_dev_authenticated() or new_s.get("scope") == "corporate"):
         def _push():
             ok, msg = CloudSyncManager.push_single_server(new_s)
             if ok:
@@ -528,13 +602,18 @@ def get_server_detail(server_id: str):
 
 @app.put("/api/servers/{server_id}")
 def update_server(server_id: str, req: UpdateServerRequest):
+    if is_development() and storage_mgr.is_corporate(server_id):
+        raise HTTPException(status_code=403, detail="No DEV, o cadastro da empresa é somente leitura. Edite no aplicativo CLIENT.")
     data = req.dict(exclude_unset=True)
-    updated = storage_mgr.update_server(server_id, data)
+    try:
+        updated = storage_mgr.update_server(server_id, data)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from None
     if not updated:
         raise HTTPException(status_code=404, detail="Servidor não encontrado")
 
     # Se dev autenticado ou escopo corporativo, atualiza no Supabase
-    if config_mgr.is_dev_authenticated() or updated.get("scope") == "corporate":
+    if CloudSyncManager.can_write_servers() and (config_mgr.is_dev_authenticated() or updated.get("scope") == "corporate"):
         def _push():
             ok, msg = CloudSyncManager.push_single_server(updated)
             if ok:
@@ -543,20 +622,63 @@ def update_server(server_id: str, req: UpdateServerRequest):
 
     return {"status": "updated", "server": updated}
 
+
+@app.get("/api/groups")
+def get_server_groups():
+    return {"groups": storage_mgr.group_details(allow_corporate=not is_development())}
+
+
+@app.post("/api/groups")
+def add_server_group(req: GroupRequest):
+    try:
+        storage_mgr.add_group(req.name)
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from None
+    broadcast_ws({"type": "servers_status_updated"})
+    return {"status": "created", **get_server_groups()}
+
+
+@app.put("/api/groups")
+def rename_server_group(req: RenameGroupRequest):
+    try:
+        storage_mgr.rename_group(req.name, req.new_name, allow_corporate=not is_development())
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Grupo não encontrado.") from None
+    except PermissionError as error:
+        raise HTTPException(status_code=403, detail=str(error)) from None
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from None
+    if CloudSyncManager.can_write_servers():
+        threading.Thread(target=lambda: CloudSyncManager.push_servers(storage_mgr.get_corporate_servers()), daemon=True).start()
+    broadcast_ws({"type": "servers_status_updated"})
+    return {"status": "updated", **get_server_groups()}
+
+
+@app.delete("/api/groups")
+def delete_server_group(req: GroupRequest):
+    try:
+        storage_mgr.delete_group(req.name)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Grupo não encontrado.") from None
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from None
+    broadcast_ws({"type": "servers_status_updated"})
+    return {"status": "deleted", **get_server_groups()}
+
 @app.post("/api/servers/{server_id}/favorite")
 def toggle_favorite(server_id: str):
-    srv = storage_mgr.get_server(server_id)
-    if not srv:
+    favorite = storage_mgr.toggle_favorite(server_id)
+    if favorite is None:
         raise HTTPException(status_code=404, detail="Servidor não encontrado")
-    srv["favorite"] = not bool(srv.get("favorite", False))
-    storage_mgr.save()
-    return {"status": "ok", "favorite": srv["favorite"]}
+    return {"status": "ok", "favorite": favorite}
 
 @app.delete("/api/servers/{server_id}")
 def delete_server(server_id: str):
     global server_downtime
     srv = storage_mgr.get_server(server_id)
     is_corp = srv and srv.get("scope") == "corporate"
+    if is_development() and is_corp:
+        raise HTTPException(status_code=403, detail="O DEV não pode excluir servidores da empresa.")
     ok = storage_mgr.delete_server(server_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Servidor não encontrado")
@@ -570,7 +692,7 @@ def delete_server(server_id: str):
     if was_offline:
         broadcast_ws({"type": "incidents_updated"})
 
-    if (config_mgr.is_dev_authenticated() or is_corp) and CloudSyncManager.is_configured():
+    if (config_mgr.is_dev_authenticated() or is_corp) and CloudSyncManager.can_write_servers():
         def _del():
             CloudSyncManager.delete_remote_server(server_id)
             log.info(f"[DesktopBackend] Servidor '{server_id}' removido do Supabase.")
@@ -584,6 +706,7 @@ def get_dev_status():
         "is_dev": config_mgr.is_dev_authenticated(),
         "channel": config_mgr.get_update_channel(),
         "supabase_configured": CloudSyncManager.is_configured(),
+        "server_read_only": is_development(),
         "supabase_url": config_mgr.get_supabase_config().get("url", "")
     }
 
@@ -941,6 +1064,11 @@ def set_update_channel(req: SetChannelRequest):
 def trigger_check_all():
     threading.Thread(target=check_all_servers_status, daemon=True).start()
     return {"status": "started", "message": "Verificação de conectividade iniciada"}
+
+
+@app.get("/api/monitoring/status")
+def get_monitoring_status():
+    return {"latest_scan": status_scan_history.latest()}
 
 @app.post("/api/servers/{server_id}/check")
 def check_single_server(server_id: str):

@@ -18,15 +18,19 @@ class _State:
     failure_started: Optional[float] = None
     failure_wall_time: Optional[float] = None
     last_counted: Optional[float] = None
+    last_observed: Optional[float] = None
+    last_valid_probe_at: Optional[float] = None
 
 
 class ConnectionHealthMonitor:
     def __init__(self, failure_count=3, failure_seconds=60.0, recovery_count=2,
-                 sample_seconds=10.0, clock=time.monotonic, wall_clock=time.time):
+                 sample_seconds=10.0, clock=time.monotonic, wall_clock=time.time,
+                 max_sample_gap=90.0):
         self.failure_count = failure_count
         self.failure_seconds = failure_seconds
         self.recovery_count = recovery_count
         self.sample_seconds = sample_seconds
+        self.max_sample_gap = max_sample_gap
         self._clock, self._wall_clock = clock, wall_clock
         self._states = {}
         self._lock = threading.RLock()
@@ -61,7 +65,19 @@ class ConnectionHealthMonitor:
                 state = self._states[server_id] = _State()
             state.target = target
 
-            if reachable:
+            # Suspension, a stalled scanner or a local error breaks continuity.
+            # Preserve confirmed status, but require a fresh confirmation sequence.
+            if (reachable is None or (state.last_observed is not None
+                                     and now - state.last_observed > self.max_sample_gap)):
+                state.failures = state.successes = 0
+                state.failure_started = state.failure_wall_time = state.last_counted = None
+            state.last_observed = now
+            if reachable is not None:
+                state.last_valid_probe_at = wall_now
+
+            if reachable is None:
+                pass
+            elif reachable:
                 state.failures = 0
                 state.failure_started = state.failure_wall_time = None
                 if state.online:
@@ -92,14 +108,18 @@ class ConnectionHealthMonitor:
 
             phase = 'online' if state.online else 'offline'
             stable_message = message
-            if state.online and not reachable:
+            if reachable is None:
+                phase = 'unverified'
+                stable_message = 'Monitoramento inconclusivo; último estado preservado. ' + message
+            elif state.online and not reachable:
                 phase = 'suspect'
-                stable_message = 'Falha pontual no teste RDP; aguardando confirmação.'
+                stable_message = 'Falha no teste RDP; aguardando confirmação. ' + message
             elif not state.online and reachable:
                 phase = 'recovering'
                 stable_message = 'RDP respondeu; aguardando confirmação da recuperação.'
             status = {'is_online': state.online, 'msg': stable_message,
-                      'health_state': phase, 'last_probe_online': bool(reachable),
+                      'health_state': phase, 'last_probe_online': reachable,
+                      'last_valid_probe_at': state.last_valid_probe_at,
                       'offline_since': state.offline_since,
                       'duration_seconds': max(0, int(wall_now - state.offline_since))
                       if state.offline_since is not None else 0}

@@ -856,9 +856,10 @@ class RemoteXPTIApp(ctk.CTk):
 
     def _sync_servers_from_cloud(self):
         try:
+            revision = self.storage.revision
             remote = CloudSyncManager.fetch_servers()
             if remote is not None:
-                changed, added, updated = self.storage.merge_cloud_servers(remote)
+                changed, added, updated = self.storage.merge_cloud_servers(remote, expected_revision=revision)
                 if changed:
                     PreviewManager.invalidate_cache()
                     self._action_queue.put(self._on_cloud_sync_applied)

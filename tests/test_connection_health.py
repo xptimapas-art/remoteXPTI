@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 from connection_health import ConnectionHealthMonitor, PROBE_TIMEOUT_SECONDS
+from connection_diagnostics import summarize_scan
 
 
 class FakeClock:
@@ -116,6 +117,58 @@ class ConnectionHealthTests(unittest.TestCase):
         self.monitor.forget('a')
         self.assertEqual(self.monitor.downtime(), {})
 
+    def test_local_error_never_creates_remote_outage(self):
+        for _ in range(10):
+            status, changed = self.probe(None)
+            self.assertTrue(status['is_online'])
+            self.assertFalse(changed)
+            self.assertEqual(status['health_state'], 'unverified')
+            self.assertIsNone(status['last_probe_online'])
+            self.clock.advance(30)
+        self.assertEqual(self.monitor.downtime(), {})
+
+    def test_local_error_breaks_failure_confirmation_sequence(self):
+        self.probe(False)
+        self.clock.advance(30)
+        self.probe(False)
+        self.clock.advance(30)
+        self.probe(None)
+        self.clock.advance(30)
+        self.assertTrue(self.probe(False)[0]['is_online'])
+        self.clock.advance(30)
+        self.assertTrue(self.probe(False)[0]['is_online'])
+        self.clock.advance(30)
+        self.assertFalse(self.probe(False)[0]['is_online'])
+
+    def test_long_pause_requires_fresh_failure_sequence(self):
+        self.probe(False)
+        self.clock.advance(30)
+        self.probe(False)
+        self.clock.advance(600)
+        self.assertTrue(self.probe(False)[0]['is_online'])
+        self.clock.advance(30)
+        self.assertTrue(self.probe(False)[0]['is_online'])
+        self.clock.advance(30)
+        self.assertFalse(self.probe(False)[0]['is_online'])
+
+    def test_long_pause_or_local_error_cannot_complete_recovery(self):
+        self.monitor.restore({'a':200})
+        self.probe(True)
+        self.clock.advance(600)
+        self.assertFalse(self.probe(True)[0]['is_online'])
+        self.clock.advance(10)
+        self.assertFalse(self.probe(None)[0]['is_online'])
+        self.clock.advance(10)
+        self.assertFalse(self.probe(True)[0]['is_online'])
+        self.clock.advance(10)
+        self.assertTrue(self.probe(True)[0]['is_online'])
+
+    def test_inconclusive_probe_keeps_last_valid_measurement_timestamp(self):
+        valid, _ = self.probe(True)
+        self.clock.advance(30)
+        invalid, _ = self.probe(None)
+        self.assertEqual(invalid['last_valid_probe_at'], valid['last_valid_probe_at'])
+
 
 class BackendStatusIntegrationTests(unittest.TestCase):
     def setUp(self):
@@ -142,6 +195,9 @@ class BackendStatusIntegrationTests(unittest.TestCase):
             'RDPManager': types.SimpleNamespace(check_connection=self.probes),
             'PROBE_TIMEOUT_SECONDS': PROBE_TIMEOUT_SECONDS,
             '_save_downtime_history': MagicMock(), 'broadcast_ws': MagicMock(),
+            'log': MagicMock(), 'summarize_scan':summarize_scan,
+            'time':types.SimpleNamespace(time=lambda: self.clock.wall, monotonic=lambda: self.clock.now),
+            'status_scan_history':MagicMock(latest=MagicMock(return_value=None)),
         }
         exec(compile(ast.Module(body=selected, type_ignores=[]), '<status-handlers>', 'exec'), self.context)
 
@@ -180,6 +236,47 @@ class BackendStatusIntegrationTests(unittest.TestCase):
         self.context['_check_server_status'](self.server)
         self.assertEqual(self.context['server_status_cache'], {})
         self.assertEqual(self.context['server_downtime'], {})
+
+    def test_probe_exception_does_not_abort_scan_or_confirm_outage(self):
+        self.probes.side_effect = RuntimeError('fixture')
+        for _ in range(4):
+            self.context['check_all_servers_status']()
+            self.clock.advance(30)
+        self.assertEqual(self.context['server_downtime'], {})
+        self.assertEqual(self.context['server_status_cache']['a']['health_state'], 'unverified')
+
+    def test_diagnostic_disk_failure_does_not_change_monitoring(self):
+        self.context['status_scan_history'].append.side_effect = OSError('disk full')
+        for _ in range(3):
+            self.context['check_all_servers_status']()
+            self.clock.advance(30)
+        self.assertEqual(self.context['server_downtime'], {'a':1000})
+        self.context['_save_downtime_history'].assert_called_once()
+
+    def test_real_mass_outage_and_recovery_are_not_hidden(self):
+        servers = [dict(self.server, id=str(index), host='remote' if index < 49 else 'local')
+                   for index in range(59)]
+        self.context['storage_mgr'] = types.SimpleNamespace(servers=servers, get_server=lambda key: servers[int(key)])
+        self.probes.return_value = (True, 'online')
+        self.context['check_all_servers_status']()
+        self.probes.side_effect = lambda host, port, **kwargs: (host == 'local', 'probe')
+        for _ in range(3):
+            self.clock.advance(30)
+            self.context['check_all_servers_status']()
+        self.assertEqual(len(self.context['server_downtime']), 49)
+        summary = self.context['status_scan_history'].append.call_args.args[0]
+        self.assertTrue(summary['mass_failure'])
+        self.assertEqual(summary['failed'], 49)
+        self.assertEqual(summary['responded'], 10)
+        self.assertEqual(len(summary['new_offline_ids']), 49)
+        self.probes.side_effect = None
+        for _ in range(2):
+            self.clock.advance(30)
+            self.context['check_all_servers_status']()
+        self.assertEqual(self.context['server_downtime'], {})
+        summary = self.context['status_scan_history'].append.call_args.args[0]
+        self.assertFalse(summary['mass_failure'])
+        self.assertEqual(len(summary['recovered_ids']), 49)
 
 
 if __name__ == '__main__':
